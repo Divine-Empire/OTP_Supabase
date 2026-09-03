@@ -1,0 +1,246 @@
+// ==============================================================================
+// otp-utils.ts
+// Formatters and converters between Supabase Views and UI Table models
+// ==============================================================================
+
+export function formatDateTime(dateVal: any): string {
+  if (!dateVal) return ""
+  try {
+    const d = new Date(dateVal)
+    if (isNaN(d.getTime())) return String(dateVal)
+    const day = String(d.getDate()).padStart(2, "0")
+    const month = String(d.getMonth() + 1).padStart(2, "0")
+    const year = d.getFullYear()
+    const hours = String(d.getHours()).padStart(2, "0")
+    const minutes = String(d.getMinutes()).padStart(2, "0")
+    return `${day}/${month}/${year} ${hours}:${minutes}`
+  } catch {
+    return String(dateVal)
+  }
+}
+
+export function formatDateOnly(dateVal: any): string {
+  if (!dateVal) return ""
+  try {
+    const d = new Date(dateVal)
+    if (isNaN(d.getTime())) return String(dateVal)
+    const day = String(d.getDate()).padStart(2, "0")
+    const month = String(d.getMonth() + 1).padStart(2, "0")
+    const year = d.getFullYear()
+    return `${day}/${month}/${year}`
+  } catch {
+    return String(dateVal)
+  }
+}
+
+export function mapOrderRowToUI(row: any): any {
+  if (!row) return {}
+
+  const items = row.items || []
+  const itemFields: Record<string, any> = {}
+  for (let i = 1; i <= 10; i++) {
+    const it = items.find((x: any) => x.item_no === i)
+    itemFields[`itemName${i}`] = it?.item_name || ""
+    itemFields[`quantity${i}`] = it?.quantity || ""
+  }
+
+  return {
+    id: row.id,
+    orderId: row.id,
+    orderNo: row.order_no || "",
+    quotationNo: row.quotation_no || "",
+    timestamp: formatDateTime(row.timestamp),
+    companyName: row.company_name || "",
+    contactPersonName: row.contact_person_name || "",
+    contactNumber: row.contact_number || "",
+    billingAddress: row.billing_address || "",
+    shippingAddress: row.shipping_address || "",
+    paymentMode: row.payment_mode || "",
+    paymentTerms: row.payment_terms_days || 0,
+    referenceName: row.reference_name || "",
+    email: row.email || "",
+    transportMode: row.transport_mode || "",
+    destination: row.destination || "",
+    freightType: "",
+    poNumber: row.po_number || "",
+    quotationCopy: row.quotation_copy_url || "",
+    acceptanceCopy: row.acceptance_copy_url || "",
+    offerShow: row.offer_show || "",
+    conveyedForRegistration: row.conveyed_for_registration || "",
+    totalOrderQty: row.total_order_qty || 0,
+    amount: row.amount || 0,
+    gstNo: row.gst_no || "",
+    creName: row.cre_name || "",
+    totalDispatch: row.total_dispatched_qty || 0,
+    quantityDelivered: row.total_delivered_qty || 0,
+    orderCancel: row.total_cancelled_qty || 0,
+    pendingDeliveryQty: row.pending_delivery_qty || 0,
+    pendingDispatchQty: row.pending_dispatch_qty || 0,
+    materialReturn: "",
+    status: row.oa_actual ? "processed" : "pending",
+    deliveryStatus: row.delivery_status || "Pending",
+    dispatchStatus: row.dispatch_status || "Pending",
+    dispatchCompleteDate: formatDateOnly(row.dispatch_complete_date),
+    deliveryCompleteDate: formatDateOnly(row.delivery_complete_date),
+    
+    // Stage 1 (Order Acceptable)
+    isOrderAcceptable: row.is_order_acceptable || "",
+    orderAcceptanceChecklist: row.acceptance_checklist || "",
+    remarks: row.oa_remark || row.ci_remarks || "",
+    remark: row.oa_remark || "",
+    oaPlanned: row.oa_planned,
+    oaActual: row.oa_actual,
+    oaDelay: row.oa_delay || 0,
+
+    // Stage 2 (Check Inventory)
+    availabilityStatus: row.availability_status || "",
+    inventoryRemarks: row.ci_remarks || "",
+    availabilityRemarks: row.ci_remarks || "",
+    ciRemarks: row.ci_remarks || "",
+    customerWantsMaterial: row.customer_wants_material_as || "",
+    warehouseLocation: row.ci_warehouse_location || "",
+    createIndent: row.create_indent_if_not_avail ? "Yes" : "No",
+    lineItemNumber: row.ci_line_item_number || "",
+    totalQty: row.ci_total_qty || 0,
+    materialReceivedLeadTime: row.material_received_lead_time || "",
+    createdBy: row.ci_created_by || row.oa_created_by || "",
+    ciPlanned: row.ci_planned,
+    ciActual: row.ci_actual,
+    ciDelay: row.ci_delay || 0,
+
+    // Stage 3 (Material Received)
+    receivedDate: formatDateOnly(row.mr_received_date),
+    mrPlanned: row.mr_planned,
+    mrActual: row.mr_actual,
+    mrDelay: row.mr_delay || 0,
+
+    // Stage 4 (Senior Approval)
+    approvalName: row.approval_name || "",
+    approvedBy: row.approval_name || "",
+    approvalDate: formatDateOnly(row.sa_actual),
+    revenue: row.revenue || 0,
+    saPlanned: row.sa_planned,
+    saActual: row.sa_actual,
+    saDelay: row.sa_delay || 0,
+
+    rawItems: items,
+    ...itemFields,
+  }
+}
+
+export function mapDispatchRowToUI(row: any): any {
+  if (!row) return {}
+
+  const items = row.dispatch_items || []
+  const itemFields: Record<string, any> = {}
+  for (let i = 1; i <= 15; i++) {
+    const it = items.find((x: any) => x.item_no === i)
+    itemFields[`itemName${i}`] = it?.item_name || ""
+    itemFields[`quantity${i}`] = it?.quantity || ""
+  }
+
+  return {
+    id: row.id,
+    dispatchId: row.id,
+    dispatchNo: row.dispatch_no || "",
+    dSrNumber: row.dispatch_no || "",
+    dSrNo: row.dispatch_no || "",
+    dsrNo: row.dispatch_no || "",
+    dsrNumber: row.dispatch_no || "",
+    orderId: row.order_id || "",
+    orderNo: row.order_no || "",
+    timestamp: formatDateTime(row.timestamp),
+    quotationNo: row.quotation_no || "",
+    companyName: row.company_name || "",
+    company: row.company_name || "",
+    contactPersonName: row.contact_person_name || "",
+    contactNumber: row.contact_number || "",
+    billingAddress: row.billing_address || "",
+    shippingAddress: row.shipping_address || "",
+    paymentMode: row.payment_mode || "",
+    paymentTerms: row.payment_terms_days || 0,
+    transportMode: row.transport_mode || "",
+    destination: row.destination || "",
+    qty: row.total_dispatch_qty || 0,
+    totalQty: row.total_dispatch_qty || 0,
+    totalDispatchQty: row.total_dispatch_qty || 0,
+    totalBillAmount: row.mi_total_bill_amount || row.total_bill_amount || 0,
+    amount: row.mi_total_bill_amount || row.total_bill_amount || 0,
+    approvedName: row.approved_name || "",
+    calibrationCertificateRequired: row.calibration_required || "NO",
+    calibrationRequired: row.calibration_required || "NO",
+    calibrationType: row.certificate_category || "",
+    certificateCategory: row.certificate_category || "",
+    installationRequired: row.installation_required || "",
+    transporterId: row.transporter_id || "",
+    vehicleNo: row.vehicle_no || "",
+    srnNumber: row.srn_number || "",
+    srnNumberAttachment: row.srn_number_attachment_url || "",
+    attachment: row.attachment_url || "",
+    gstNo: row.gst_no || "",
+    dispatchStatus: row.dispatch_status || "Pending",
+    status: row.dispatch_status || "Pending",
+    dispatchLocation: row.dispatch_location || "",
+    directDispatch: row.direct_dispatch || false,
+    calibrationResponsible: row.calibration_responsible || "",
+    creName: row.cre_name || "",
+
+    // Stage 5 (Make Invoice)
+    invoiceNumber: row.invoice_number || "",
+    invoiceUpload: row.invoice_upload_url || "",
+    ewayBillUpload: row.eway_bill_upload_url || "",
+    billDate: formatDateOnly(row.mi_bill_date || row.bill_date),
+    totalQtyHistory: row.mi_total_qty || row.total_qty || row.total_dispatch_qty || 0,
+    miPlanned: row.mi_planned,
+    miActual: row.mi_actual,
+    miDelay: row.mi_delay || 0,
+
+    // Stage 6 (Warehouse)
+    beforePhoto: row.before_photo_url || "",
+    beforePhotoUpload: row.before_photo_url || "",
+    afterPhoto: row.after_photo_url || "",
+    afterPhotoUpload: row.after_photo_url || "",
+    biltyUpload: row.bilty_upload_url || "",
+    transporterName: row.transporter_name || "",
+    transporterContact: row.transporter_contact || "",
+    biltyNumber: row.bilty_docket_no || "",
+    transporterBiltyNo: row.bilty_docket_no || "",
+    totalCharges: row.freight_charge || 0,
+    freightCharge: row.freight_charge || 0,
+    warehouseRemarks: row.warehouse_remarks || "",
+    whPlanned: row.wh_planned,
+    whActual: row.wh_actual,
+    whDelay: row.wh_delay || 0,
+
+    // Stage 7 (Driver / Material Receiving)
+    materialReceivingStatus: row.material_receiving_status || "",
+    sitePersonName: row.site_person_name || "",
+    sitePersonContact: row.site_person_contact || "",
+    mrcvPlanned: row.mrcv_planned,
+    mrcvActual: row.mrcv_actual,
+    mrcvDelay: row.mrcv_delay || 0,
+
+    // Stage 8 (Calibration)
+    labCalibrationCertificate: row.lab_cert_url || "",
+    stCalibrationCertificate: row.st_cert_url || "",
+    labCalibrationDate: formatDateOnly(row.lab_cert_date),
+    stCalibrationDate: formatDateOnly(row.st_cert_date),
+    labCalibrationPeriod: row.lab_cert_period || "",
+    stCalibrationPeriod: row.st_cert_period || "",
+    labDueDate: formatDateOnly(row.lab_due_date),
+    stDueDate: formatDateOnly(row.st_due_date),
+    calPlanned: row.cal_planned,
+    calActual: row.cal_actual,
+    calDelay: row.cal_delay || 0,
+
+    // Stage 9 (Update Delivery Note)
+    uploadDN: row.upload_dn_url || "",
+    totalDeliveredQty: row.total_delivered_qty || 0,
+    udPlanned: row.ud_planned,
+    udActual: row.ud_actual,
+    udDelay: row.ud_delay || 0,
+
+    rawDispatchItems: items,
+    ...itemFields,
+  }
+}
