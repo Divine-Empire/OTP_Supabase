@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription, VisuallyHidden } from "@/components/ui/sheet";
 import {
   LayoutDashboard,
   ClipboardCheck,
@@ -236,7 +236,11 @@ export function Sidebar() {
             <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent side="left" className="p-0 w-64">
+        <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
+          <VisuallyHidden>
+            <SheetTitle>Navigation Menu</SheetTitle>
+            <SheetDescription>OTP System Navigation Menu</SheetDescription>
+          </VisuallyHidden>
           <SidebarContent />
         </SheetContent>
       </Sheet>

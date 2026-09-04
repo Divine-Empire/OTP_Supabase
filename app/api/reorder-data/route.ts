@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 
 // Apps Script linked to the Reorder/IMS spreadsheet
 // (SPREADSHEET_ID: 1O-fEA6iQvlJhSP6xcn2G-n0XxWE5LUX2kg2z6BVQLJw)
-const REORDER_SCRIPT_URL = process.env.REORDER_SCRIPT_URL
 const SHEET_NAME = "IMS"
 
 // The sheet uses 2 header rows → data starts at index 2 (row 3)
@@ -10,7 +9,15 @@ const HEADER_ROWS = 2
 
 export async function GET() {
   try {
-    const url = `${REORDER_SCRIPT_URL}?sheet=${SHEET_NAME}`
+    const reorderScriptUrl = process.env.REORDER_SCRIPT_URL
+    if (!reorderScriptUrl) {
+      return NextResponse.json(
+        { success: false, error: "REORDER_SCRIPT_URL environment variable is not configured in .env" },
+        { status: 500 }
+      )
+    }
+
+    const url = `${reorderScriptUrl}?sheet=${SHEET_NAME}`
 
     const response = await fetch(url, {
       method: "GET",

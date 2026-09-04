@@ -2,7 +2,6 @@ import { NextResponse } from "next/server"
 
 // This is the Apps Script linked to the INDENT-LIFT spreadsheet
 // (SPREADSHEET_ID: 1_KAokqi4ZxBGj2xA7TOdUMj6H44szaf4CQMI_OINdAo)
-const INDENT_SCRIPT_URL = process.env.INDENT_SCRIPT_URL
 const SHEET_NAME = "INDENT-LIFT"
 
 // Column indices (0-based) in the INDENT-LIFT sheet
@@ -24,7 +23,15 @@ const COL = {
 
 export async function GET() {
   try {
-    const url = `${INDENT_SCRIPT_URL}?sheet=${SHEET_NAME}`
+    const indentScriptUrl = process.env.INDENT_SCRIPT_URL
+    if (!indentScriptUrl) {
+      return NextResponse.json(
+        { success: false, error: "INDENT_SCRIPT_URL environment variable is not configured in .env" },
+        { status: 500 }
+      )
+    }
+
+    const url = `${indentScriptUrl}?sheet=${SHEET_NAME}`
 
     const response = await fetch(url, {
       method: "GET",
