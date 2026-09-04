@@ -6,7 +6,7 @@ export async function GET() {
     const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from("otp_users")
-      .select("id, username, full_name, role, assigned_steps, deploy_link, warehouse_page_access, location, is_active, created_at, updated_at")
+      .select("id, username, full_name, role, assigned_steps, warehouse_page_access, location, is_active, created_at, updated_at")
       .order("created_at", { ascending: true })
 
     if (error) {
@@ -97,7 +97,6 @@ export async function POST(request: Request) {
         password_hash: password || "123456",
         role: role || "user",
         assigned_steps: assignedSteps || [],
-        deploy_link: deployLink || null,
         warehouse_page_access: warehousePageAccess || null,
         location: location || null,
       }])
@@ -119,7 +118,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json()
-    const { id, username, fullName, password, role, assignedSteps, deployLink, warehousePageAccess, location, isActive } = body
+    const { id, username, fullName, password, role, assignedSteps, warehousePageAccess, location, isActive } = body
 
     if (!id && !username) {
       return NextResponse.json({ success: false, error: "User ID or username required" }, { status: 400 })
@@ -131,7 +130,6 @@ export async function PUT(request: Request) {
     if (password !== undefined && password !== "") updateData.password_hash = password
     if (role !== undefined) updateData.role = role
     if (assignedSteps !== undefined) updateData.assigned_steps = assignedSteps
-    if (deployLink !== undefined) updateData.deploy_link = deployLink
     if (warehousePageAccess !== undefined) updateData.warehouse_page_access = warehousePageAccess
     if (location !== undefined) updateData.location = location
     if (isActive !== undefined) updateData.is_active = isActive
