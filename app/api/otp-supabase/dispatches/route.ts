@@ -12,7 +12,7 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseAdmin()
     let query = supabase
-      .from("v_otp_dispatch_full")
+      .from("otp_v_dispatch_full")
       .select("*")
       .order("timestamp", { ascending: false })
 
@@ -301,31 +301,10 @@ export async function PATCH(request: Request) {
           return NextResponse.json({ success: false, error: stageErr.message }, { status: 500 })
         }
 
-        // Sync parent order delivery status when update_delivery is completed
-        if (stage === "update_delivery" && targetDispatchId) {
-          const { data: dRec } = await supabase.from("otp_dispatches").select("order_id").eq("id", targetDispatchId).single()
-          if (dRec?.order_id) {
-            const { data: allDispatches } = await supabase.from("otp_dispatches").select("id").eq("order_id", dRec.order_id)
-            const dIds = allDispatches?.map((x: any) => x.id) || []
-            if (dIds.length > 0) {
-              const { data: allDel } = await supabase
-                .from("otp_update_delivery")
-                .select("total_delivered_qty")
-                .in("dispatch_id", dIds)
-                .not("actual_date", "is", null)
-
-              const totalDelivered = allDel?.reduce((sum: number, x: any) => sum + Number(x.total_delivered_qty || 0), 0) || 0
-              const { data: ord } = await supabase.from("otp_orders").select("total_order_qty").eq("id", dRec.order_id).single()
-              const isComplete = totalDelivered >= Number(ord?.total_order_qty || 0)
-
-              await supabase.from("otp_orders").update({
-                total_delivered_qty: totalDelivered,
-                delivery_status: isComplete ? "Complete" : "Partial",
-                delivery_complete_date: isComplete ? new Date().toISOString() : null,
-              }).eq("id", dRec.order_id)
-            }
-          }
-        }
+        // Note: parent order's total_delivered_qty / delivery_complete_date are kept in
+        // sync automatically by the otp_trg_after_ud_update trigger (fires on the
+        // otp_update_delivery upsert above), and delivery_status/dispatch_status are
+        // GENERATED columns on otp_orders that recompute themselves — no app-side write needed.
       }
     }
 

@@ -11,7 +11,7 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseAdmin()
     let query = supabase
-      .from("v_otp_order_full")
+      .from("otp_v_order_full")
       .select("*")
       .order("timestamp", { ascending: false })
 

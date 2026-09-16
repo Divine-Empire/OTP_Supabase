@@ -13,13 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Edit, Trash2, RefreshCw, Clock, Users as UsersIcon, Save, Info, ShieldCheck } from "lucide-react"
+import { Plus, Edit, Trash2, RefreshCw, Clock, Users as UsersIcon, Save, Info, ShieldCheck, Eye, EyeOff } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
 
 interface User {
   id: string
   username: string
   fullName: string
+  password: string
   role: "admin" | "user" | "super_admin"
   assignedSteps: string[]
 }
@@ -63,6 +64,7 @@ export default function SettingsPage() {
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [userLoading, setUserLoading] = useState(true)
+  const [showPassword, setShowPassword] = useState(false)
   const [userFormData, setUserFormData] = useState({
     username: "",
     fullName: "",
@@ -97,6 +99,7 @@ export default function SettingsPage() {
           id: u.id,
           username: u.username,
           fullName: u.full_name,
+          password: u.password_hash || "",
           role: u.role || "user",
           assignedSteps: Array.isArray(u.assigned_steps) ? u.assigned_steps : [],
         }))
@@ -152,6 +155,7 @@ export default function SettingsPage() {
       role: "user",
       assignedSteps: [],
     })
+    setShowPassword(false)
     setIsUserDialogOpen(true)
   }
 
@@ -160,10 +164,11 @@ export default function SettingsPage() {
     setUserFormData({
       username: user.username,
       fullName: user.fullName,
-      password: "",
+      password: user.password,
       role: user.role === "admin" ? "admin" : "user",
       assignedSteps: user.assignedSteps,
     })
+    setShowPassword(true)
     setIsUserDialogOpen(true)
   }
 
@@ -646,14 +651,25 @@ export default function SettingsPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password {editingUser ? "(leave blank to keep current)" : "*"}</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={userFormData.password}
-                    onChange={(e) => setUserFormData((prev) => ({ ...prev, password: e.target.value }))}
-                    placeholder={editingUser ? "Leave blank to keep unchanged" : "Enter password"}
-                  />
+                  <Label htmlFor="password">Password {editingUser ? "" : "*"}</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={userFormData.password}
+                      onChange={(e) => setUserFormData((prev) => ({ ...prev, password: e.target.value }))}
+                      placeholder="Enter password"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      tabIndex={-1}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="role">Role *</Label>

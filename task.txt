@@ -1,0 +1,5 @@
+ab mai pura flow btata hu Check Inventory stage ka
+
+humare paas ek QR hai per item jo ki @Purchase-FMS-Supabase/stage-pages/serial-generation/  se generate hota hai for each qty of each item
+
+ab mai chahta hu ki user yha se list dekh lega  

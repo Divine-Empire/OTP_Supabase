@@ -33,6 +33,129 @@ export function formatDateOnly(dateVal: any): string {
   }
 }
 
+// Maps a row from /api/otp-supabase/order-acceptable (Stage 1, against the
+// new otp_orders / otp_orders_acceptable tables) into the same UI field
+// names order_acceptable.tsx's pendingColumns/historyColumns already expect.
+// A "pending" row is a plain otp_orders row; a "history" row is an
+// otp_orders_acceptable row with the parent order nested under `order`
+// (from `.select("*, order:otp_orders(*)")`). Handles both shapes.
+export function mapOrderAcceptableRowToUI(row: any): any {
+  if (!row) return {}
+
+  const acceptance = row.order ? row : null // set only on history rows
+  const order = row.order || row // the otp_orders fields, either nested or top-level
+
+  const items = order.items || []
+  const itemFields: Record<string, any> = {}
+  items.forEach((it: any, idx: number) => {
+    const n = idx + 1
+    itemFields[`itemName${n}`] = it?.item_name || ""
+    itemFields[`quantity${n}`] = it?.quantity || ""
+  })
+
+  return {
+    id: order.id,
+    orderId: order.id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(order.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    billingAddress: order.billing_address || "",
+    shippingAddress: order.shipping_address || "",
+    paymentMode: order.payment_mode || "",
+    paymentTerms: order.payment_terms_days || 0,
+    email: order.email || "",
+    transportMode: order.transport_mode || "",
+    destination: order.destination || "",
+    poNumber: order.po_number || "",
+    acceptanceCopy: order.acceptance_file_upload || "",
+    amount: order.amount_with_tax || 0,
+    gstNo: order.gst_number || "",
+
+    // Stage 1 (Order Acceptable)
+    isOrderAcceptable: acceptance?.is_order_acceptable || "",
+    orderAcceptanceChecklist: acceptance?.acceptance_checklist || "",
+    remarks: acceptance?.remark || "",
+    remark: acceptance?.remark || "",
+    processedBy: acceptance?.processed_by || "",
+    oaPlanned: order.order_acceptable_planned,
+    ciPlanned: acceptance?.check_inventory_planned,
+
+    rawItems: items,
+    ...itemFields,
+  }
+}
+
+// Maps a row from /api/otp-supabase/check-inventory (Stage 2, against
+// otp_orders / otp_orders_acceptable / otp_check_inventory) into the same UI
+// field names check-inventory/page.tsx's pendingColumns/historyColumns
+// already expect. Both the pending and history branches of that API return
+// the same { order, acceptance, inventory } shape, so this mapper doesn't
+// need to guess which endpoint a row came from.
+export function mapCheckInventoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const acceptance = row.acceptance || null // Stage 1 outcome, if it exists
+  const inventory = row.inventory || null // Stage 2 outcome, only on history rows
+
+  const rawItems = order.items || []
+  const itemFields: Record<string, any> = {}
+  rawItems.forEach((it: any, idx: number) => {
+    const n = idx + 1
+    itemFields[`itemName${n}`] = it?.item_name || ""
+    itemFields[`quantity${n}`] = it?.quantity || ""
+  })
+
+  return {
+    id: order.id,
+    orderId: order.id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    billingAddress: order.billing_address || "",
+    shippingAddress: order.shipping_address || "",
+    paymentMode: order.payment_mode || "",
+    paymentTerms: order.payment_terms_days || 0,
+    email: order.email || "",
+    transportMode: order.transport_mode || "",
+    destination: order.destination || "",
+    poNumber: order.po_number || "",
+    acceptanceCopy: order.acceptance_file_upload || "",
+    amount: order.amount_with_tax || 0,
+
+    // Stage 1 (Order Acceptable) outcome — already-completed context, shown
+    // on this stage's tables too since a Check Inventory row can't exist
+    // without having passed Stage 1 first.
+    isOrderAcceptable: acceptance?.is_order_acceptable || "",
+    orderAcceptanceChecklist: acceptance?.acceptance_checklist || "",
+    remarks: acceptance?.remark || "",
+
+    // Stage 2 (Check Inventory)
+    availabilityStatus: inventory?.availability_status || "",
+    inventoryStatus: inventory?.availability_status || "",
+    inventoryRemarks: inventory?.remark || "",
+    customerWantsMaterialAs: inventory?.customer_wants_material_as || "",
+    warehouseLocation: inventory?.warehouse_location || "",
+    lineItemNumber: inventory?.line_item_number ?? "",
+    totalQty: inventory?.total_qty ?? "",
+    materialReceivedLeadTime: inventory?.material_received_lead_time ?? "",
+    createdBy: inventory?.created_by || "",
+    processedDate: inventory?.actual_date,
+
+    // items in {name, qty} shape (not {item_name, quantity}) so the existing
+    // "Items Not Available" prefill logic in check-inventory/page.tsx (which
+    // reads item.name/item.qty) keeps working unchanged.
+    items: rawItems.map((it: any) => ({ name: it.item_name, qty: it.quantity })),
+    rawItems,
+    ...itemFields,
+  }
+}
+
 export function mapOrderRowToUI(row: any): any {
   if (!row) return {}
 

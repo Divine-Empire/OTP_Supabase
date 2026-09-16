@@ -11,7 +11,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE SEQUENCE IF NOT EXISTS otp_order_no_seq START WITH 1 INCREMENT BY 1;
 
 -- Function to generate formatted order numbers
-CREATE OR REPLACE FUNCTION generate_order_no()
+CREATE OR REPLACE FUNCTION otp_generate_order_no()
 RETURNS TEXT AS $$
   SELECT 'DO-' || LPAD(nextval('otp_order_no_seq')::TEXT, 4, '0');
 $$ LANGUAGE SQL;
@@ -21,7 +21,7 @@ $$ LANGUAGE SQL;
 CREATE SEQUENCE IF NOT EXISTS otp_dispatch_no_seq START WITH 1 INCREMENT BY 1;
 
 -- Function to generate formatted dispatch numbers (replaces D-Sr Number)
-CREATE OR REPLACE FUNCTION generate_dispatch_no()
+CREATE OR REPLACE FUNCTION otp_generate_dispatch_no()
 RETURNS TEXT AS $$
   SELECT 'D-' || LPAD(nextval('otp_dispatch_no_seq')::TEXT, 4, '0');
 $$ LANGUAGE SQL;

@@ -20,16 +20,39 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { Trash2, RefreshCw, Search, Settings } from "lucide-react"
+import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapOrderRowToUI } from "@/lib/otp-utils"
+import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
+import { QrScanner, parseItemQr, type ScannedQrItem } from "@/components/qr-scanner"
+import { toast } from "@/components/ui/use-toast"
+
+// One row per QR scan (one physical unit's serial), item identified straight
+// from the QR string — qty is filled in by hand afterwards, not implied by
+// scan count.
+interface ScanRow extends ScannedQrItem {
+  qty: string
+}
+
+// Per-item compare result: order's expected qty vs what got scanned+entered.
+interface CompareItem {
+  itemCode: string
+  itemName: string
+  orderedQty: number
+  scannedQty: number
+  shortageQty: number
+}
 
 
 
-// Column definitions for Pending tab (B to AJ + BD, BE, BF)
+// Column definitions for Pending tab — same base columns as Order Acceptable
+// (stage-1-specific columns like isOrderAcceptable/orderAcceptanceChecklist/
+// remarks and the never-implemented dispatch/delivery columns are dropped;
+// this stage's own outcome columns are added in historyColumns below).
 const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
+  { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
+  { key: "creName", label: "CRE Name", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
@@ -40,26 +63,7 @@ const pendingColumns = [
   { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
   { key: "referenceName", label: "Reference Name", searchable: true },
   { key: "email", label: "Email", searchable: true },
-  { key: "itemName1", label: "Item Name 1", searchable: true },
-  { key: "quantity1", label: "Quantity 1", searchable: true },
-  { key: "itemName2", label: "Item Name 2", searchable: true },
-  { key: "quantity2", label: "Quantity 2", searchable: true },
-  { key: "itemName3", label: "Item Name 3", searchable: true },
-  { key: "quantity3", label: "Quantity 3", searchable: true },
-  { key: "itemName4", label: "Item Name 4", searchable: true },
-  { key: "quantity4", label: "Quantity 4", searchable: true },
-  { key: "itemName5", label: "Item Name 5", searchable: true },
-  { key: "quantity5", label: "Quantity 5", searchable: true },
-  { key: "itemName6", label: "Item Name 6", searchable: true },
-  { key: "quantity6", label: "Quantity 6", searchable: true },
-  { key: "itemName7", label: "Item Name 7", searchable: true },
-  { key: "quantity7", label: "Quantity 7", searchable: true },
-  { key: "itemName8", label: "Item Name 8", searchable: true },
-  { key: "quantity8", label: "Quantity 8", searchable: true },
-  { key: "itemName9", label: "Item Name 9", searchable: true },
-  { key: "quantity9", label: "Quantity 9", searchable: true },
-  { key: "itemName10", label: "Item Name 10", searchable: true },
-  { key: "quantity10", label: "Quantity 10", searchable: true },
+  { key: "itemList", label: "Item List", searchable: false },
   { key: "transportMode", label: "Transport Mode", searchable: true },
   { key: "freightType", label: "Freight Type", searchable: true },
   { key: "destination", label: "Destination", searchable: true },
@@ -70,22 +74,9 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
-  { key: "totalDispatch", label: "Total Dispatch", searchable: true },
-  { key: "quantityDelivered", label: "Quantity Delivered", searchable: true },
-  { key: "orderCancel", label: "Order Cancel", searchable: true },
-  { key: "pendingDeliveryQty", label: "Pending Delivery Qty", searchable: true },
-  { key: "pendingDispatchQty", label: "Pending Dispatch Qty", searchable: true },
-  { key: "materialReturn", label: "Material Return", searchable: true },
-  { key: "deliveryStatus", label: "Delivery Status", searchable: true },
-  { key: "dispatchStatus", label: "Dispatch Status", searchable: true },
-  { key: "dispatchCompleteDate", label: "Dispatch Complete Date", searchable: true },
-  { key: "deliveryCompleteDate", label: "Delivery Complete Date", searchable: true },
-  { key: "isOrderAcceptable", label: "Is Order Acceptable?", searchable: true },
-  { key: "orderAcceptanceChecklist", label: "Order Acceptance Checklist", searchable: true },
-  { key: "remarks", label: "Remark", searchable: true },
 ]
 
-// Column definitions for History tab (includes BJ, BK columns)
+// Column definitions for History tab — base columns + this stage's own outcome
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "availabilityStatus", label: "Availability Status", searchable: true },
@@ -99,13 +90,23 @@ export default function CheckInventoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
-  const [availabilityStatus, setAvailabilityStatus] = useState("")
   const [remarks, setRemarks] = useState("")
-  const [partialDetails, setPartialDetails] = useState<any>({})
-  const [unavailableItems, setUnavailableItems] = useState<any[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+
+  // Scan -> Compare -> Preview flow
+  const [dialogStep, setDialogStep] = useState<"scan" | "preview">("scan")
+  const [scanRows, setScanRows] = useState<ScanRow[]>([])
+  const [scannerError, setScannerError] = useState<string | null>(null)
+  const [compareItems, setCompareItems] = useState<CompareItem[]>([])
+  const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
+  const [customerWantsMaterialAs, setCustomerWantsMaterialAs] = useState("")
+  const [createdByPerson, setCreatedByPerson] = useState("")
+  const [warehouseLocationValue, setWarehouseLocationValue] = useState("")
+  const [leadTime, setLeadTime] = useState("")
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [viewOrder, setViewOrder] = useState<any>(null)
+  const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
+  const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedColumn, setSelectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
@@ -128,11 +129,11 @@ export default function CheckInventoryPage() {
     setError(null)
 
     try {
-      const response = await fetch("/api/otp-supabase/orders?stage=check_inventory&status=pending")
+      const response = await fetch("/api/otp-supabase/check-inventory?status=pending")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
-        const ordersData = result.data.map(mapOrderRowToUI)
+        const ordersData = result.data.map(mapCheckInventoryRowToUI)
         setOrders(ordersData)
       } else {
         setOrders([])
@@ -149,11 +150,11 @@ export default function CheckInventoryPage() {
   // Fetch processed history orders from Supabase API
   const fetchProcessedOrders = async () => {
     try {
-      const response = await fetch("/api/otp-supabase/orders?stage=check_inventory&status=history")
+      const response = await fetch("/api/otp-supabase/check-inventory?status=history")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
-        return result.data.map(mapOrderRowToUI)
+        return result.data.map(mapCheckInventoryRowToUI)
       }
       return []
     } catch (err) {
@@ -282,220 +283,180 @@ export default function CheckInventoryPage() {
 
 
 
-  // Update order status via Supabase orders API
-  const updateOrderStatus = async (order: any, inventoryData: any) => {
-    try {
-      const orderNo = order.orderNo || order.id
+  const handleProcess = (order: any) => {
+    setSelectedOrder(order)
+    setDialogStep("scan")
+    setScanRows([])
+    setScannerError(null)
+    setCompareItems([])
+    setComputedStatus("")
+    setCustomerWantsMaterialAs("")
+    setCreatedByPerson(currentUser?.fullName || currentUser?.username || "")
+    setWarehouseLocationValue("")
+    setLeadTime("")
+    setRemarks("")
+    setInventoryPhotoAttachment(null)
+    setIsDialogOpen(true)
+  }
 
-      let uploadedPhotoUrl = ""
+  // Each QR scan appends one row (one physical unit's serial); the same
+  // serial scanned twice is ignored rather than double-counted. Qty per row
+  // is filled in by hand afterwards — scan count itself is not the qty.
+  //
+  // Reject anything not on this order's own item list: match by item_code
+  // (case/whitespace-insensitive), falling back to item_name when the
+  // order-side item_code couldn't be resolved (enrichOrderItemsWithCode
+  // leaves it null when lto_items has no matching row).
+  const handleQrScan = (raw: string) => {
+    const parsed = parseItemQr(raw)
+    if (!parsed) {
+      setScannerError(`Unrecognized QR: "${raw.slice(0, 60)}"`)
+      return
+    }
+
+    const orderItems: any[] = selectedOrder?.rawItems || []
+    const scannedCode = parsed.itemCode.trim().toLowerCase()
+    const scannedName = parsed.itemName.trim().toLowerCase()
+    const belongsToOrder = orderItems.some((it) => {
+      const orderCode = (it.item_code || "").trim().toLowerCase()
+      const orderName = (it.item_name || "").trim().toLowerCase()
+      return orderCode ? orderCode === scannedCode : orderName === scannedName
+    })
+
+    if (!belongsToOrder) {
+      const message = `"${parsed.itemName}" (${parsed.itemCode}) is not part of this order's item list — scan rejected.`
+      setScannerError(message)
+      toast({ title: "Item not in order", description: message, variant: "destructive" })
+      return
+    }
+
+    setScannerError(null)
+    setScanRows((prev) => {
+      if (prev.some((r) => r.serialNo === parsed.serialNo)) return prev // already scanned
+      return [...prev, { ...parsed, qty: "" }]
+    })
+  }
+
+  const updateScanRowQty = (index: number, qty: string) => {
+    setScanRows((prev) => prev.map((r, i) => (i === index ? { ...r, qty } : r)))
+  }
+
+  const removeScanRow = (index: number) => {
+    setScanRows((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // Groups scanned rows by item_code, sums their qty, and compares against
+  // the order's expected item list -> per-item shortage breakdown +
+  // overall status. Moves the dialog into the editable preview step.
+  const handleCompare = () => {
+    const scannedByCode = new Map<string, number>()
+    for (const row of scanRows) {
+      const key = row.itemCode || row.itemName
+      scannedByCode.set(key, (scannedByCode.get(key) || 0) + (Number(row.qty) || 0))
+    }
+
+    const orderItems: any[] = selectedOrder?.rawItems || []
+    const items: CompareItem[] = orderItems.map((it) => {
+      const key = it.item_code || it.item_name
+      const ordered = Number(it.quantity) || 0
+      const scanned = scannedByCode.get(key) || 0
+      return {
+        itemCode: it.item_code || "",
+        itemName: it.item_name,
+        orderedQty: ordered,
+        scannedQty: scanned,
+        shortageQty: Math.max(ordered - scanned, 0),
+      }
+    })
+
+    const totalShortage = items.reduce((s, it) => s + it.shortageQty, 0)
+    const totalScanned = items.reduce((s, it) => s + it.scannedQty, 0)
+    const status = totalShortage === 0 ? "Available" : totalScanned === 0 ? "Not Available" : "Partial"
+
+    setCompareItems(items)
+    setComputedStatus(status)
+    setDialogStep("preview")
+  }
+
+  // Editable in the preview step — adjusting scannedQty recomputes that
+  // item's shortageQty and the overall computed status.
+  const updateCompareItemQty = (index: number, scannedQty: string) => {
+    setCompareItems((prev) => {
+      const updated = prev.map((it, i) => {
+        if (i !== index) return it
+        const scanned = Math.max(Number(scannedQty) || 0, 0)
+        return { ...it, scannedQty: scanned, shortageQty: Math.max(it.orderedQty - scanned, 0) }
+      })
+      const totalShortage = updated.reduce((s, it) => s + it.shortageQty, 0)
+      const totalScanned = updated.reduce((s, it) => s + it.scannedQty, 0)
+      setComputedStatus(totalShortage === 0 ? "Available" : totalScanned === 0 ? "Not Available" : "Partial")
+      return updated
+    })
+  }
+
+  const handleSubmit = async () => {
+    if (!selectedOrder || compareItems.length === 0) return
+
+    setUploading(true)
+    setIsSubmitting(true)
+    setError(null)
+
+    try {
+      let inventoryPhotoUrl = ""
       if (inventoryPhotoAttachment) {
         try {
           const uploadFormData = new FormData()
           uploadFormData.append("file", inventoryPhotoAttachment)
           uploadFormData.append("folder", "check-inventory")
-
           const uploadRes = await fetch("/api/otp-supabase/attachments", {
             method: "POST",
             body: uploadFormData,
           })
           const uploadJson = await uploadRes.json()
-          if (uploadJson.success) {
-            uploadedPhotoUrl = uploadJson.url
-          }
+          if (uploadJson.success) inventoryPhotoUrl = uploadJson.url
         } catch (uploadErr) {
-          console.error("Error uploading inventory photo attachment:", uploadErr)
+          console.error("Error uploading inventory photo:", uploadErr)
         }
       }
 
-      const stageData: any = {
-        availability_status: inventoryData.availabilityStatus,
-        remarks: inventoryData.remarks || "",
-        created_by: currentUser?.fullName || currentUser?.username || "Admin",
-        actual_date: new Date().toISOString(),
-      }
+      const orderNo = selectedOrder.orderNo || selectedOrder.id
 
-      if (inventoryData.availabilityStatus === "Not Available" || inventoryData.availabilityStatus === "Partial") {
-        stageData.customer_wants_material_as = inventoryData.partialDetails?.customerDecision || ""
-        stageData.warehouse_location = inventoryData.partialDetails?.warehouseLocation || ""
-        stageData.create_indent_if_not_avail = !!inventoryData.partialDetails?.createIndent
-        stageData.line_item_number = inventoryData.partialDetails?.lineItemNumber || ""
-        stageData.total_qty = inventoryData.partialDetails?.totalQty ? Number(inventoryData.partialDetails.totalQty) : null
-        stageData.material_received_lead_time = inventoryData.partialDetails?.leadTime ? Number(inventoryData.partialDetails.leadTime) : null
-      }
-
-      const updateResponse = await fetch("/api/otp-supabase/orders", {
-        method: "PATCH",
+      // Submits Stage 2 (Check Inventory) — inserts a row into
+      // otp_check_inventory (moving this order from Pending to History),
+      // splits shortage items into otp_material_shortage (+ best-effort PFMS
+      // indent), and queues whatever's available into otp_pre_invoice_queue.
+      const response = await fetch("/api/otp-supabase/check-inventory", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderNo: orderNo,
-          stage: "check_inventory",
-          stageData,
+          orderId: selectedOrder.orderId || selectedOrder.id,
+          items: compareItems.map((it) => ({
+            item_code: it.itemCode,
+            item_name: it.itemName,
+            ordered_qty: it.orderedQty,
+            scanned_qty: it.scannedQty,
+          })),
+          customerWantsMaterialAs: computedStatus !== "Available" ? customerWantsMaterialAs || null : null,
+          createdBy: createdByPerson || currentUser?.fullName || currentUser?.username || "Admin",
+          warehouseLocation: warehouseLocationValue || null,
+          inventoryPhotoUrl,
+          leadTime: leadTime || null,
+          remarks: remarks || "",
         }),
       })
 
-      const result = await updateResponse.json()
+      const result = await response.json()
+      if (!result.success) throw new Error(result.error || "Update failed")
 
-      if (result.success) {
-        await fetchOrders()
-        return { success: true, fileUrls: uploadedPhotoUrl ? [uploadedPhotoUrl] : [] }
-      } else {
-        throw new Error(result.error || "Update failed")
-      }
+      setIsDialogOpen(false)
+      setSelectedOrder(null)
+      setInventoryPhotoAttachment(null)
+
+      await fetchOrders()
+
+      alert(`Inventory check for order ${orderNo} updated successfully — ${result.availabilityStatus}`)
     } catch (err: any) {
-      console.error("Error updating order:", err)
-      setError(err.message)
-      return { success: false, error: err.message }
-    }
-  }
-
-  const convertFileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        // Ensure the result is a string
-        if (typeof reader.result === 'string') {
-          resolve(reader.result);
-        } else {
-          reject(new Error('Failed to convert file to base64'));
-        }
-      };
-      reader.onerror = (error) => reject(error);
-    });
-  };
-
-  const calculateTotalQty = (items: any[]) => {
-    return items.reduce((total: number, item: any) => total + (Number(item.qty) || 0), 0);
-  };
-
-  const handleSubmit = async () => {
-    if (!selectedOrder || !availabilityStatus) return;
-
-    setUploading(true);
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      let inventoryPhotoUrl = "";
-
-      // Handle inventory photo upload
-      if (inventoryPhotoAttachment) {
-        try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("file", inventoryPhotoAttachment);
-          uploadFormData.append("folder", "check-inventory");
-          const uploadRes = await fetch("/api/otp-supabase/attachments", {
-            method: "POST",
-            body: uploadFormData,
-          });
-          const uploadJson = await uploadRes.json();
-          if (uploadJson.success) inventoryPhotoUrl = uploadJson.url;
-        } catch (uploadErr) {
-          console.error("Error uploading inventory photo:", uploadErr);
-        }
-      }
-
-      const orderNo = selectedOrder.orderNo || selectedOrder.id;
-
-      const patchResponse = await fetch("/api/otp-supabase/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orderNo,
-          stage: "check_inventory",
-          stageData: {
-            availability_status: availabilityStatus,
-            remarks: remarks || "",
-            customer_wants_material_as: partialDetails.customerDecision || null,
-            created_by: partialDetails.createdBy || currentUser?.fullName || currentUser?.username || "Admin",
-            warehouse_location: partialDetails.warehouseLocation || null,
-            create_indent_if_not_avail: !!partialDetails.createIndent,
-            line_item_number: partialDetails.lineItemNumber || null,
-            total_qty: partialDetails.totalQty ? Number(partialDetails.totalQty) : null,
-            material_received_lead_time: partialDetails.leadTime ? Number(partialDetails.leadTime) : null,
-            actual_date: new Date().toISOString()
-          }
-        }),
-      });
-
-      const result = await patchResponse.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Update failed");
-      }
-
-      // Secondary submission to Supabase (Indent Generation)
-      if (availabilityStatus === "Partial" || availabilityStatus === "Not Available") {
-        try {
-          let filePayload = null;
-          if (inventoryPhotoAttachment) {
-            try {
-              const base64Data = await convertFileToBase64(inventoryPhotoAttachment);
-              filePayload = {
-                base64: base64Data,
-                name: inventoryPhotoAttachment.name,
-                type: inventoryPhotoAttachment.type,
-              };
-            } catch (err) {
-              console.error("Error preparing file base64 for Supabase upload:", err);
-            }
-          }
-
-          const validItems = unavailableItems
-            .filter((item) => item.name && item.name.trim() !== "")
-            .map((item) => ({ name: item.name, qty: Number(item.qty) || 0 }));
-
-          const payload = {
-            items: validItems.length > 0 ? validItems : [{
-              name: selectedOrder?.orderNo ? `Order ${selectedOrder.orderNo} Material` : (partialDetails.lineItemNumber ? `Line ${partialDetails.lineItemNumber}` : "Material"),
-              qty: Number(partialDetails.totalQty) || 1
-            }],
-            totalQty: partialDetails.totalQty || "",
-            createdBy: partialDetails.createdBy || "",
-            warehouseLocation: partialDetails.warehouseLocation || "",
-            lineItemNumber: partialDetails.lineItemNumber || "",
-            leadTime: partialDetails.leadTime || "",
-            remarks: remarks || "",
-            file: filePayload,
-          };
-
-          const indentResponse = await fetch("/api/generate-indent", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(payload),
-          });
-
-          if (indentResponse.ok) {
-            const indentResult = await indentResponse.json();
-            if (indentResult.success) {
-              console.log("✅ Supabase indent records created:", indentResult.generatedIds);
-            } else {
-              console.warn("⚠️ Supabase indent creation warning:", indentResult.error);
-            }
-          } else {
-            console.error("❌ Supabase indent endpoint returned status:", indentResponse.status);
-          }
-        } catch (indentErr) {
-          console.error("❌ Error submitting to Supabase (non-blocking):", indentErr);
-        }
-      }
-
-      setIsDialogOpen(false);
-      setSelectedOrder(null);
-      setInventoryPhotoAttachment(null);
-
-      await fetchOrders();
-
-      let message = `Inventory check for order ${orderNo} updated successfully`;
-      if (inventoryPhotoUrl) {
-        message += `\n\nPhoto uploaded: ${inventoryPhotoUrl}`;
-      }
-      alert(message);
-
-    } catch (err: any) {
-      console.error("Submission error:", err);
+      console.error("Submission error:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setUploading(false)
@@ -503,114 +464,14 @@ export default function CheckInventoryPage() {
     }
   }
 
-  const handleProcess = (order: any) => {
-    setSelectedOrder(order)
-    setAvailabilityStatus("")
-    setRemarks("")
-    setPartialDetails({
-      customerDecision: "",
-      createdBy: "",
-      warehouseLocation: "",
-      createIndent: false,
-      lineItemNumber: "",
-      totalQty: "",
-      leadTime: ""
-    })
-
-    // Extract items from the order data (columns M to AF) - first 10 items
-    const extractedItems: Array<{ name: string; qty: number }> = []
-    if (order.fullRowData) {
-      for (let i = 12; i <= 31; i += 2) { // Columns M (12) to AF (31)
-        const nameCol = order.fullRowData[i]
-        const qtyCol = order.fullRowData[i + 1]
-
-        if (nameCol && nameCol.v && nameCol.v.toString().trim() !== "") {
-          extractedItems.push({
-            name: nameCol.v.toString(),
-            qty: qtyCol ? Number(qtyCol.v) || 0 : 0,
-          })
-        }
-      }
-    } else if (order.items && Array.isArray(order.items)) {
-      order.items.forEach((item: any) => {
-        extractedItems.push({
-          name: item.name || item.itemName || "",
-          qty: item.qty || item.quantity || 0,
-        })
-      })
-    }
-
-    setUnavailableItems(extractedItems)
-    setIsDialogOpen(true)
-  }
-
-
-
-  const addUnavailableItem = () => {
-    setUnavailableItems([...unavailableItems, { name: "", qty: 0 }])
-  }
-
-  const removeUnavailableItem = (index: number) => {
-    setUnavailableItems(unavailableItems.filter((_, i) => i !== index))
-  }
-
-  const updateUnavailableItem = (index: number, field: "name" | "qty", value: string | number) => {
-    const updated = [...unavailableItems];
-    updated[index] = { ...updated[index], [field]: value };
-    setUnavailableItems(updated);
-
-    // Update total qty whenever quantity changes
-    if (field === "qty") {
-      setPartialDetails((prev: any) => ({
-        ...prev,
-        totalQty: calculateTotalQty(updated).toString()
-      }));
-    }
-  };
-
-  useEffect(() => {
-    if (availabilityStatus === "Not Available" || availabilityStatus === "Partial") {
-      // Calculate initial total qty from unavailable items if available
-      const initialTotalQty = calculateTotalQty(unavailableItems);
-      if (initialTotalQty > 0) {
-        setPartialDetails((prev: any) => ({
-          ...prev,
-          totalQty: initialTotalQty.toString()
-        }));
-      }
-    }
-  }, [availabilityStatus, unavailableItems]);
-
-  // const handleSubmit = async () => {
-  //   if (!selectedOrder || !availabilityStatus) return
-
-  //   setIsSubmitting(true) // Start loading
-
-  //   const inventoryData = {
-  //     availabilityStatus,
-  //     remarks,
-  //     partialDetails: availabilityStatus === "Partial" ? partialDetails : "",
-  //     unavailableItems:
-  //       availabilityStatus === "Not Available" || availabilityStatus === "Partial" ? unavailableItems : [],
-  //     processedAt: new Date().toISOString(),
-  //     processedBy: "Current User",
-  //   }
-
-  //   const success = await updateOrderStatus(selectedOrder, inventoryData)
-
-  //   setIsSubmitting(false) // Stop loading regardless of outcome
-
-  //   if (success) {
-  //     setIsDialogOpen(false)
-  //     setSelectedOrder(null)
-  //     // Show success message
-  //     alert(`Order ${selectedOrder.id} has been updated successfully.`)
-  //   }
-  // }
-
   const handleView = (order: any) => {
     setViewOrder(order)
     setViewDialogOpen(true)
+  }
+
+  const handleViewItemList = (order: any) => {
+    setItemListDialogItems(order.rawItems || [])
+    setItemListDialogOpen(true)
   }
 
   const renderCellContent = (order: any, columnKey: string) => {
@@ -633,8 +494,12 @@ export default function CheckInventoryPage() {
         ) : (
           <Badge variant="secondary">{value || "N/A"}</Badge>
         )
-      case "isOrderAcceptable":
-        return <Badge variant={value === "Yes" ? "default" : "destructive"}>{value || "N/A"}</Badge>
+      case "itemList":
+        return (
+          <Button size="icon" variant="ghost" onClick={() => handleViewItemList(order)} title="View item list">
+            <Eye className="h-4 w-4" />
+          </Button>
+        )
       case "availabilityStatus":
         return (
           <Badge variant={value === "Available" ? "default" : value === "Not Available" ? "destructive" : "secondary"}>
@@ -643,8 +508,6 @@ export default function CheckInventoryPage() {
         )
       case "billingAddress":
       case "shippingAddress":
-      case "orderAcceptanceChecklist":
-      case "remarks":
       case "inventoryRemarks":
         return <div className="max-w-[200px] whitespace-normal break-words">{value}</div>
       default:
@@ -795,6 +658,7 @@ export default function CheckInventoryPage() {
                                   className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
                                   style={{
                                     width: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -807,6 +671,7 @@ export default function CheckInventoryPage() {
                                                         column.key === 'remarks' ? '200px' :
                                                           '160px',
                                     minWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -819,6 +684,7 @@ export default function CheckInventoryPage() {
                                                         column.key === 'remarks' ? '200px' :
                                                           '160px',
                                     maxWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -854,6 +720,7 @@ export default function CheckInventoryPage() {
                                       className="border-b px-4 py-3 align-top"
                                       style={{
                                         width: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -866,6 +733,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'remarks' ? '200px' :
                                                               '160px',
                                         minWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -878,6 +746,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'remarks' ? '200px' :
                                                               '160px',
                                         maxWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -1004,6 +873,7 @@ export default function CheckInventoryPage() {
                                     className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
                                     style={{
                                       width: column.key === 'orderNo' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -1017,6 +887,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'inventoryRemarks' ? '200px' :
                                                               '160px',
                                       minWidth: column.key === 'orderNo' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -1030,6 +901,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'inventoryRemarks' ? '200px' :
                                                               '160px',
                                       maxWidth: column.key === 'orderNo' ? '120px' :
+                                      column.key === 'itemList' ? '90px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -1066,6 +938,7 @@ export default function CheckInventoryPage() {
                                         className="border-b px-4 py-3 align-top"
                                         style={{
                                           width: column.key === 'orderNo' ? '120px' :
+                                          column.key === 'itemList' ? '90px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -1079,6 +952,7 @@ export default function CheckInventoryPage() {
                                                                 column.key === 'inventoryRemarks' ? '200px' :
                                                                   '160px',
                                           minWidth: column.key === 'orderNo' ? '120px' :
+                                          column.key === 'itemList' ? '90px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -1092,6 +966,7 @@ export default function CheckInventoryPage() {
                                                                 column.key === 'inventoryRemarks' ? '200px' :
                                                                   '160px',
                                           maxWidth: column.key === 'orderNo' ? '120px' :
+                                          column.key === 'itemList' ? '90px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -1135,148 +1010,196 @@ export default function CheckInventoryPage() {
           </TabsContent>
         </Tabs>
 
-        {/* Process Dialog */}
+        {/* Process Dialog — Scan -> Compare -> Preview/Edit -> Submit */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Check Inventory</DialogTitle>
-              <DialogDescription>Verify item availability for the order</DialogDescription>
+              <DialogTitle>{dialogStep === "scan" ? "Scan Items" : "Review & Confirm"}</DialogTitle>
+              <DialogDescription>
+                {dialogStep === "scan"
+                  ? "Scan each item's QR label, then enter its qty."
+                  : "Check the availability breakdown, edit any qty if needed, then submit."}
+              </DialogDescription>
             </DialogHeader>
+
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="orderNo">Order No.</Label>
-                <Input id="orderNo" value={selectedOrder?.orderNo || ""} disabled />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="companyName">Company Name</Label>
-                <Input id="companyName" value={selectedOrder?.companyName || ""} disabled />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="availability">Availability Status *</Label>
-                <Select value={availabilityStatus} onValueChange={setAvailabilityStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Available">Available</SelectItem>
-                    <SelectItem value="Not Available">Not Available</SelectItem>
-                    <SelectItem value="Partial">Partial</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="orderNo">Order No.</Label>
+                  <Input id="orderNo" value={selectedOrder?.orderNo || ""} disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="companyName">Company Name</Label>
+                  <Input id="companyName" value={selectedOrder?.companyName || ""} disabled />
+                </div>
               </div>
 
-              {availabilityStatus === "Available" && (
-                <div className="space-y-2">
-                  <Label htmlFor="remarks">Remarks</Label>
-                  <Textarea
-                    id="remarks"
-                    value={remarks}
-                    onChange={(e) => setRemarks(e.target.value)}
-                    placeholder="Enter remarks..."
-                  />
-                </div>
+              {dialogStep === "scan" && (
+                <>
+                  <QrScanner onScan={handleQrScan} onError={setScannerError} />
+                  {scannerError && <p className="text-sm text-destructive">{scannerError}</p>}
+
+                  <div className="space-y-2">
+                    <Label>Scanned Items ({scanRows.length})</Label>
+                    {scanRows.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No items scanned yet. Point the camera at each item's QR label.
+                      </p>
+                    ) : (
+                      <div className="border rounded-lg divide-y">
+                        {scanRows.map((row, index) => (
+                          <div key={row.serialNo} className="flex items-center gap-2 p-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{row.itemName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Code: {row.itemCode} &middot; Serial: {row.serialNo}
+                              </p>
+                            </div>
+                            <Input
+                              type="number"
+                              className="w-24"
+                              placeholder="Qty"
+                              value={row.qty}
+                              onChange={(e) => updateScanRowQty(index, e.target.value)}
+                            />
+                            <Button type="button" size="icon" variant="ghost" onClick={() => removeScanRow(index)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleCompare} disabled={scanRows.length === 0} className="gap-2">
+                      <ArrowLeftRight className="h-4 w-4" />
+                      Compare
+                    </Button>
+                  </div>
+                </>
               )}
 
-              {(availabilityStatus === "Partial" || availabilityStatus === "Not Available") && (
+              {dialogStep === "preview" && (
                 <>
-                  <div className="space-y-2">
-                    <Label htmlFor="customerDecision">Customer wants material as</Label>
-                    <Select
-                      value={partialDetails.customerDecision || ""}
-                      onValueChange={(value) => setPartialDetails({ ...partialDetails, customerDecision: value })}
+                  <div className="flex items-center gap-2">
+                    <Label className="mb-0">Result:</Label>
+                    <Badge
+                      variant={
+                        computedStatus === "Available" ? "default" : computedStatus === "Not Available" ? "destructive" : "secondary"
+                      }
                     >
-                      <SelectTrigger id="customerDecision">
-                        <SelectValue placeholder="Select option" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="When full material will available">When full material will available</SelectItem>
-                        <SelectItem value="Order cancel">Order cancel</SelectItem>
-                        <SelectItem value="Partial">Partial</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      {computedStatus}
+                    </Badge>
                   </div>
 
-                  {/* <div className="space-y-4">
-  <Label>Items Not Available</Label>
-  {unavailableItems.map((item, index) => (
-    <div key={index} className="flex gap-2 items-end">
-      <div className="flex-1">
-        <Label htmlFor={`itemName-${index}`}>Item Name {index + 1}</Label>
-        <Input
-          id={`itemName-${index}`}
-          value={item.name}
-          onChange={(e) => updateUnavailableItem(index, "name", e.target.value)}
-          placeholder="Enter item name"
-        />
-      </div>
-      <div className="w-24">
-        <Label htmlFor={`qty-${index}`}>QTY</Label>
-        <Input
-          id={`qty-${index}`}
-          type="number"
-          value={item.qty}
-          onChange={(e) => updateUnavailableItem(index, "qty", Number.parseInt(e.target.value) || 0)}
-          placeholder="0"
-        />
-      </div>
-      <Button 
-        type="button" 
-        size="sm" 
-        variant="outline" 
-        onClick={() => removeUnavailableItem(index)}
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
-    </div>
-  ))}
-  
-  <div className="space-y-2">
-    <Label htmlFor="totalQty">Total qty</Label>
-    <Input
-      type="number"
-      id="totalQty"
-      value={partialDetails.totalQty || ""}
-      placeholder="Will auto-calculate"
-      readOnly
-    />
-  </div>
-</div> */}
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="text-right">Ordered</TableHead>
+                          <TableHead className="text-right w-28">Scanned</TableHead>
+                          <TableHead className="text-right">Shortage</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {compareItems.map((it, index) => (
+                          <TableRow key={it.itemCode || it.itemName}>
+                            <TableCell>
+                              <p className="font-medium">{it.itemName}</p>
+                              <p className="text-xs text-muted-foreground">{it.itemCode || "no code"}</p>
+                            </TableCell>
+                            <TableCell className="text-right">{it.orderedQty}</TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                className="w-20 ml-auto text-right"
+                                value={it.scannedQty}
+                                onChange={(e) => updateCompareItemQty(index, e.target.value)}
+                              />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {it.shortageQty > 0 ? (
+                                <Badge variant="destructive">{it.shortageQty}</Badge>
+                              ) : (
+                                "0"
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {compareItems.some((it) => it.shortageQty > 0) && (
+                    <p className="text-xs text-muted-foreground">
+                      Shortage qty will go to Material Received pending, and an indent will be raised for it.
+                      Available qty goes to Pre-Invoice pending under the same order number.
+                    </p>
+                  )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="createdBy">Created by</Label>
-                    <Select
-                      value={partialDetails.createdBy || ""}
-                      onValueChange={(value) => setPartialDetails({ ...partialDetails, createdBy: value })}
-                    >
-                      <SelectTrigger id="createdBy">
-                        <SelectValue placeholder="Select person" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Sarita Baghel">Sarita Baghel</SelectItem>
-                        <SelectItem value="Khushi Khemani">Khushi Khemani</SelectItem>
-                        <SelectItem value="SATYA KUMARI OGREY">SATYA KUMARI OGREY</SelectItem>
-                        <SelectItem value="PRIYANKA VISHWAS">PRIYANKA VISHWAS</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {computedStatus !== "Available" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="customerDecision">Customer wants material as</Label>
+                      <Select value={customerWantsMaterialAs} onValueChange={setCustomerWantsMaterialAs}>
+                        <SelectTrigger id="customerDecision">
+                          <SelectValue placeholder="Select option" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="When full material will available">When full material will available</SelectItem>
+                          <SelectItem value="Order cancel">Order cancel</SelectItem>
+                          <SelectItem value="Partial">Partial</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="createdBy">Created by</Label>
+                      <Select value={createdByPerson} onValueChange={setCreatedByPerson}>
+                        <SelectTrigger id="createdBy">
+                          <SelectValue placeholder="Select person" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Sarita Baghel">Sarita Baghel</SelectItem>
+                          <SelectItem value="Khushi Khemani">Khushi Khemani</SelectItem>
+                          <SelectItem value="SATYA KUMARI OGREY">SATYA KUMARI OGREY</SelectItem>
+                          <SelectItem value="PRIYANKA VISHWAS">PRIYANKA VISHWAS</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="warehouseLocation">Warehouse location</Label>
+                      <Select value={warehouseLocationValue} onValueChange={setWarehouseLocationValue}>
+                        <SelectTrigger id="warehouseLocation">
+                          <SelectValue placeholder="Select location" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="C.G Warehouse">C.G Warehouse</SelectItem>
+                          <SelectItem value="NE Warehouse">NE Warehouse</SelectItem>
+                          <SelectItem value="Maniquip Store">Maniquip Store</SelectItem>
+                          <SelectItem value="Head Office">Head Office</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="warehouseLocation">Warehouse location</Label>
-                    <Select
-                      value={partialDetails.warehouseLocation || ""}
-                      onValueChange={(value) => setPartialDetails({ ...partialDetails, warehouseLocation: value })}
-                    >
-                      <SelectTrigger id="warehouseLocation">
-                        <SelectValue placeholder="Select location" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="C.G Warehouse">C.G Warehouse</SelectItem>
-                        <SelectItem value="NE Warehouse">NE Warehouse</SelectItem>
-                        <SelectItem value="Maniquip Store">Maniquip Store</SelectItem>
-                        <SelectItem value="Head Office">Head Office</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {compareItems.some((it) => it.shortageQty > 0) && (
+                    <div className="space-y-2">
+                      <Label htmlFor="leadTime">Material received lead time (days)</Label>
+                      <Input
+                        type="number"
+                        id="leadTime"
+                        value={leadTime}
+                        onChange={(e) => setLeadTime(e.target.value)}
+                        placeholder="Enter lead time in days"
+                      />
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="inventoryPhoto">Inventory Photo</Label>
@@ -1292,39 +1215,6 @@ export default function CheckInventoryPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="lineItemNumber">Line item number</Label>
-                    <Input
-                      type="number"
-                      id="lineItemNumber"
-                      value={partialDetails.lineItemNumber || ""}
-                      onChange={(e) => setPartialDetails({ ...partialDetails, lineItemNumber: e.target.value })}
-                      placeholder="Enter line item number"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="totalQty">Total qty</Label>
-                    <Input
-                      type="number"
-                      id="totalQty"
-                      value={partialDetails.totalQty || ""}
-                      onChange={(e) => setPartialDetails({ ...partialDetails, totalQty: e.target.value })}
-                      placeholder="Enter or auto-calculated"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="leadTime">Material received lead time</Label>
-                    <Input
-                      type="number"
-                      id="leadTime"
-                      value={partialDetails.leadTime || ""}
-                      onChange={(e) => setPartialDetails({ ...partialDetails, leadTime: e.target.value })}
-                      placeholder="Enter lead time in days"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
                     <Label htmlFor="remarks">Remarks</Label>
                     <Textarea
                       id="remarks"
@@ -1333,107 +1223,28 @@ export default function CheckInventoryPage() {
                       placeholder="Enter remarks..."
                     />
                   </div>
-                  <div className="space-y-4">
-                    <Label>Items Not Available</Label>
-                    {unavailableItems.map((item, index) => (
-                      <div key={index} className="flex gap-2 items-end">
-                        <div className="flex-1">
-                          <Label htmlFor={`itemName-${index}`}>Item Name {index + 1}</Label>
-                          <Input
-                            id={`itemName-${index}`}
-                            value={item.name}
-                            onChange={(e) => updateUnavailableItem(index, "name", e.target.value)}
-                            placeholder="Enter item name"
-                          />
-                        </div>
-                        <div className="w-24">
-                          <Label htmlFor={`qty-${index}`}>QTY</Label>
-                          <Input
-                            id={`qty-${index}`}
-                            type="number"
-                            value={item.qty}
-                            onChange={(e) => updateUnavailableItem(index, "qty", Number.parseInt(e.target.value) || 0)}
-                            placeholder="0"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => removeUnavailableItem(index)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
 
-                    {/* <div className="space-y-2">
-    <Label htmlFor="totalQty">Total qty</Label>
-    <Input
-      type="number"
-      id="totalQty"
-      value={partialDetails.totalQty || ""}
-      placeholder="Will auto-calculate"
-      readOnly
-    />
-  </div> */}
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setDialogStep("scan")} className="gap-2">
+                      <ScanLine className="h-4 w-4" />
+                      Back to Scan
+                    </Button>
+                    <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleSubmit} disabled={currentUser?.role === "user" || isSubmitting}>
+                      {isSubmitting ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                          Processing...
+                        </>
+                      ) : (
+                        "Submit"
+                      )}
+                    </Button>
                   </div>
-
-
-                  {/* {availabilityStatus === "Partial" && (
-            <div className="space-y-4">
-              {unavailableItems.map((item, index) => (
-                <div key={index} className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <Label htmlFor={`itemName-${index}`}>Item Name</Label>
-                    <Input
-                      id={`itemName-${index}`}
-                      value={item.name}
-                      onChange={(e) => updateUnavailableItem(index, "name", e.target.value)}
-                      placeholder="Enter item name"
-                    />
-                  </div>
-                  <div className="w-24">
-                    <Label htmlFor={`qty-${index}`}>QTY</Label>
-                    <Input
-                      id={`qty-${index}`}
-                      type="number"
-                      value={item.qty}
-                      onChange={(e) => updateUnavailableItem(index, "qty", Number.parseInt(e.target.value) || 0)}
-                      placeholder="0"
-                    />
-                  </div>
-                  <Button type="button" size="sm" variant="outline" onClick={() => removeUnavailableItem(index)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              <Button type="button" variant="outline" onClick={addUnavailableItem}>
-                Add Unavailable Item
-              </Button>
-            </div>
-          )} */}
                 </>
               )}
-
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!availabilityStatus || currentUser?.role === "user" || isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "Submit"
-                  )}
-                </Button>
-              </div>
             </div>
           </DialogContent>
         </Dialog>
@@ -1501,6 +1312,44 @@ export default function CheckInventoryPage() {
                 )}
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Item List Dialog */}
+        <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Item List</DialogTitle>
+            </DialogHeader>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>Item Name</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {itemListDialogItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      No items
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  itemListDialogItems.map((item: any, idx: number) => (
+                    <TableRow key={idx}>
+                      <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                      <TableCell>{item.item_name}</TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+            <div className="flex justify-end">
+              <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

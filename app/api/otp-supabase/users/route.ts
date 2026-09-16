@@ -6,7 +6,7 @@ export async function GET() {
     const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from("otp_users")
-      .select("id, username, full_name, role, assigned_steps, warehouse_page_access, location, is_active, created_at, updated_at")
+      .select("id, username, full_name, password_hash, role, assigned_steps, warehouse_page_access, location, is_active, created_at, updated_at")
       .order("created_at", { ascending: true })
 
     if (error) {

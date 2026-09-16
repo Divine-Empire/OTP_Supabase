@@ -20,10 +20,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings } from "lucide-react"
+import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 
-import { mapOrderRowToUI } from "@/lib/otp-utils"
+import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -41,26 +41,7 @@ const pendingColumns = [
   { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
   { key: "referenceName", label: "Reference Name", searchable: true },
   { key: "email", label: "Email", searchable: true },
-  { key: "itemName1", label: "Item Name 1", searchable: true },
-  { key: "quantity1", label: "Quantity 1", searchable: true },
-  { key: "itemName2", label: "Item Name 2", searchable: true },
-  { key: "quantity2", label: "Quantity 2", searchable: true },
-  { key: "itemName3", label: "Item Name 3", searchable: true },
-  { key: "quantity3", label: "Quantity 3", searchable: true },
-  { key: "itemName4", label: "Item Name 4", searchable: true },
-  { key: "quantity4", label: "Quantity 4", searchable: true },
-  { key: "itemName5", label: "Item Name 5", searchable: true },
-  { key: "quantity5", label: "Quantity 5", searchable: true },
-  { key: "itemName6", label: "Item Name 6", searchable: true },
-  { key: "quantity6", label: "Quantity 6", searchable: true },
-  { key: "itemName7", label: "Item Name 7", searchable: true },
-  { key: "quantity7", label: "Quantity 7", searchable: true },
-  { key: "itemName8", label: "Item Name 8", searchable: true },
-  { key: "quantity8", label: "Quantity 8", searchable: true },
-  { key: "itemName9", label: "Item Name 9", searchable: true },
-  { key: "quantity9", label: "Quantity 9", searchable: true },
-  { key: "itemName10", label: "Item Name 10", searchable: true },
-  { key: "quantity10", label: "Quantity 10", searchable: true },
+  { key: "itemList", label: "Item List", searchable: false },
   { key: "transportMode", label: "Transport Mode", searchable: true },
   { key: "freightType", label: "Freight Type", searchable: true },
   { key: "destination", label: "Destination", searchable: true },
@@ -71,16 +52,6 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
-  { key: "totalDispatch", label: "Total Dispatch", searchable: true },
-  { key: "quantityDelivered", label: "Quantity Delivered", searchable: true },
-  { key: "orderCancel", label: "Order Cancel", searchable: true },
-  { key: "pendingDeliveryQty", label: "Pending Delivery Qty", searchable: true },
-  { key: "pendingDispatchQty", label: "Pending Dispatch Qty", searchable: true },
-  { key: "materialReturn", label: "Material Return", searchable: true },
-  { key: "deliveryStatus", label: "Delivery Status", searchable: true },
-  { key: "dispatchStatus", label: "Dispatch Status", searchable: true },
-  { key: "dispatchCompleteDate", label: "Dispatch Complete Date", searchable: true },
-  { key: "deliveryCompleteDate", label: "Delivery Complete Date", searchable: true },
 ]
 
 // Column definitions for History tab (includes 3 additional columns)
@@ -111,6 +82,8 @@ export default function OrderAcceptablePage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [viewOrder, setViewOrder] = useState<any>(null)
+  const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
+  const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -125,7 +98,7 @@ export default function OrderAcceptablePage() {
   )
   const [historyCreFilter, setHistoryCreFilter] = useState("all")
   const [creName, setCreName] = useState("")
-  const [creFilter, setCreFilter] = useState("all") 
+  const [creFilter, setCreFilter] = useState("all")
   const { user: currentUser } = useAuth()
 
   // Fetch pending orders from Supabase API
@@ -134,11 +107,11 @@ export default function OrderAcceptablePage() {
     setError(null)
 
     try {
-      const response = await fetch("/api/otp-supabase/orders?stage=order_acceptable&status=pending")
+      const response = await fetch("/api/otp-supabase/order-acceptable?status=pending")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
-        const ordersData = result.data.map(mapOrderRowToUI)
+        const ordersData = result.data.map(mapOrderAcceptableRowToUI)
         setOrders(ordersData)
       } else {
         setOrders([])
@@ -155,11 +128,11 @@ export default function OrderAcceptablePage() {
   // Fetch history orders from Supabase API
   const fetchProcessedOrders = async () => {
     try {
-      const response = await fetch("/api/otp-supabase/orders?stage=order_acceptable&status=history")
+      const response = await fetch("/api/otp-supabase/order-acceptable?status=history")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
-        return result.data.map(mapOrderRowToUI)
+        return result.data.map(mapOrderAcceptableRowToUI)
       }
       return []
     } catch (err) {
@@ -175,7 +148,7 @@ export default function OrderAcceptablePage() {
   // Filter orders based on search term
   const filterOrdersByUserRole = (orders: any[], currentUser: any) => {
     if (!currentUser) return orders;
-    
+
     // Super admin and admin see all orders
     if (currentUser.role === "super_admin" || currentUser.role === "admin") {
       return orders;
@@ -185,10 +158,10 @@ export default function OrderAcceptablePage() {
     if (currentUser.assignedSteps?.includes("all") || currentUser.assignedSteps?.includes("order-acceptable")) {
       return orders;
     }
-    
+
     // Otherwise filter by CRE Name matching username or full name
-    return orders.filter(order => 
-      !order.creName || 
+    return orders.filter(order =>
+      !order.creName ||
       order.creName.toLowerCase() === (currentUser.username || "").toLowerCase() ||
       (currentUser.fullName && order.creName.toLowerCase() === currentUser.fullName.toLowerCase())
     );
@@ -255,21 +228,21 @@ const filteredProcessedOrders = useMemo(() => {
 
   // const filteredOrders = useMemo(() => {
   //   let filtered = orders
-  
+
   //   if (searchTerm) {
   //     filtered = filtered.filter((order) => {
   //       const searchableFields = pendingColumns
   //         .filter((col) => col.searchable)
   //         .map((col) => String(order[col.key] || "").toLowerCase())
-  
+
   //       return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
   //     })
   //   }
-  
+
   //   if (pendingCreFilter && pendingCreFilter !== "all") {
   //     filtered = filtered.filter((order) => order.creName === pendingCreFilter)
   //   }
-  
+
   //   return filtered
   // }, [orders, searchTerm, pendingCreFilter])
 
@@ -328,9 +301,9 @@ const filteredProcessedOrders = useMemo(() => {
       alert("Please fill in all required fields");
       return;
     }
-    
+
     setIsSubmitting(true);
-    
+
     try {
       const acceptanceData = {
         isAcceptable,
@@ -340,9 +313,9 @@ const filteredProcessedOrders = useMemo(() => {
         processedAt: new Date().toISOString(),
         processedBy: currentUser?.fullName || currentUser?.username || "Admin",
       };
-  
+
       const success = await updateOrderStatus(selectedOrder, acceptanceData);
-  
+
       if (success) {
         setIsDialogOpen(false);
         setSelectedOrder(null);
@@ -351,7 +324,7 @@ const filteredProcessedOrders = useMemo(() => {
         setCheckedItems([]);
         setRemarks("");
         setCreName("");
-        
+
         alert(`Order ${selectedOrder.orderNo} has been updated successfully as: ${isAcceptable}`);
       }
     } catch (error) {
@@ -361,24 +334,20 @@ const filteredProcessedOrders = useMemo(() => {
       setIsSubmitting(false);
     }
   };
-  
-  // 2. Fix the updateOrderStatus function - correct the data structure
+
+  // Submits Stage 1 (Order Acceptable) — inserts a row into
+  // otp_orders_acceptable, which is what moves this order from Pending to History.
   const updateOrderStatus = async (order: any, acceptanceData: any) => {
     try {
-      const updateResponse = await fetch("/api/otp-supabase/orders", {
-        method: "PATCH",
+      const updateResponse = await fetch("/api/otp-supabase/order-acceptable", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderNo: order.orderNo,
-          stage: "order_acceptable",
-          stageData: {
-            is_order_acceptable: acceptanceData.isAcceptable,
-            acceptance_checklist: acceptanceData.isAcceptable === "Yes" ? acceptanceData.checklist.join(", ") : "",
-            remark: acceptanceData.remarks || "",
-            created_by: currentUser?.fullName || currentUser?.username || "Admin",
-            actual_date: new Date().toISOString(),
-          },
-          orderUpdates: acceptanceData.creName ? { cre_name: acceptanceData.creName } : {},
+          orderId: order.orderId || order.id,
+          isAcceptable: acceptanceData.isAcceptable,
+          checklist: acceptanceData.checklist,
+          remarks: acceptanceData.remarks || "",
+          processedBy: acceptanceData.processedBy,
         }),
       })
 
@@ -421,6 +390,12 @@ const renderCellContent = (order: any, columnKey: string) => {
       ) : (
         <Badge variant="secondary">{value || "N/A"}</Badge>
       )
+    case "itemList":
+      return (
+        <Button size="icon" variant="ghost" onClick={() => handleViewItemList(order)} title="View item list">
+          <Eye className="h-4 w-4" />
+        </Button>
+      )
     case "status":
       return <Badge variant="outline">{value}</Badge>
     case "isOrderAcceptable":
@@ -438,6 +413,11 @@ const renderCellContent = (order: any, columnKey: string) => {
   const handleView = (order: any) => {
     setViewOrder(order)
     setViewDialogOpen(true)
+  }
+
+  const handleViewItemList = (order: any) => {
+    setItemListDialogItems(order.rawItems || [])
+    setItemListDialogOpen(true)
   }
 
   if (loading) {
@@ -499,7 +479,7 @@ const renderCellContent = (order: any, columnKey: string) => {
               className="pl-10"
             />
           </div>
-          
+
           {/* Conditional filter dropdowns */}
           {currentTab === "pending" && (
             <div className="min-w-[200px]">
@@ -518,7 +498,7 @@ const renderCellContent = (order: any, columnKey: string) => {
               </Select>
             </div>
           )}
-          
+
           {currentTab === "history" && (
             <div className="min-w-[200px]">
               <Select value={historyCreFilter} onValueChange={setHistoryCreFilter}>
@@ -538,8 +518,8 @@ const renderCellContent = (order: any, columnKey: string) => {
           )}
         </div>
 
-        <Tabs 
-          defaultValue="pending" 
+        <Tabs
+          defaultValue="pending"
           className="space-y-4"
           onValueChange={(value) => setCurrentTab(value)}
         >
@@ -604,11 +584,12 @@ const renderCellContent = (order: any, columnKey: string) => {
                   {pendingColumns
                     .filter((col) => visiblePendingColumns[col.key])
                     .map((column) => (
-                      <TableHead 
+                      <TableHead
                         key={column.key}
                         className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
-                        style={{ 
-                          width: column.key === 'actions' ? '120px' : 
+                        style={{
+                          width: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                  column.key === 'timestamp' ? '130px' :
                                  column.key === 'orderNo' ? '120px' :
                                  column.key === 'creName' ? '150px' :
@@ -619,7 +600,8 @@ const renderCellContent = (order: any, columnKey: string) => {
                                  column.key === 'billingAddress' ? '200px' :
                                  column.key === 'shippingAddress' ? '200px' :
                                  '160px',
-                          minWidth: column.key === 'actions' ? '120px' : 
+                          minWidth: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                    column.key === 'timestamp' ? '130px' :
                                    column.key === 'orderNo' ? '120px' :
                                    column.key === 'creName' ? '150px' :
@@ -630,7 +612,8 @@ const renderCellContent = (order: any, columnKey: string) => {
                                    column.key === 'billingAddress' ? '200px' :
                                    column.key === 'shippingAddress' ? '200px' :
                                    '160px',
-                          maxWidth: column.key === 'actions' ? '120px' : 
+                          maxWidth: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                    column.key === 'timestamp' ? '130px' :
                                    column.key === 'orderNo' ? '120px' :
                                    column.key === 'creName' ? '150px' :
@@ -651,7 +634,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                 </TableRow>
               </TableHeader>
             </Table>
-            
+
             <div className="overflow-y-auto" style={{ maxHeight: '500px' }}>
               <Table>
                 <TableBody>
@@ -660,11 +643,12 @@ const renderCellContent = (order: any, columnKey: string) => {
                       {pendingColumns
                         .filter((col) => visiblePendingColumns[col.key])
                         .map((column) => (
-                          <TableCell 
-                            key={column.key} 
+                          <TableCell
+                            key={column.key}
                             className="border-b px-4 py-3 align-top"
-                            style={{ 
-                              width: column.key === 'actions' ? '120px' : 
+                            style={{
+                              width: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                      column.key === 'timestamp' ? '130px' :
                                      column.key === 'orderNo' ? '120px' :
                                      column.key === 'creName' ? '150px' :
@@ -675,7 +659,8 @@ const renderCellContent = (order: any, columnKey: string) => {
                                      column.key === 'billingAddress' ? '200px' :
                                      column.key === 'shippingAddress' ? '200px' :
                                      '160px',
-                              minWidth: column.key === 'actions' ? '120px' : 
+                              minWidth: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                        column.key === 'timestamp' ? '130px' :
                                        column.key === 'orderNo' ? '120px' :
                                        column.key === 'creName' ? '150px' :
@@ -686,7 +671,8 @@ const renderCellContent = (order: any, columnKey: string) => {
                                        column.key === 'billingAddress' ? '200px' :
                                        column.key === 'shippingAddress' ? '200px' :
                                        '160px',
-                              maxWidth: column.key === 'actions' ? '120px' : 
+                              maxWidth: column.key === 'actions' ? '120px' :
+                                 column.key === 'itemList' ? '90px' :
                                        column.key === 'timestamp' ? '130px' :
                                        column.key === 'orderNo' ? '120px' :
                                        column.key === 'creName' ? '150px' :
@@ -791,11 +777,12 @@ const renderCellContent = (order: any, columnKey: string) => {
                     {historyColumns
                       .filter((col) => visibleHistoryColumns[col.key])
                       .map((column) => (
-                        <TableHead 
+                        <TableHead
                           key={column.key}
                           className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
-                          style={{ 
+                          style={{
                             width: column.key === 'timestamp' ? '130px' :
+                            column.key === 'itemList' ? '90px' :
                                    column.key === 'orderNo' ? '120px' :
                                    column.key === 'creName' ? '150px' :
                                    column.key === 'quotationNo' ? '150px' :
@@ -809,6 +796,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                                    column.key === 'remarks' ? '200px' :
                                    '160px',
                             minWidth: column.key === 'timestamp' ? '130px' :
+                            column.key === 'itemList' ? '90px' :
                                      column.key === 'orderNo' ? '120px' :
                                      column.key === 'creName' ? '150px' :
                                      column.key === 'quotationNo' ? '150px' :
@@ -822,6 +810,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                                      column.key === 'remarks' ? '200px' :
                                      '160px',
                             maxWidth: column.key === 'timestamp' ? '130px' :
+                            column.key === 'itemList' ? '90px' :
                                      column.key === 'orderNo' ? '120px' :
                                      column.key === 'creName' ? '150px' :
                                      column.key === 'quotationNo' ? '150px' :
@@ -844,7 +833,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                   </TableRow>
                 </TableHeader>
               </Table>
-              
+
               <div className="overflow-y-auto" style={{ maxHeight: '500px' }}>
                 <Table>
                   <TableBody>
@@ -853,11 +842,12 @@ const renderCellContent = (order: any, columnKey: string) => {
                         {historyColumns
                           .filter((col) => visibleHistoryColumns[col.key])
                           .map((column) => (
-                            <TableCell 
-                              key={column.key} 
+                            <TableCell
+                              key={column.key}
                               className="border-b px-4 py-3 align-top"
-                              style={{ 
+                              style={{
                                 width: column.key === 'timestamp' ? '130px' :
+                                column.key === 'itemList' ? '90px' :
                                        column.key === 'orderNo' ? '120px' :
                                        column.key === 'creName' ? '150px' :
                                        column.key === 'quotationNo' ? '150px' :
@@ -871,6 +861,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                                        column.key === 'remarks' ? '200px' :
                                        '160px',
                                 minWidth: column.key === 'timestamp' ? '130px' :
+                                column.key === 'itemList' ? '90px' :
                                          column.key === 'orderNo' ? '120px' :
                                          column.key === 'creName' ? '150px' :
                                          column.key === 'quotationNo' ? '150px' :
@@ -884,6 +875,7 @@ const renderCellContent = (order: any, columnKey: string) => {
                                          column.key === 'remarks' ? '200px' :
                                          '160px',
                                 maxWidth: column.key === 'timestamp' ? '130px' :
+                                column.key === 'itemList' ? '90px' :
                                          column.key === 'orderNo' ? '120px' :
                                          column.key === 'creName' ? '150px' :
                                          column.key === 'quotationNo' ? '150px' :
@@ -1009,8 +1001,8 @@ const renderCellContent = (order: any, columnKey: string) => {
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-<Button 
-  onClick={handleSubmit} 
+<Button
+  onClick={handleSubmit}
   disabled={!isAcceptable || isSubmitting || (currentUser?.role === "user")}
 >
   {isSubmitting ? (
@@ -1082,8 +1074,44 @@ const renderCellContent = (order: any, columnKey: string) => {
             )}
           </DialogContent>
         </Dialog>
+        {/* Item List Dialog */}
+        <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Item List</DialogTitle>
+            </DialogHeader>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>Item Name</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {itemListDialogItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      No items
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  itemListDialogItems.map((item: any, idx: number) => (
+                    <TableRow key={idx}>
+                      <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                      <TableCell>{item.item_name}</TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+            <div className="flex justify-end">
+              <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </MainLayout>
   )
 }
-

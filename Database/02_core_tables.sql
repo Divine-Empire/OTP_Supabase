@@ -34,7 +34,7 @@ ON CONFLICT (stage_key) DO NOTHING;
 -- Replaces ORDER-DISPATCH master attributes & state indicators
 CREATE TABLE IF NOT EXISTS otp_orders (
   id                        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  order_no                  TEXT UNIQUE NOT NULL DEFAULT generate_order_no(),
+  order_no                  TEXT UNIQUE NOT NULL DEFAULT otp_generate_order_no(),
   quotation_no              TEXT,
   timestamp                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   company_name              TEXT,
@@ -201,7 +201,7 @@ CREATE TABLE IF NOT EXISTS otp_senior_approval (
 -- 8. DISPATCHES TABLE (replaces DISPATCH-DELIVERY rows)
 CREATE TABLE IF NOT EXISTS otp_dispatches (
   id                            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  dispatch_no                   TEXT UNIQUE NOT NULL DEFAULT generate_dispatch_no(),
+  dispatch_no                   TEXT UNIQUE NOT NULL DEFAULT otp_generate_dispatch_no(),
   order_id                      UUID NOT NULL REFERENCES otp_orders(id) ON DELETE CASCADE,
   order_no                      TEXT NOT NULL,
   timestamp                     TIMESTAMPTZ DEFAULT NOW(),

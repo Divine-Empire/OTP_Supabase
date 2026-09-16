@@ -4,7 +4,7 @@
 -- ==============================================================================
 
 -- 1. VIEW: Order Full View (Replaces ORDER-DISPATCH sheet row queries)
-CREATE OR REPLACE VIEW v_otp_order_full AS
+CREATE OR REPLACE VIEW otp_v_order_full AS
 SELECT
   o.id,
   o.order_no,
@@ -116,7 +116,7 @@ LEFT JOIN otp_senior_approval sa   ON sa.order_id = o.id;
 
 
 -- 2. VIEW: Dispatch Full View (Replaces DISPATCH-DELIVERY sheet row queries)
-CREATE OR REPLACE VIEW v_otp_dispatch_full AS
+CREATE OR REPLACE VIEW otp_v_dispatch_full AS
 SELECT
   d.id,
   d.dispatch_no,
@@ -253,7 +253,7 @@ LEFT JOIN otp_update_delivery ud   ON ud.dispatch_id = d.id;
 
 
 -- 3. VIEW: Dashboard KPI Aggregations
-CREATE OR REPLACE VIEW v_otp_dashboard_kpis AS
+CREATE OR REPLACE VIEW otp_v_dashboard_kpis AS
 SELECT
   -- Order metrics
   COUNT(DISTINCT o.id) AS total_orders,
