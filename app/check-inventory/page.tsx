@@ -42,6 +42,29 @@ interface CompareItem {
   shortageQty: number
 }
 
+// Shared key for matching a scanned item against an order's item list.
+//
+// item_code is NOT a reliable match key here, even when it looks present
+// and valid on both sides: otp_orders.items.item_code is resolved from
+// lto_items (Lead-To-Order's own catalog), while the QR's item_code comes
+// from Purchase-FMS-Supabase's separate, unsynced item master — two
+// independent catalogs that don't share codes for the same physical item
+// (confirmed: lto_items has "ManiQuip-BAR BENDING MACHINE MQB-52 PRO" as
+// BTH12553, while Purchase-FMS-Supabase has no code for it at all, so its
+// QR carries the literal placeholder "N/A" — see qr-scanner.tsx). Matching
+// by code was previously the default, with a fallback to name only when
+// one side's code was missing/"N/A" — but that still fails the moment
+// exactly one side happens to have a real (just different-system) code,
+// which is the common case, not the exception.
+//
+// item_name is the only field both systems populate consistently for the
+// same item, so it's the sole match key. Used by both the scan-time
+// belongs-to-this-order check and the compare-time qty grouping so they
+// can't drift apart again.
+function itemMatchKey(name?: string | null) {
+  return (name || "").trim().toLowerCase()
+}
+
 
 
 // Column definitions for Pending tab — same base columns as Order Acceptable
@@ -302,11 +325,7 @@ export default function CheckInventoryPage() {
   // Each QR scan appends one row (one physical unit's serial); the same
   // serial scanned twice is ignored rather than double-counted. Qty per row
   // is filled in by hand afterwards — scan count itself is not the qty.
-  //
-  // Reject anything not on this order's own item list: match by item_code
-  // (case/whitespace-insensitive), falling back to item_name when the
-  // order-side item_code couldn't be resolved (enrichOrderItemsWithCode
-  // leaves it null when lto_items has no matching row).
+  // Rejects anything not on this order's own item list (see itemMatchKey).
   const handleQrScan = (raw: string) => {
     const parsed = parseItemQr(raw)
     if (!parsed) {
@@ -315,13 +334,8 @@ export default function CheckInventoryPage() {
     }
 
     const orderItems: any[] = selectedOrder?.rawItems || []
-    const scannedCode = parsed.itemCode.trim().toLowerCase()
-    const scannedName = parsed.itemName.trim().toLowerCase()
-    const belongsToOrder = orderItems.some((it) => {
-      const orderCode = (it.item_code || "").trim().toLowerCase()
-      const orderName = (it.item_name || "").trim().toLowerCase()
-      return orderCode ? orderCode === scannedCode : orderName === scannedName
-    })
+    const scannedKey = itemMatchKey(parsed.itemName)
+    const belongsToOrder = orderItems.some((it) => itemMatchKey(it.item_name) === scannedKey)
 
     if (!belongsToOrder) {
       const message = `"${parsed.itemName}" (${parsed.itemCode}) is not part of this order's item list — scan rejected.`
@@ -348,16 +362,23 @@ export default function CheckInventoryPage() {
   // Groups scanned rows by item_code, sums their qty, and compares against
   // the order's expected item list -> per-item shortage breakdown +
   // overall status. Moves the dialog into the editable preview step.
+  //
+  // Must use the same "is this code actually usable" rule as handleQrScan's
+  // belongsToOrder check above — a bare `it.item_code || it.item_name` was
+  // treating the literal "N/A" placeholder (unregistered items in
+  // Purchase-FMS-Supabase's item master — see qr-scanner.tsx) as a real,
+  // matchable code, so a scanned row keyed "N/A" never matched an order
+  // item keyed by its real code and silently compared as 0 scanned.
   const handleCompare = () => {
     const scannedByCode = new Map<string, number>()
     for (const row of scanRows) {
-      const key = row.itemCode || row.itemName
+      const key = itemMatchKey(row.itemName)
       scannedByCode.set(key, (scannedByCode.get(key) || 0) + (Number(row.qty) || 0))
     }
 
     const orderItems: any[] = selectedOrder?.rawItems || []
     const items: CompareItem[] = orderItems.map((it) => {
-      const key = it.item_code || it.item_name
+      const key = itemMatchKey(it.item_name)
       const ordered = Number(it.quantity) || 0
       const scanned = scannedByCode.get(key) || 0
       return {

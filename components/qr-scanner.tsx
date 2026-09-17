@@ -12,10 +12,14 @@ import { Camera, X } from "lucide-react"
 //
 // serialNo itself is generated there as `SN-${vendorCode}/${encodedDate}/${seq}`
 // (stage-pages/serial-generation/serial-generation.tsx, the `prefix` const)
-// — it already contains "/" characters. So a naive split into exactly 3
-// parts truncates it (and silently shifts/loses the rest). Only itemName
-// and itemCode are guaranteed slash-free; everything from the 3rd segment
-// onward belongs to serialNo and must be rejoined with "/".
+// — it already contains "/" characters, and always starts with "SN-".
+// itemCode can *also* contain "/": when an item has no code registered in
+// Purchase-FMS-Supabase's item master, it falls back to the literal string
+// "N/A" (baked into the actual QR content there, not just its on-screen
+// label — see `itemCodeMap[itemName] || "N/A"` in serial-generation.tsx).
+// So a fixed part-count split is unsafe in both directions; instead find
+// where the "SN-" serial segment starts and treat everything between
+// itemName and that point as itemCode (rejoining it if it had its own "/").
 export interface ScannedQrItem {
   itemName: string
   itemCode: string
@@ -25,8 +29,11 @@ export interface ScannedQrItem {
 export function parseItemQr(raw: string): ScannedQrItem | null {
   const parts = raw.split("/").map((p) => p.trim())
   if (parts.length < 3) return null
-  const [itemName, itemCode, ...serialParts] = parts
-  const serialNo = serialParts.join("/")
+  const itemName = parts[0]
+  let serialStart = parts.findIndex((p, i) => i >= 2 && p.startsWith("SN-"))
+  if (serialStart === -1) serialStart = 2 // unrecognized serial format — fall back to the plain 3-part shape
+  const itemCode = parts.slice(1, serialStart).join("/")
+  const serialNo = parts.slice(serialStart).join("/")
   if (!itemName || !itemCode || !serialNo) return null
   return { itemName, itemCode, serialNo }
 }

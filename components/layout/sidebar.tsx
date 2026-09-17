@@ -11,7 +11,6 @@ import {
   LayoutDashboard,
   ClipboardCheck,
   Package,
-  UserCheck,
   FileText,
   Receipt,
   FileSpreadsheet,
@@ -51,12 +50,6 @@ const menuItems = [
     label: "Material Received",
     icon: Package,
     step: "material-received",
-  },
-  {
-    href: "/senior-approval",
-    label: "Senior Approval",
-    icon: UserCheck,
-    step: "senior-approval",
   },
   {
     href: "/disp-form",
