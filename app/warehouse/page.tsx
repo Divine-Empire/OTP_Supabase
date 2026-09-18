@@ -114,7 +114,7 @@ export default function WarehousePage() {
     { key: "quotationCopy2", label: "Quotation Copy", searchable: true },
     {
       key: "acceptanceCopy",
-      label: "Acceptance Copy (Purchase Order Only)",
+      label: "Acceptance Copy",
       searchable: true,
     },
     { key: "offer", label: "Offer", searchable: true },

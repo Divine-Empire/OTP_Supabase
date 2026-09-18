@@ -24,6 +24,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 
 import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
+import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -47,7 +48,7 @@ const pendingColumns = [
   { key: "destination", label: "Destination", searchable: true },
   { key: "poNumber", label: "Po Number", searchable: true },
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
-  { key: "acceptanceCopy", label: "Acceptance Copy (Purchase Order Only)", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
   { key: "offerShow", label: "Offer Show", searchable: true },
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
@@ -575,7 +576,26 @@ const renderCellContent = (order: any, columnKey: string) => {
       </div>
     </CardHeader>
     <CardContent>
-      <div className="border rounded-lg overflow-hidden">
+      {/* Mobile: one card per record */}
+      <div className="md:hidden space-y-3">
+        {pendingOrders.map((order, idx) => (
+          <MobileRecordCard
+            key={order.id || order.orderId || order.orderNo || idx}
+            columns={pendingColumns}
+            visibleColumns={visiblePendingColumns}
+            record={order}
+            renderCellContent={renderCellContent}
+          />
+        ))}
+        {pendingOrders.length === 0 && (
+          <p className="text-center text-muted-foreground py-8">
+            {searchTerm ? "No orders match your search criteria" : "No pending orders found in Google Sheets"}
+          </p>
+        )}
+      </div>
+
+      {/* Desktop: table */}
+      <div className="hidden md:block border rounded-lg overflow-hidden">
         <div className="overflow-x-auto">
           <div style={{ minWidth: 'max-content' }}>
             <Table>
@@ -768,7 +788,27 @@ const renderCellContent = (order: any, columnKey: string) => {
           <span className="ml-2">Loading processed orders...</span>
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <>
+        {/* Mobile: one card per record */}
+        <div className="md:hidden space-y-3">
+          {filteredProcessedOrders.map((order, idx) => (
+            <MobileRecordCard
+              key={order.id || order.orderId || order.orderNo || idx}
+              columns={historyColumns}
+              visibleColumns={visibleHistoryColumns}
+              record={order}
+              renderCellContent={renderCellContent}
+            />
+          ))}
+          {filteredProcessedOrders.length === 0 && (
+            <p className="text-center text-muted-foreground py-8">
+              {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+            </p>
+          )}
+        </div>
+
+        {/* Desktop: table */}
+        <div className="hidden md:block border rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <div style={{ minWidth: 'max-content' }}>
               <Table>
@@ -913,6 +953,7 @@ const renderCellContent = (order: any, columnKey: string) => {
             </div>
           </div>
         </div>
+        </>
       )}
     </CardContent>
   </Card>

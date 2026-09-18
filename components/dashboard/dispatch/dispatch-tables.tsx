@@ -116,7 +116,7 @@ const ALL_DISPATCH_COLUMNS = [
   { key: 'destination', label: 'Destination', defaultVisible: false },
   { key: 'poNumber', label: 'Po Number', defaultVisible: false },
   { key: 'quotationCopyField', label: 'Quotation Copy', defaultVisible: false },
-  { key: 'acceptanceCopy', label: 'Acceptance Copy (Purchase Order Only)', defaultVisible: false },
+  { key: 'acceptanceCopy', label: 'Acceptance Copy', defaultVisible: false },
   { key: 'offer', label: 'Offer', defaultVisible: false },
   { key: 'conveyedForRegistration', label: 'Conveyed For Registration Form', defaultVisible: false },
   { key: 'qty', label: 'Qty', defaultVisible: false },

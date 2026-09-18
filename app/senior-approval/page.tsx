@@ -62,7 +62,7 @@ const pendingColumns = [
   { key: "destination", label: "Destination", searchable: true },
   { key: "poNumber", label: "Po Number", searchable: true },
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
-  { key: "acceptanceCopy", label: "Acceptance Copy (Purchase Order Only)", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
   { key: "offerShow", label: "Offer Show", searchable: true },
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },

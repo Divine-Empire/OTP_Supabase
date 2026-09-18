@@ -40,7 +40,7 @@ const allSteps = [
   { id: "check-inventory", label: "Check Inventory" },
   { id: "material-received", label: "Material Received" },
   { id: "senior-approval", label: "Senior Approval" },
-  { id: "disp-form", label: "DISP Form" },
+  { id: "pre-invoice", label: "Pre Invoice" },
   { id: "make-invoice", label: "Make Invoice" },
   { id: "make-pi", label: "Make PI" },
   { id: "warehouse", label: "Warehouse" },

@@ -52,10 +52,10 @@ const menuItems = [
     step: "material-received",
   },
   {
-    href: "/disp-form",
+    href: "/pre-invoice",
     label: "Pre Invoice Details",
     icon: FileText,
-    step: "disp-form",
+    step: "pre-invoice",
   },
   {
     href: "/make-invoice",

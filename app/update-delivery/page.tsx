@@ -55,7 +55,7 @@ export default function DeliveryPage() {
     { key: "destination", label: "Destination", searchable: true },
     { key: "poNumber", label: "Po Number", searchable: true },
     { key: "quotationCopy2", label: "Quotation Copy", searchable: true },
-    { key: "acceptanceCopy", label: "Acceptance Copy (Purchase Order Only)", searchable: true },
+    { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
     { key: "offer", label: "Offer", searchable: true },
     { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
     { key: "qty", label: "Qty", searchable: true },

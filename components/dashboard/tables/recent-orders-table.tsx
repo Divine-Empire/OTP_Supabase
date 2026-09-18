@@ -115,7 +115,7 @@ const ALL_COLUMNS = [
   { key: 'destination', label: 'Destination', defaultVisible: false },
   { key: 'poNumber', label: 'Po Number', defaultVisible: false },
   { key: 'quotationCopy', label: 'Quotation Copy', defaultVisible: false },
-  { key: 'acceptanceCopy', label: 'Acceptance Copy (Purchase Order Only)', defaultVisible: false },
+  { key: 'acceptanceCopy', label: 'Acceptance Copy', defaultVisible: false },
   { key: 'offerShow', label: 'Offer Show', defaultVisible: false },
   { key: 'conveyedForRegistration', label: 'Conveyed For Registration Form', defaultVisible: false },
   { key: 'totalOrderQty', label: 'Total Order Qty', defaultVisible: false },

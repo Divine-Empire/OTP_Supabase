@@ -109,7 +109,7 @@ export default function CalibrationPage() {
     { key: "poNumber", label: "Po Number", searchable: true },
     { key: "invoiceNumber", label: "Invoice-No.", searchable: true },
     { key: "quotationCopy2", label: "Invoice Upload", searchable: true },
-    { key: "acceptanceCopy", label: "Acceptance Copy (Purchase Order Only)", searchable: true },
+    { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
     { key: "offer", label: "Offer", searchable: true },
     { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
     { key: "qty", label: "Qty", searchable: true },

@@ -159,6 +159,40 @@ export function mapCheckInventoryRowToUI(row: any): any {
   }
 }
 
+// Maps a row from /api/otp-supabase/pre-invoice (against otp_pre_invoice_queue,
+// joined to its parent otp_orders) into the UI field names pre-invoice/page.tsx
+// expects. One otp_orders row can produce more than one queue row over time
+// (one per wave — Check Inventory's available qty, later Material Received's
+// partial receipts), so orderNo/companyName come from the row's own `order`,
+// not assumed unique per order.
+export function mapPreInvoiceRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    queueId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: row.quotation_number || order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    email: order.email || "",
+    sourceStage: row.source_stage || "",
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: row.items || [],
+
+    invoiceNumber: row.invoice_number || "",
+    invoiceCopyUrl: row.invoice_copy_url || "",
+    createdBy: row.created_by || "",
+    invoicedAt: formatDateTime(row.invoiced_at),
+    status: row.status || "",
+  }
+}
+
 export function mapOrderRowToUI(row: any): any {
   if (!row) return {}
 

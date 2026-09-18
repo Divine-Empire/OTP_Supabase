@@ -23,14 +23,33 @@ import {
 import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
-import { QrScanner, parseItemQr, type ScannedQrItem } from "@/components/qr-scanner"
+import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
+import { MobileRecordCard } from "@/components/mobile-record-card"
 
-// One row per QR scan (one physical unit's serial), item identified straight
-// from the QR string — qty is filled in by hand afterwards, not implied by
-// scan count.
-interface ScanRow extends ScannedQrItem {
+// One row per distinct item (grouped by itemMatchKey), not per QR scan.
+// Purchase-FMS-Supabase's serial format is "SN-<vendorCode>/<encodedDate>/<seq>"
+// (see qr-scanner.tsx) — items that get an individually-numbered label (seq
+// present, e.g. ".../001", ".../002") are countable physical units: each
+// distinct serial scanned becomes its own sub-row under the item, and qty
+// is just the count of those sub-rows (auto, not hand-edited — removing a
+// sub-row is how you undo a bad scan). Items whose label has no per-unit
+// sequence (seq empty, e.g. ".../BF0GAF/") aren't individually serialized —
+// re-scanning the same label just re-confirms the same item, so there are
+// no sub-rows and qty is still filled in by hand, same as before.
+interface ScanRow {
+  itemName: string
+  itemCode: string
   qty: string
+  serials: string[] // numbered sub-rows for this item; empty for a non-serialized (bulk) item
+}
+
+// The trailing segment of the serial (after the last "/") is the per-unit
+// sequence number. Present -> this label uniquely identifies one physical
+// unit. Empty -> the label is shared across the whole batch/bulk item.
+function isNumberedSerial(serialNo: string): boolean {
+  const lastSegment = serialNo.split("/").pop() || ""
+  return lastSegment.trim() !== ""
 }
 
 // Per-item compare result: order's expected qty vs what got scanned+entered.
@@ -40,6 +59,7 @@ interface CompareItem {
   orderedQty: number
   scannedQty: number
   shortageQty: number
+  serials: string[] // carried through from the matching ScanRow, for traceability in otp_check_inventory.items
 }
 
 // Shared key for matching a scanned item against an order's item list.
@@ -92,7 +112,7 @@ const pendingColumns = [
   { key: "destination", label: "Destination", searchable: true },
   { key: "poNumber", label: "Po Number", searchable: true },
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
-  { key: "acceptanceCopy", label: "Acceptance Copy (Purchase Order Only)", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
   { key: "offerShow", label: "Offer Show", searchable: true },
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
@@ -345,18 +365,59 @@ export default function CheckInventoryPage() {
     }
 
     setScannerError(null)
+    const key = itemMatchKey(parsed.itemName)
+    const numbered = isNumberedSerial(parsed.serialNo)
+
     setScanRows((prev) => {
-      if (prev.some((r) => r.serialNo === parsed.serialNo)) return prev // already scanned
-      return [...prev, { ...parsed, qty: "" }]
+      const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
+
+      if (groupIndex === -1) {
+        // First scan of this item.
+        const newGroup: ScanRow = {
+          itemName: parsed.itemName,
+          itemCode: parsed.itemCode,
+          qty: numbered ? "1" : "",
+          serials: numbered ? [parsed.serialNo] : [],
+        }
+        return [...prev, newGroup]
+      }
+
+      const group = prev[groupIndex]
+      if (!numbered) return prev // bulk item re-scanned — already have this item's row, nothing to add
+
+      if (group.serials.includes(parsed.serialNo)) return prev // same physical unit scanned twice — ignore
+
+      const serials = [...group.serials, parsed.serialNo]
+      const next = [...prev]
+      next[groupIndex] = { ...group, serials, qty: String(serials.length) }
+      return next
     })
   }
 
+  // Bulk (non-serialized) items only — their qty can't come from a scan
+  // count, so it's typed in by hand. Numbered items never call this; their
+  // qty is always the count of serial sub-rows.
   const updateScanRowQty = (index: number, qty: string) => {
     setScanRows((prev) => prev.map((r, i) => (i === index ? { ...r, qty } : r)))
   }
 
+  // Removes an entire item row (bulk items, which have no sub-rows to peel off).
   const removeScanRow = (index: number) => {
     setScanRows((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // Removes one scanned serial from a numbered item's row and recomputes
+  // its qty; if that was the last serial, the whole row goes with it.
+  const removeScanSerial = (groupIndex: number, serialIndex: number) => {
+    setScanRows((prev) => {
+      const group = prev[groupIndex]
+      if (!group) return prev
+      const serials = group.serials.filter((_, i) => i !== serialIndex)
+      if (serials.length === 0) return prev.filter((_, i) => i !== groupIndex)
+      const next = [...prev]
+      next[groupIndex] = { ...group, serials, qty: String(serials.length) }
+      return next
+    })
   }
 
   // Groups scanned rows by item_code, sums their qty, and compares against
@@ -370,23 +431,29 @@ export default function CheckInventoryPage() {
   // matchable code, so a scanned row keyed "N/A" never matched an order
   // item keyed by its real code and silently compared as 0 scanned.
   const handleCompare = () => {
-    const scannedByCode = new Map<string, number>()
+    const scannedByCode = new Map<string, { qty: number; serials: string[] }>()
     for (const row of scanRows) {
       const key = itemMatchKey(row.itemName)
-      scannedByCode.set(key, (scannedByCode.get(key) || 0) + (Number(row.qty) || 0))
+      const existing = scannedByCode.get(key)
+      scannedByCode.set(key, {
+        qty: (existing?.qty || 0) + (Number(row.qty) || 0),
+        serials: [...(existing?.serials || []), ...row.serials],
+      })
     }
 
     const orderItems: any[] = selectedOrder?.rawItems || []
     const items: CompareItem[] = orderItems.map((it) => {
       const key = itemMatchKey(it.item_name)
       const ordered = Number(it.quantity) || 0
-      const scanned = scannedByCode.get(key) || 0
+      const matched = scannedByCode.get(key)
+      const scanned = matched?.qty || 0
       return {
         itemCode: it.item_code || "",
         itemName: it.item_name,
         orderedQty: ordered,
         scannedQty: scanned,
         shortageQty: Math.max(ordered - scanned, 0),
+        serials: matched?.serials || [],
       }
     })
 
@@ -456,6 +523,7 @@ export default function CheckInventoryPage() {
             item_name: it.itemName,
             ordered_qty: it.orderedQty,
             scanned_qty: it.scannedQty,
+            serials: it.serials,
           })),
           customerWantsMaterialAs: computedStatus !== "Available" ? customerWantsMaterialAs || null : null,
           createdBy: createdByPerson || currentUser?.fullName || currentUser?.username || "Admin",
@@ -671,7 +739,26 @@ export default function CheckInventoryPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="border rounded-lg overflow-hidden">
+                {/* Mobile: one card per record */}
+                <div className="md:hidden space-y-3">
+                  {pendingOrders.map((order, idx) => (
+                    <MobileRecordCard
+                      key={order.id || order.orderId || order.orderNo || idx}
+                      columns={pendingColumns}
+                      visibleColumns={visiblePendingColumns}
+                      record={order}
+                      renderCellContent={renderCellContent}
+                    />
+                  ))}
+                  {pendingOrders.length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">
+                      {searchTerm ? "No orders match your search criteria" : "No pending orders found in Google Sheets"}
+                    </p>
+                  )}
+                </div>
+
+                {/* Desktop: table */}
+                <div className="hidden md:block border rounded-lg overflow-hidden">
                   <div className="overflow-x-auto">
                     <div style={{ minWidth: 'max-content' }}>
                       <Table>
@@ -886,7 +973,27 @@ export default function CheckInventoryPage() {
                     <span className="ml-2">Loading processed orders...</span>
                   </div>
                 ) : (
-                  <div className="border rounded-lg overflow-hidden">
+                  <>
+                  {/* Mobile: one card per record */}
+                  <div className="md:hidden space-y-3">
+                    {filteredProcessedOrders.map((order, idx) => (
+                      <MobileRecordCard
+                        key={order.id || order.orderId || order.orderNo || idx}
+                        columns={historyColumns}
+                        visibleColumns={visibleHistoryColumns}
+                        record={order}
+                        renderCellContent={renderCellContent}
+                      />
+                    ))}
+                    {filteredProcessedOrders.length === 0 && (
+                      <p className="text-center text-muted-foreground py-8">
+                        {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Desktop: table */}
+                  <div className="hidden md:block border rounded-lg overflow-hidden">
                     <div className="overflow-x-auto">
                       <div style={{ minWidth: 'max-content' }}>
                         <Table>
@@ -1031,6 +1138,7 @@ export default function CheckInventoryPage() {
                       </div>
                     </div>
                   </div>
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -1075,23 +1183,48 @@ export default function CheckInventoryPage() {
                     ) : (
                       <div className="border rounded-lg divide-y">
                         {scanRows.map((row, index) => (
-                          <div key={row.serialNo} className="flex items-center gap-2 p-2">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">{row.itemName}</p>
-                              <p className="text-xs text-muted-foreground">
-                                Code: {row.itemCode} &middot; Serial: {row.serialNo}
-                              </p>
+                          <div key={itemMatchKey(row.itemName)}>
+                            <div className="flex items-center gap-2 p-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{row.itemName}</p>
+                                <p className="text-xs text-muted-foreground">Code: {row.itemCode}</p>
+                              </div>
+                              {row.serials.length > 0 ? (
+                                // Numbered item — qty is just the sub-row count, not hand-edited.
+                                <span className="w-24 text-center text-sm font-medium">{row.qty} pcs</span>
+                              ) : (
+                                <Input
+                                  type="number"
+                                  className="w-24"
+                                  placeholder="Qty"
+                                  value={row.qty}
+                                  onChange={(e) => updateScanRowQty(index, e.target.value)}
+                                />
+                              )}
+                              <Button type="button" size="icon" variant="ghost" onClick={() => removeScanRow(index)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
-                            <Input
-                              type="number"
-                              className="w-24"
-                              placeholder="Qty"
-                              value={row.qty}
-                              onChange={(e) => updateScanRowQty(index, e.target.value)}
-                            />
-                            <Button type="button" size="icon" variant="ghost" onClick={() => removeScanRow(index)}>
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {row.serials.length > 0 && (
+                              <div className="pl-6 pb-2 space-y-1">
+                                {row.serials.map((serialNo, serialIndex) => (
+                                  <div key={serialNo} className="flex items-center gap-2 pr-2">
+                                    <p className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+                                      Serial: {serialNo}
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-6 w-6"
+                                      onClick={() => removeScanSerial(index, serialIndex)}
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

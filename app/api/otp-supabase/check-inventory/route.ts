@@ -120,6 +120,7 @@ interface ScanItemPayload {
   item_name: string
   ordered_qty: number
   scanned_qty: number
+  serials?: string[]
 }
 
 // Best-effort cross-system call into Purchase-FMS-Supabase's own
@@ -209,11 +210,22 @@ export async function POST(request: Request) {
     const supabase = getSupabaseAdmin()
 
     // Normalize + compute shortage per item, and the overall status.
+    // `serials` (the individually-numbered QR labels scanned for this item,
+    // if any — see check-inventory/page.tsx) rides along into
+    // otp_check_inventory.items purely for traceability; it isn't used by
+    // shortage/pre-invoice-queue logic below, which only ever needs qty.
     const normalized = items.map((it) => {
       const ordered = Number(it.ordered_qty) || 0
       const scanned = Number(it.scanned_qty) || 0
       const shortage = Math.max(ordered - scanned, 0)
-      return { item_code: it.item_code, item_name: it.item_name, ordered_qty: ordered, scanned_qty: scanned, shortage_qty: shortage }
+      return {
+        item_code: it.item_code,
+        item_name: it.item_name,
+        ordered_qty: ordered,
+        scanned_qty: scanned,
+        shortage_qty: shortage,
+        serials: it.serials || [],
+      }
     })
 
     const totalShortage = normalized.reduce((sum, it) => sum + it.shortage_qty, 0)
