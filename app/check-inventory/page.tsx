@@ -517,8 +517,14 @@ export default function CheckInventoryPage() {
         )
       case "itemList":
         return (
-          <Button size="icon" variant="ghost" onClick={() => handleViewItemList(order)} title="View item list">
-            <Eye className="h-4 w-4" />
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            onClick={() => handleViewItemList(order)}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View Items
           </Button>
         )
       case "availabilityStatus":
@@ -679,7 +685,7 @@ export default function CheckInventoryPage() {
                                   className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
                                   style={{
                                     width: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -692,7 +698,7 @@ export default function CheckInventoryPage() {
                                                         column.key === 'remarks' ? '200px' :
                                                           '160px',
                                     minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -705,7 +711,7 @@ export default function CheckInventoryPage() {
                                                         column.key === 'remarks' ? '200px' :
                                                           '160px',
                                     maxWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                       column.key === 'orderNo' ? '120px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
@@ -741,7 +747,7 @@ export default function CheckInventoryPage() {
                                       className="border-b px-4 py-3 align-top"
                                       style={{
                                         width: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -754,7 +760,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'remarks' ? '200px' :
                                                               '160px',
                                         minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -767,7 +773,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'remarks' ? '200px' :
                                                               '160px',
                                         maxWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                           column.key === 'orderNo' ? '120px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
@@ -894,7 +900,7 @@ export default function CheckInventoryPage() {
                                     className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
                                     style={{
                                       width: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -908,7 +914,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'inventoryRemarks' ? '200px' :
                                                               '160px',
                                       minWidth: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -922,7 +928,7 @@ export default function CheckInventoryPage() {
                                                             column.key === 'inventoryRemarks' ? '200px' :
                                                               '160px',
                                       maxWidth: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
+                                      column.key === 'itemList' ? '130px' :
                                         column.key === 'quotationNo' ? '150px' :
                                           column.key === 'companyName' ? '250px' :
                                             column.key === 'contactPersonName' ? '180px' :
@@ -959,7 +965,7 @@ export default function CheckInventoryPage() {
                                         className="border-b px-4 py-3 align-top"
                                         style={{
                                           width: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '90px' :
+                                          column.key === 'itemList' ? '130px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -973,7 +979,7 @@ export default function CheckInventoryPage() {
                                                                 column.key === 'inventoryRemarks' ? '200px' :
                                                                   '160px',
                                           minWidth: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '90px' :
+                                          column.key === 'itemList' ? '130px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -987,7 +993,7 @@ export default function CheckInventoryPage() {
                                                                 column.key === 'inventoryRemarks' ? '200px' :
                                                                   '160px',
                                           maxWidth: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '90px' :
+                                          column.key === 'itemList' ? '130px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :

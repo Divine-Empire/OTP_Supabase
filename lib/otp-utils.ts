@@ -114,6 +114,8 @@ export function mapCheckInventoryRowToUI(row: any): any {
     orderId: order.id,
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(order.created_at),
+    creName: order.crm_name || "",
     companyName: order.company_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -125,6 +127,7 @@ export function mapCheckInventoryRowToUI(row: any): any {
     transportMode: order.transport_mode || "",
     destination: order.destination || "",
     poNumber: order.po_number || "",
+    quotationCopy: order.quotation_copy || "",
     acceptanceCopy: order.acceptance_file_upload || "",
     amount: order.amount_with_tax || 0,
 
