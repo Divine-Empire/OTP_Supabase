@@ -190,6 +190,86 @@ export function mapPreInvoiceRowToUI(row: any): any {
     createdBy: row.created_by || "",
     invoicedAt: formatDateTime(row.invoiced_at),
     status: row.status || "",
+
+    calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
+    calibrationType: row.calibration_type || "",
+    transportId: row.transport_id || "",
+    gstNumber: row.gst_number || "",
+    vehicleNumber: row.vehicle_number || "",
+    dispatchLocation: row.dispatch_location || "",
+    directDispatchDetails: row.direct_dispatch_details || "",
+    paymentAttachmentUrl: row.payment_attachment_url || "",
+    srnAttachmentUrl: row.srn_attachment_url || "",
+    remarks: row.remarks || "",
+  }
+}
+
+// Maps a row from /api/otp-supabase/material-received (against
+// otp_material_shortage, joined to its parent otp_orders) into the UI field
+// names material-received/page.tsx expects. One row per short item — see
+// Database/17_check_inventory_scan_flow.sql.
+// Pending Material Received rows are grouped by order (see
+// app/api/otp-supabase/material-received/route.ts GET) — one card per
+// order, carrying every currently outstanding otp_material_shortage row
+// so they can all be scanned together, same as Check Inventory's own
+// order-level scan flow.
+export function mapMaterialReceivedPendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const shortageItems = row.shortageItems || []
+
+  return {
+    id: order.id,
+    orderId: order.id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(order.created_at),
+    creName: order.crm_name || "",
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+
+    // Reference table in the scan dialog + Item List dialog both read
+    // this shape: {item_name, quantity} per outstanding shortage item.
+    rawItems: shortageItems.map((it: any) => ({
+      item_name: it.item_name,
+      item_code: it.item_code,
+      quantity: it.indented_qty,
+    })),
+    shortageRows: shortageItems,
+  }
+}
+
+// History rows stay item-level — each otp_material_shortage row already
+// processed is its own record of one receiving attempt (found vs. still
+// short at that point), not rolled up per order.
+export function mapMaterialReceivedHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    shortageId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+
+    itemCode: row.item_code || "",
+    itemName: row.item_name || "",
+    indentedQty: Number(row.indented_qty) || 0,
+    receivedQty: Number(row.received_qty) || 0,
+    remainingQty: Number(row.remaining_qty) || 0,
+    pfmsIndentNo: row.pfms_indent_no || "",
+    warehouseLocation: row.warehouse_location || "",
+    remark: row.remark || "",
+    status: row.status || "",
+    updatedAt: formatDateTime(row.updated_at),
   }
 }
 

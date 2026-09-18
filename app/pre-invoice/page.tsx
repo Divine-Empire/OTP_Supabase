@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +19,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Search, Settings, Eye, Plus, Trash2 } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapPreInvoiceRowToUI } from "@/lib/otp-utils"
 import { MobileRecordCard } from "@/components/mobile-record-card"
@@ -41,9 +42,55 @@ const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
+  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
+  { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "transportId", label: "Transport Id/Name", searchable: true },
+  { key: "gstNumber", label: "GST Number", searchable: true },
+  { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
+  { key: "dispatchLocation", label: "Dispatch Location", searchable: true },
+  { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
+  { key: "paymentAttachment", label: "Payment Attachment", searchable: false },
+  { key: "srnAttachment", label: "SRN Attachment", searchable: false },
+  { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
 ]
+
+// One row per physical unit for serialized items (see check-inventory's
+// isNumberedSerial) — Qty is always 1 for those. Bulk items keep one row
+// with the full qty and an empty serial. `isPrefilled` rows came straight
+// from Check Inventory's own scan data, so their Item Name is locked
+// (read-only) to keep it matching what was actually scanned — only rows
+// added by hand via "Add Item" (isPrefilled: false) get an editable name.
+interface PreInvoiceItemRow {
+  name: string
+  itemCode: string
+  qty: number
+  serialNo: string
+  isPrefilled: boolean
+  installation: "Yes" | "No"
+}
+
+function expandQueueItemsToRows(rawItems: any[]): PreInvoiceItemRow[] {
+  const rows: PreInvoiceItemRow[] = []
+  for (const it of rawItems || []) {
+    const serials: string[] = Array.isArray(it.serials) ? it.serials : []
+    const qty = Number(it.qty) || 0
+    if (serials.length > 0) {
+      const usable = serials.slice(0, qty)
+      usable.forEach((serialNo: string) =>
+        rows.push({ name: it.item_name, itemCode: it.item_code || "", qty: 1, serialNo, isPrefilled: true, installation: "No" })
+      )
+      const remaining = qty - usable.length
+      if (remaining > 0) {
+        rows.push({ name: it.item_name, itemCode: it.item_code || "", qty: remaining, serialNo: "", isPrefilled: true, installation: "No" })
+      }
+    } else {
+      rows.push({ name: it.item_name, itemCode: it.item_code || "", qty, serialNo: "", isPrefilled: true, installation: "No" })
+    }
+  }
+  return rows
+}
 
 export default function PreInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -52,8 +99,18 @@ export default function PreInvoicePage() {
   const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
-  const [invoiceNumber, setInvoiceNumber] = useState("")
-  const [invoiceCopyFile, setInvoiceCopyFile] = useState<File | null>(null)
+  const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
+  const [calibrationRequired, setCalibrationRequired] = useState("")
+  const [calibrationType, setCalibrationType] = useState("")
+  const [transportId, setTransportId] = useState("")
+  const [gstNumber, setGstNumber] = useState("")
+  const [vehicleNumber, setVehicleNumber] = useState("")
+  const [dispatchLocation, setDispatchLocation] = useState("")
+  const [directDispatchDetails, setDirectDispatchDetails] = useState("")
+  const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null)
+  const [preInvoiceRemarks, setPreInvoiceRemarks] = useState("")
+  const [items, setItems] = useState<PreInvoiceItemRow[]>([])
+  const [dispatchLocationOptions, setDispatchLocationOptions] = useState<string[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
@@ -109,6 +166,17 @@ export default function PreInvoicePage() {
     fetchOrders()
   }, [])
 
+  useEffect(() => {
+    fetch("/api/otp-supabase/dropdowns?category=dispatch_location")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && Array.isArray(result.data)) {
+          setDispatchLocationOptions(result.data.map((d: any) => d.value))
+        }
+      })
+      .catch((err) => console.error("Error fetching dispatch location options:", err))
+  }, [])
+
   const handleProcessedTabClick = async () => {
     await fetchProcessedOrders()
   }
@@ -148,8 +216,17 @@ export default function PreInvoicePage() {
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
-    setInvoiceNumber("")
-    setInvoiceCopyFile(null)
+    setCalibrationRequired("")
+    setCalibrationType("")
+    setTransportId("")
+    setGstNumber("")
+    setVehicleNumber("")
+    setDispatchLocation("")
+    setDirectDispatchDetails("")
+    setPaymentAttachmentFile(null)
+    setSrnAttachmentFile(null)
+    setPreInvoiceRemarks("")
+    setItems(expandQueueItemsToRows(order.rawItems || []))
     setIsDialogOpen(true)
   }
 
@@ -158,26 +235,50 @@ export default function PreInvoicePage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits the Pre-Invoice stage — captures the Invoice Number (+ optional
-  // copy) on the otp_pre_invoice_queue row, moving it from Pending to
-  // History. This Invoice Number becomes the tracking key every stage
-  // after Pre-Invoice will use.
+  const addItemRow = () => {
+    setItems((prev) => [...prev, { name: "", itemCode: "", qty: 1, serialNo: "", isPrefilled: false, installation: "No" }])
+  }
+
+  const removeItemRow = (index: number) => {
+    setItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const updateItemRow = (
+    index: number,
+    field: "name" | "qty" | "serialNo" | "installation",
+    value: string | number
+  ) => {
+    setItems((prev) => prev.map((it, i) => (i === index ? { ...it, [field]: value } : it)))
+  }
+
+  // Submits the Pre-Invoice stage — saves the dispatch-prep details onto
+  // the otp_pre_invoice_queue row and flips its status to 'invoiced',
+  // moving it from Pending to History. The Invoice Number itself is no
+  // longer captured here — that's a later, not-yet-built stage's job on
+  // this same row — so status is the sole pending/history signal now.
   const handleSubmit = async () => {
-    if (!selectedOrder || !invoiceNumber.trim()) {
-      alert("Invoice Number is required")
-      return
-    }
+    if (!selectedOrder) return
 
     setIsSubmitting(true)
     try {
-      let invoiceCopyUrl = ""
-      if (invoiceCopyFile) {
+      let paymentAttachmentUrl = ""
+      if (paymentAttachmentFile) {
         const formData = new FormData()
-        formData.append("file", invoiceCopyFile)
-        formData.append("folder", "pre-invoice")
+        formData.append("file", paymentAttachmentFile)
+        formData.append("folder", "pre-invoice-payment")
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
-        if (uploadJson.success) invoiceCopyUrl = uploadJson.url
+        if (uploadJson.success) paymentAttachmentUrl = uploadJson.url
+      }
+
+      let srnAttachmentUrl = ""
+      if (srnAttachmentFile) {
+        const formData = new FormData()
+        formData.append("file", srnAttachmentFile)
+        formData.append("folder", "pre-invoice-srn")
+        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+        const uploadJson = await uploadRes.json()
+        if (uploadJson.success) srnAttachmentUrl = uploadJson.url
       }
 
       const response = await fetch("/api/otp-supabase/pre-invoice", {
@@ -185,18 +286,65 @@ export default function PreInvoicePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: selectedOrder.queueId || selectedOrder.id,
-          invoiceNumber: invoiceNumber.trim(),
-          invoiceCopyUrl,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
+          items: items.map((it) => ({
+            item_code: it.itemCode,
+            item_name: it.name,
+            qty: Number(it.qty) || 0,
+            serial_no: it.serialNo || "",
+          })),
+          calibrationRequired: calibrationRequired || "",
+          calibrationType: calibrationRequired === "YES" ? calibrationType : "",
+          transportId,
+          gstNumber,
+          vehicleNumber,
+          dispatchLocation,
+          directDispatchDetails,
+          paymentAttachmentUrl,
+          srnAttachmentUrl,
+          remarks: preInvoiceRemarks,
         }),
       })
       const result = await response.json()
 
       if (result.success) {
+        // Items marked Installation=Yes each become one row in
+        // sss_service_installation (existing legacy table/route — SI-001,
+        // SI-002... generated there). Best-effort: a failure here doesn't
+        // undo the Pre-Invoice submission that already succeeded above.
+        const installationItems = items.filter((it) => it.installation === "Yes")
+        let installationMessage = ""
+        if (installationItems.length > 0) {
+          try {
+            const siRes = await fetch("/api/otp-supabase/service-installation", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                orderNo: selectedOrder.orderNo,
+                companyName: selectedOrder.companyName,
+                contactPersonName: selectedOrder.contactPersonName,
+                contactPersonNo: selectedOrder.contactNumber,
+                items: installationItems.map((it) => ({
+                  itemName: it.name,
+                  qty: it.qty,
+                  serial: it.serialNo,
+                })),
+              }),
+            })
+            const siResult = await siRes.json()
+            installationMessage = siResult.success
+              ? `\n\n${installationItems.length} item(s) logged in Service Installation.`
+              : `\n\nFailed to log items in Service Installation: ${siResult.error}`
+          } catch (siErr) {
+            console.error("Error submitting to service-installation:", siErr)
+            installationMessage = "\n\nFailed to log items in Service Installation system."
+          }
+        }
+
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} moved to Pre-Invoice History with Invoice Number ${invoiceNumber.trim()}`)
+        alert(`Order ${selectedOrder.orderNo} moved to Pre-Invoice History${installationMessage}`)
       } else {
         throw new Error(result.error || "Update failed")
       }
@@ -237,8 +385,26 @@ export default function PreInvoicePage() {
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
+      case "paymentAttachment":
+        return order.paymentAttachmentUrl ? (
+          <a href={order.paymentAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "srnAttachment":
+        return order.srnAttachmentUrl ? (
+          <a href={order.srnAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
+      case "calibrationRequired":
+        return value ? <Badge variant={value === "YES" ? "default" : "secondary"}>{value}</Badge> : ""
       default:
         return value || ""
     }
@@ -560,10 +726,10 @@ export default function PreInvoicePage() {
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Process Pre-Invoice</DialogTitle>
-              <DialogDescription>Enter the Invoice Number raised for this order's available quantity</DialogDescription>
+              <DialogDescription>Enter the dispatch details for this order's available quantity</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -577,30 +743,222 @@ export default function PreInvoicePage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="invoiceNumber">Invoice Number *</Label>
-                <Input
-                  id="invoiceNumber"
-                  value={invoiceNumber}
-                  onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="Enter invoice number"
-                />
+              {/* Row 1: Calibration Required, Dispatch Location, Calibration Type */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="calibration">Calibration Certificate Required</Label>
+                  <Select value={calibrationRequired} onValueChange={setCalibrationRequired}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="YES">YES</SelectItem>
+                      <SelectItem value="NO">NO</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="dispatchLocation">Dispatch Location</Label>
+                  <Select value={dispatchLocation} onValueChange={setDispatchLocation}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select dispatch location" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dispatchLocationOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {opt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {calibrationRequired === "YES" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="calibrationType">Calibration Type</Label>
+                    <Select value={calibrationType} onValueChange={setCalibrationType}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select calibration type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="LAB">LAB</SelectItem>
+                        <SelectItem value="Surevey Instruments">Survey Instruments</SelectItem>
+                        <SelectItem value="Both">Both</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Row 2: Transport Id/Name, GST Number, Vehicle Number */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="transportId">Transport Id/Name</Label>
+                  <Input
+                    id="transportId"
+                    value={transportId}
+                    onChange={(e) => setTransportId(e.target.value)}
+                    placeholder="Enter transport id/name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="gstNumber">GST Number</Label>
+                  <Input
+                    id="gstNumber"
+                    value={gstNumber}
+                    onChange={(e) => setGstNumber(e.target.value)}
+                    placeholder="Enter GST Number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vehicleNumber">Vehicle Number</Label>
+                  <Input
+                    id="vehicleNumber"
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value)}
+                    placeholder="Enter Vehicle Number"
+                  />
+                </div>
+              </div>
+
+              {/* Row 3: Direct Dispatch Details, Remarks */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="directDispatch">Direct Dispatch Details</Label>
+                  <Input
+                    id="directDispatch"
+                    value={directDispatchDetails}
+                    onChange={(e) => setDirectDispatchDetails(e.target.value)}
+                    placeholder="Enter direct dispatch details"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="preInvoiceRemarks">Remarks</Label>
+                  <Input
+                    id="preInvoiceRemarks"
+                    value={preInvoiceRemarks}
+                    onChange={(e) => setPreInvoiceRemarks(e.target.value)}
+                    placeholder="Enter any remarks..."
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="invoiceCopy">Invoice Copy (optional)</Label>
-                <Input
-                  id="invoiceCopy"
-                  type="file"
-                  onChange={(e) => setInvoiceCopyFile(e.target.files?.[0] || null)}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>Items (Total: {items.length})</Label>
+                  <Button type="button" size="sm" variant="outline" onClick={addItemRow}>
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Item
+                  </Button>
+                </div>
+
+                <div className="border rounded-md overflow-hidden">
+                  <Table>
+                    <TableHeader className="bg-muted/50">
+                      <TableRow>
+                        <TableHead className="w-[30%] font-semibold">Item Name</TableHead>
+                        <TableHead className="w-[25%] font-semibold">Serial No</TableHead>
+                        <TableHead className="w-[15%] font-semibold text-center">Qty</TableHead>
+                        <TableHead className="w-[20%] font-semibold text-center">Installation</TableHead>
+                        <TableHead className="w-[10%] font-semibold text-center">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((item, index) => (
+                        <TableRow key={index} className="hover:bg-muted/30">
+                          <TableCell className="p-2">
+                            <Input
+                              value={item.name}
+                              onChange={(e) => updateItemRow(index, "name", e.target.value)}
+                              placeholder="Enter item name"
+                              className="h-9"
+                              disabled={item.isPrefilled}
+                              readOnly={item.isPrefilled}
+                            />
+                          </TableCell>
+                          <TableCell className="p-2">
+                            <Input
+                              value={item.serialNo}
+                              onChange={(e) => updateItemRow(index, "serialNo", e.target.value)}
+                              placeholder="Serial No"
+                              className="h-9 text-xs"
+                            />
+                          </TableCell>
+                          <TableCell className="p-2 text-center">
+                            <Input
+                              type="number"
+                              value={item.qty}
+                              onChange={(e) => updateItemRow(index, "qty", Number.parseInt(e.target.value) || 0)}
+                              placeholder="0"
+                              className="h-9 text-center w-full min-w-[60px]"
+                            />
+                          </TableCell>
+                          <TableCell className="p-2 text-center">
+                            <Select
+                              value={item.installation}
+                              onValueChange={(val) => updateItemRow(index, "installation", val)}
+                            >
+                              <SelectTrigger className="h-9">
+                                <SelectValue placeholder="No" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Yes">Yes</SelectItem>
+                                <SelectItem value="No">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="p-2 text-center">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => removeItemRow(index)}
+                              className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {items.length === 0 && (
+                  <div className="text-center py-4 text-muted-foreground border border-dashed rounded-md">
+                    No items added. Click "Add Item" to begin.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="paymentDetails">Payment Details (Attachment) - In case of Advance</Label>
+                  <Input
+                    id="paymentDetails"
+                    type="file"
+                    onChange={(e) => setPaymentAttachmentFile(e.target.files?.[0] || null)}
+                  />
+                  {paymentAttachmentFile && (
+                    <p className="text-sm text-muted-foreground">Selected: {paymentAttachmentFile.name}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="srnAttachment">SRN Attachment</Label>
+                  <Input
+                    id="srnAttachment"
+                    type="file"
+                    onChange={(e) => setSrnAttachmentFile(e.target.files?.[0] || null)}
+                  />
+                  {srnAttachmentFile && (
+                    <p className="text-sm text-muted-foreground">Selected: {srnAttachmentFile.name}</p>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={!invoiceNumber.trim() || isSubmitting}>
+                <Button onClick={handleSubmit} disabled={isSubmitting}>
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />

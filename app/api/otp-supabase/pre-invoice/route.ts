@@ -7,11 +7,12 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 //          Check Inventory's available-qty submission creates one; a future
 //          Material Received partial-receipt submission will create more
 //          for the same order).
-// History: otp_pre_invoice_queue.status = 'invoiced'.
-//
-// The Invoice Number captured here becomes the tracking key for every
-// stage after this one — this route doesn't do anything with it beyond
-// storing it; downstream stages are built separately.
+// History: otp_pre_invoice_queue.status = 'invoiced', set on Submit here —
+//          this stage no longer captures the Invoice Number itself (that
+//          moved to a later, not-yet-built stage), so status is the sole
+//          pending/history signal now, same as every other stage in this
+//          pipeline. invoice_number/invoice_copy_url stay on the table,
+//          nullable, for that future stage to fill in on this same row.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -36,18 +37,38 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { id, invoiceNumber, invoiceCopyUrl, createdBy } = body as {
+    const {
+      id,
+      createdBy,
+      items,
+      calibrationRequired,
+      calibrationType,
+      transportId,
+      gstNumber,
+      vehicleNumber,
+      dispatchLocation,
+      directDispatchDetails,
+      paymentAttachmentUrl,
+      srnAttachmentUrl,
+      remarks,
+    } = body as {
       id: string
-      invoiceNumber: string
-      invoiceCopyUrl?: string
       createdBy?: string
+      items?: { item_code: string; item_name: string; qty: number; serial_no?: string }[]
+      calibrationRequired?: "YES" | "NO" | ""
+      calibrationType?: string
+      transportId?: string
+      gstNumber?: string
+      vehicleNumber?: string
+      dispatchLocation?: string
+      directDispatchDetails?: string
+      paymentAttachmentUrl?: string
+      srnAttachmentUrl?: string
+      remarks?: string
     }
 
-    if (!id || !invoiceNumber) {
-      return NextResponse.json(
-        { success: false, error: "Missing id or invoiceNumber" },
-        { status: 400 }
-      )
+    if (!id) {
+      return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 })
     }
 
     const supabase = getSupabaseAdmin()
@@ -55,11 +76,23 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("otp_pre_invoice_queue")
       .update({
-        invoice_number: invoiceNumber,
-        invoice_copy_url: invoiceCopyUrl || null,
         created_by: createdBy || null,
         status: "invoiced",
         invoiced_at: new Date().toISOString(),
+        // Items get saved back finalized (per-serial rows the warehouse
+        // person confirmed/adjusted in the Pre-Invoice dialog), replacing
+        // the lump-qty breakdown Check Inventory originally queued.
+        ...(items ? { items } : {}),
+        calibration_required: calibrationRequired === "YES" ? true : calibrationRequired === "NO" ? false : null,
+        calibration_type: calibrationType || null,
+        transport_id: transportId || null,
+        gst_number: gstNumber || null,
+        vehicle_number: vehicleNumber || null,
+        dispatch_location: dispatchLocation || null,
+        direct_dispatch_details: directDispatchDetails || null,
+        payment_attachment_url: paymentAttachmentUrl || null,
+        srn_attachment_url: srnAttachmentUrl || null,
+        remarks: remarks || null,
       })
       .eq("id", id)
       .eq("status", "pending")

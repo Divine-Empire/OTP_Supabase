@@ -334,7 +334,7 @@ export default function CheckInventoryPage() {
     setCompareItems([])
     setComputedStatus("")
     setCustomerWantsMaterialAs("")
-    setCreatedByPerson(currentUser?.fullName || currentUser?.username || "")
+    setCreatedByPerson(order.creName || currentUser?.fullName || currentUser?.username || "")
     setWarehouseLocationValue("")
     setLeadTime("")
     setRemarks("")
@@ -1171,6 +1171,35 @@ export default function CheckInventoryPage() {
 
               {dialogStep === "scan" && (
                 <>
+                  <div className="space-y-2">
+                    <Label>Order Items (reference — what to pull from the warehouse)</Label>
+                    <div className="border rounded-md overflow-hidden">
+                      <Table>
+                        <TableHeader className="bg-muted/50">
+                          <TableRow>
+                            <TableHead className="font-semibold">Item Name</TableHead>
+                            <TableHead className="font-semibold text-right">Ordered Qty</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(selectedOrder?.rawItems || []).map((it: any, idx: number) => (
+                            <TableRow key={idx}>
+                              <TableCell>{it.item_name}</TableCell>
+                              <TableCell className="text-right">{it.quantity}</TableCell>
+                            </TableRow>
+                          ))}
+                          {(selectedOrder?.rawItems || []).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={2} className="text-center text-muted-foreground">
+                                No items on this order
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
                   <QrScanner onScan={handleQrScan} onError={setScannerError} />
                   {scannerError && <p className="text-sm text-destructive">{scannerError}</p>}
 
@@ -1317,20 +1346,15 @@ export default function CheckInventoryPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="createdBy">Created by</Label>
-                      <Select value={createdByPerson} onValueChange={setCreatedByPerson}>
-                        <SelectTrigger id="createdBy">
-                          <SelectValue placeholder="Select person" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Sarita Baghel">Sarita Baghel</SelectItem>
-                          <SelectItem value="Khushi Khemani">Khushi Khemani</SelectItem>
-                          <SelectItem value="SATYA KUMARI OGREY">SATYA KUMARI OGREY</SelectItem>
-                          <SelectItem value="PRIYANKA VISHWAS">PRIYANKA VISHWAS</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Input
+                        id="createdBy"
+                        value={createdByPerson}
+                        onChange={(e) => setCreatedByPerson(e.target.value)}
+                        placeholder="Enter name"
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="warehouseLocation">Warehouse location</Label>
@@ -1346,20 +1370,19 @@ export default function CheckInventoryPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {compareItems.some((it) => it.shortageQty > 0) && (
+                      <div className="space-y-2">
+                        <Label htmlFor="leadTime">Receiving lead time</Label>
+                        <Input
+                          type="number"
+                          id="leadTime"
+                          value={leadTime}
+                          onChange={(e) => setLeadTime(e.target.value)}
+                          placeholder="Enter no. of days"
+                        />
+                      </div>
+                    )}
                   </div>
-
-                  {compareItems.some((it) => it.shortageQty > 0) && (
-                    <div className="space-y-2">
-                      <Label htmlFor="leadTime">Material received lead time (days)</Label>
-                      <Input
-                        type="number"
-                        id="leadTime"
-                        value={leadTime}
-                        onChange={(e) => setLeadTime(e.target.value)}
-                        placeholder="Enter lead time in days"
-                      />
-                    </div>
-                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="inventoryPhoto">Inventory Photo</Label>
