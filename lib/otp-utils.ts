@@ -182,11 +182,9 @@ export function mapPreInvoiceRowToUI(row: any): any {
     contactNumber: order.phone_number || "",
     email: order.email || "",
     sourceStage: row.source_stage || "",
-    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
 
-    invoiceNumber: row.invoice_number || "",
-    invoiceCopyUrl: row.invoice_copy_url || "",
     createdBy: row.created_by || "",
     invoicedAt: formatDateTime(row.invoiced_at),
     status: row.status || "",
@@ -201,6 +199,119 @@ export function mapPreInvoiceRowToUI(row: any): any {
     paymentAttachmentUrl: row.payment_attachment_url || "",
     srnAttachmentUrl: row.srn_attachment_url || "",
     remarks: row.remarks || "",
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/make-invoice (an
+// otp_pre_invoice_queue row, joined to its parent otp_orders) into the UI
+// field names make-invoice/page.tsx expects.
+export function mapMakeInvoicePendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    queueId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: row.quotation_number || order.quotation_number || "",
+    timestamp: formatDateTime(row.invoiced_at || row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    sourceStage: row.source_stage || "",
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
+    rawItems: row.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/make-invoice (an
+// otp_make_invoice row, joined to its parent otp_orders +
+// otp_pre_invoice_queue) into the UI field names make-invoice/page.tsx
+// expects.
+export function mapMakeInvoiceHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const queue = row.queue || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: queue.quotation_number || order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+
+    invoiceNumber: row.invoice_number || "",
+    invoiceDate: row.invoice_date || "",
+    invoiceUploadUrl: row.invoice_upload_url || "",
+    ewayBillNumber: row.eway_bill_number || "",
+    ewayBillUploadUrl: row.eway_bill_upload_url || "",
+    totalBillAmount: row.total_bill_amount ?? "",
+    remarks: row.remarks || "",
+    createdBy: row.created_by || "",
+
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
+    rawItems: row.items || [],
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/calibration (an
+// otp_make_invoice row, joined to its parent otp_orders) into the UI field
+// names calibration/page.tsx expects.
+export function mapCalibrationPendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    makeInvoiceId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: row.invoice_number || "",
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: row.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/calibration (an
+// otp_calibration_certificate row, joined to its parent otp_orders +
+// otp_make_invoice) into the UI field names calibration/page.tsx expects.
+export function mapCalibrationHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const makeInvoice = row.makeInvoice || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+
+    certificateNumber: row.certificate_number || "",
+    certificateType: row.certificate_type || "",
+    certificateUploadUrl: row.certificate_upload_url || "",
+    remarks: row.remarks || "",
+    createdBy: row.created_by || "",
+
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
   }
 }
 

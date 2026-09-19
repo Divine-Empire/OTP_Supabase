@@ -8,11 +8,10 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 //          Material Received partial-receipt submission will create more
 //          for the same order).
 // History: otp_pre_invoice_queue.status = 'invoiced', set on Submit here —
-//          this stage no longer captures the Invoice Number itself (that
-//          moved to a later, not-yet-built stage), so status is the sole
-//          pending/history signal now, same as every other stage in this
-//          pipeline. invoice_number/invoice_copy_url stay on the table,
-//          nullable, for that future stage to fill in on this same row.
+//          this stage doesn't capture the Invoice Number itself; that's
+//          Make Invoice's job, one stage later, on its own otp_make_invoice
+//          table (see Database/25_otp_make_invoice.sql). status is the sole
+//          pending/history signal here, same as every other stage.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)

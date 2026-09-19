@@ -63,6 +63,12 @@ const menuItems = [
     icon: Receipt,
     step: "make-invoice",
   },
+  {
+    href: "/calibration",
+    label: "Calibration Certificate",
+    icon: Award,
+    step: "calibration",
+  },
   // { href: "/make-pi", label: "Make PI", icon: FileSpreadsheet, step: "make-pi" },
   {
     href: "/warehouse",
@@ -70,12 +76,6 @@ const menuItems = [
     icon: PackageCheck,
     step: "warehouse",
   },
-    {
-      href: "/calibration",
-      label: "Calibration Certificate",
-      icon: Award,
-      step: "calibration",
-    },
     {
       href: "/update-delivery",
       label: "Update Delivery",

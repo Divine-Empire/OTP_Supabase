@@ -40,8 +40,6 @@ const pendingColumns = [
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
-  { key: "invoiceNumber", label: "Invoice Number", searchable: true },
-  { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "calibrationRequired", label: "Calibration Required", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },
   { key: "transportId", label: "Transport Id/Name", searchable: true },
@@ -292,6 +290,7 @@ export default function PreInvoicePage() {
             item_name: it.name,
             qty: Number(it.qty) || 0,
             serial_no: it.serialNo || "",
+            installation: it.installation, // carried forward so downstream stages can see which items needed installation
           })),
           calibrationRequired: calibrationRequired || "",
           calibrationType: calibrationRequired === "YES" ? calibrationType : "",
@@ -376,14 +375,6 @@ export default function PreInvoicePage() {
             <Eye className="h-3.5 w-3.5" />
             View Items
           </Button>
-        )
-      case "invoiceCopy":
-        return order.invoiceCopyUrl ? (
-          <a href={order.invoiceCopyUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
-          </a>
-        ) : (
-          <Badge variant="secondary">N/A</Badge>
         )
       case "paymentAttachment":
         return order.paymentAttachmentUrl ? (
@@ -985,12 +976,13 @@ export default function PreInvoicePage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-center">Installation</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -1000,6 +992,11 @@ export default function PreInvoicePage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.qty}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant={item.installation === "Yes" ? "default" : "secondary"}>
+                          {item.installation === "Yes" ? "Yes" : "No"}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
