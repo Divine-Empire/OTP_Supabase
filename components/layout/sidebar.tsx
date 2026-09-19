@@ -40,6 +40,12 @@ const menuItems = [
     step: "order-acceptable",
   },
   {
+    href: "/proforma-invoice",
+    label: "Pro-Forma Invoice",
+    icon: FileSpreadsheet,
+    step: "proforma-invoice",
+  },
+  {
     href: "/check-inventory",
     label: "Check Inventory",
     icon: Package,

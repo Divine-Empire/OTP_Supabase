@@ -68,8 +68,31 @@ export async function POST(request: Request) {
     // Stage 2 (Check Inventory) planned date — only meaningful if the order
     // actually moves forward. Simple fixed 3-day offset for now; a real
     // otp_stage_tat-driven calculation is a later phase.
-    const checkInventoryPlanned =
-      isAcceptable === "Yes" ? new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() : null
+    //
+    // Orders paying "pi against advance" get a Pro-Forma Invoice stage
+    // inserted before Check Inventory (see Database/28_otp_proforma_invoice.sql):
+    // proforma_invoice_planned is set instead, and check_inventory_planned
+    // stays null until that stage's own POST
+    // (app/api/otp-supabase/proforma-invoice/route.ts) sets it. Every other
+    // payment mode skips Pro-Forma Invoice entirely, same as before.
+    let checkInventoryPlanned: string | null = null
+    let proformaInvoicePlanned: string | null = null
+
+    if (isAcceptable === "Yes") {
+      const { data: order, error: orderError } = await supabase
+        .from("otp_orders")
+        .select("payment_mode")
+        .eq("id", orderId)
+        .maybeSingle()
+      if (orderError) throw orderError
+
+      const threeDaysOut = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+      if (order?.payment_mode === "pi against advance") {
+        proformaInvoicePlanned = threeDaysOut
+      } else {
+        checkInventoryPlanned = threeDaysOut
+      }
+    }
 
     const { error } = await supabase.from("otp_orders_acceptable").upsert(
       {
@@ -79,6 +102,7 @@ export async function POST(request: Request) {
         remark: remarks || "",
         processed_by: processedBy || "Admin",
         check_inventory_planned: checkInventoryPlanned,
+        proforma_invoice_planned: proformaInvoicePlanned,
       },
       { onConflict: "order_id" }
     )

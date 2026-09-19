@@ -88,6 +88,62 @@ export function mapOrderAcceptableRowToUI(row: any): any {
   }
 }
 
+// Maps a Pending row from /api/otp-supabase/proforma-invoice (an
+// otp_orders_acceptable row, joined to its parent otp_orders) into the UI
+// field names proforma-invoice/page.tsx expects. Only reached when
+// otp_orders.payment_mode = 'pi against advance' — see order-acceptable/route.ts.
+export function mapProformaInvoicePendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const items = order.items || []
+
+  return {
+    id: order.id,
+    orderId: order.id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(order.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    paymentMode: order.payment_mode || "",
+    amount: order.amount_with_tax || 0,
+    rawItems: items,
+  }
+}
+
+// Maps a History row from /api/otp-supabase/proforma-invoice (an
+// otp_proforma_invoice row, joined to its parent otp_orders) into the UI
+// field names proforma-invoice/page.tsx expects.
+export function mapProformaInvoiceHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const items = order.items || []
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    paymentMode: order.payment_mode || "",
+    amount: order.amount_with_tax || 0,
+
+    piNumber: row.pi_number || "",
+    piAmount: row.pi_amount ?? "",
+    piUploadUrl: row.pi_upload_url || "",
+    remark: row.remark || "",
+    createdBy: row.created_by || "",
+
+    rawItems: items,
+  }
+}
+
 // Maps a row from /api/otp-supabase/check-inventory (Stage 2, against
 // otp_orders / otp_orders_acceptable / otp_check_inventory) into the same UI
 // field names check-inventory/page.tsx's pendingColumns/historyColumns
@@ -184,6 +240,10 @@ export function mapPreInvoiceRowToUI(row: any): any {
     sourceStage: row.source_stage || "",
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
+    // Pending: falls back to the live otp_orders.payment_mode (pre-select
+    // default). History: row.payment_mode is the snapshot saved at
+    // Pre-Invoice-submit time, which wins once it's set.
+    paymentMode: row.payment_mode || order.payment_mode || "",
 
     createdBy: row.created_by || "",
     invoicedAt: formatDateTime(row.invoiced_at),

@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       paymentAttachmentUrl,
       srnAttachmentUrl,
       remarks,
+      paymentMode,
     } = body as {
       id: string
       createdBy?: string
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
       paymentAttachmentUrl?: string
       srnAttachmentUrl?: string
       remarks?: string
+      paymentMode?: string
     }
 
     if (!id) {
@@ -92,6 +94,7 @@ export async function POST(request: Request) {
         payment_attachment_url: paymentAttachmentUrl || null,
         srn_attachment_url: srnAttachmentUrl || null,
         remarks: remarks || null,
+        payment_mode: paymentMode || null,
       })
       .eq("id", id)
       .eq("status", "pending")

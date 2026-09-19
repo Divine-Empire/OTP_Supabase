@@ -40,6 +40,7 @@ const pendingColumns = [
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
+  { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "calibrationRequired", label: "Calibration Required", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },
   { key: "transportId", label: "Transport Id/Name", searchable: true },
@@ -67,6 +68,25 @@ interface PreInvoiceItemRow {
   serialNo: string
   isPrefilled: boolean
   installation: "Yes" | "No"
+}
+
+// otp_dropdown "payment_mode" values are stored lower-case to match
+// lto_enquiry_tracker(_for_leads).payment_mode exactly (see
+// Database/30_otp_pre_invoice_payment_mode.sql) — this is purely a display
+// formatter, the underlying value sent to the API stays lower-case.
+const PAYMENT_MODE_LABELS: Record<string, string> = {
+  "current date cheque": "Current Date Cheque",
+  "full on credit": "Full On Credit",
+  fullyadvance: "FullyAdvance",
+  na: "NA",
+  pdc: "PDC",
+  "pi against advance": "PI Against Advance",
+  "partial advance": "Partial Advance",
+  "partial advance+pdc": "Partial Advance+PDC",
+}
+function formatPaymentModeLabel(value: string): string {
+  if (!value) return ""
+  return PAYMENT_MODE_LABELS[value] || value
 }
 
 function expandQueueItemsToRows(rawItems: any[]): PreInvoiceItemRow[] {
@@ -109,6 +129,8 @@ export default function PreInvoicePage() {
   const [preInvoiceRemarks, setPreInvoiceRemarks] = useState("")
   const [items, setItems] = useState<PreInvoiceItemRow[]>([])
   const [dispatchLocationOptions, setDispatchLocationOptions] = useState<string[]>([])
+  const [paymentModeOptions, setPaymentModeOptions] = useState<string[]>([])
+  const [paymentMode, setPaymentMode] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
@@ -175,6 +197,17 @@ export default function PreInvoicePage() {
       .catch((err) => console.error("Error fetching dispatch location options:", err))
   }, [])
 
+  useEffect(() => {
+    fetch("/api/otp-supabase/dropdowns?category=payment_mode")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && Array.isArray(result.data)) {
+          setPaymentModeOptions(result.data.map((d: any) => d.value))
+        }
+      })
+      .catch((err) => console.error("Error fetching payment mode options:", err))
+  }, [])
+
   const handleProcessedTabClick = async () => {
     await fetchProcessedOrders()
   }
@@ -224,6 +257,7 @@ export default function PreInvoicePage() {
     setPaymentAttachmentFile(null)
     setSrnAttachmentFile(null)
     setPreInvoiceRemarks("")
+    setPaymentMode(order.paymentMode || "")
     setItems(expandQueueItemsToRows(order.rawItems || []))
     setIsDialogOpen(true)
   }
@@ -302,6 +336,7 @@ export default function PreInvoicePage() {
           paymentAttachmentUrl,
           srnAttachmentUrl,
           remarks: preInvoiceRemarks,
+          paymentMode,
         }),
       })
       const result = await response.json()
@@ -396,6 +431,8 @@ export default function PreInvoicePage() {
         return <Badge variant="outline">{value || "N/A"}</Badge>
       case "calibrationRequired":
         return value ? <Badge variant={value === "YES" ? "default" : "secondary"}>{value}</Badge> : ""
+      case "paymentMode":
+        return formatPaymentModeLabel(value)
       default:
         return value || ""
     }
@@ -723,7 +760,7 @@ export default function PreInvoicePage() {
               <DialogDescription>Enter the dispatch details for this order's available quantity</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="orderNo">Order No.</Label>
                   <Input id="orderNo" value={selectedOrder?.orderNo || ""} disabled />
@@ -731,6 +768,21 @@ export default function PreInvoicePage() {
                 <div className="space-y-2">
                   <Label htmlFor="companyName">Company Name</Label>
                   <Input id="companyName" value={selectedOrder?.companyName || ""} disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="paymentMode">Payment Mode</Label>
+                  <Select value={paymentMode} onValueChange={setPaymentMode}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select payment mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paymentModeOptions.map((opt) => (
+                        <SelectItem key={opt} value={opt}>
+                          {formatPaymentModeLabel(opt)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
