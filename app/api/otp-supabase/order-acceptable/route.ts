@@ -73,10 +73,17 @@ export async function POST(request: Request) {
     // inserted before Check Inventory (see Database/28_otp_proforma_invoice.sql):
     // proforma_invoice_planned is set instead, and check_inventory_planned
     // stays null until that stage's own POST
-    // (app/api/otp-supabase/proforma-invoice/route.ts) sets it. Every other
-    // payment mode skips Pro-Forma Invoice entirely, same as before.
+    // (app/api/otp-supabase/proforma-invoice/route.ts) sets it.
+    //
+    // Orders paying "na" go to Debit Note instead (see
+    // Database/31_otp_debit_note.sql) and stop there — debit_note_planned
+    // is set and neither check_inventory_planned nor proforma_invoice_planned
+    // gets set, since the order doesn't continue past Debit Note.
+    //
+    // Every other payment mode skips both and goes straight to Check Inventory.
     let checkInventoryPlanned: string | null = null
     let proformaInvoicePlanned: string | null = null
+    let debitNotePlanned: string | null = null
 
     if (isAcceptable === "Yes") {
       const { data: order, error: orderError } = await supabase
@@ -89,6 +96,8 @@ export async function POST(request: Request) {
       const threeDaysOut = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
       if (order?.payment_mode === "pi against advance") {
         proformaInvoicePlanned = threeDaysOut
+      } else if (order?.payment_mode === "na") {
+        debitNotePlanned = threeDaysOut
       } else {
         checkInventoryPlanned = threeDaysOut
       }
@@ -103,6 +112,7 @@ export async function POST(request: Request) {
         processed_by: processedBy || "Admin",
         check_inventory_planned: checkInventoryPlanned,
         proforma_invoice_planned: proformaInvoicePlanned,
+        debit_note_planned: debitNotePlanned,
       },
       { onConflict: "order_id" }
     )

@@ -144,6 +144,59 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
   }
 }
 
+// Maps a Pending row from /api/otp-supabase/debit-note (an
+// otp_orders_acceptable row, joined to its parent otp_orders) into the UI
+// field names debit-note/page.tsx expects.
+export function mapDebitNotePendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const items = order.items || []
+
+  return {
+    id: order.id,
+    orderId: order.id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(order.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    paymentMode: order.payment_mode || "",
+    amount: order.amount_with_tax || 0,
+    rawItems: items,
+  }
+}
+
+// Maps a History row from /api/otp-supabase/debit-note (an
+// otp_debit_note row, joined to its parent otp_orders) into the UI field
+// names debit-note/page.tsx expects.
+export function mapDebitNoteHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const items = order.items || []
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    paymentMode: order.payment_mode || "",
+    amount: order.amount_with_tax || 0,
+
+    dnNumber: row.dn_number || "",
+    dnAttachmentUrl: row.dn_attachment_url || "",
+    createdBy: row.created_by || "",
+
+    rawItems: items,
+  }
+}
+
 // Maps a row from /api/otp-supabase/check-inventory (Stage 2, against
 // otp_orders / otp_orders_acceptable / otp_check_inventory) into the same UI
 // field names check-inventory/page.tsx's pendingColumns/historyColumns

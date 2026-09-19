@@ -24,6 +24,7 @@ import {
   ReceiptText,
   XOctagon,
   FlaskConical,
+  FileMinus,
 } from "lucide-react";
 
 const menuItems = [
@@ -99,6 +100,12 @@ const menuItems = [
       label: "Credit Note",
       icon: ReceiptText,
       step: "credit-note",
+    },
+    {
+      href: "/debit-note",
+      label: "Debit Note",
+      icon: FileMinus,
+      step: "debit-note",
     },
     {
       href: "/ims",
