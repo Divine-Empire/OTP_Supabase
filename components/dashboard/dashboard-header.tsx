@@ -14,7 +14,7 @@ export function DashboardHeader({ onRefresh }: DashboardHeaderProps) {
         <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
           Order & Dispatch Dashboard
         </h1>
-        <p className="text-muted-foreground mt-2">Comprehensive real-time overview from Google Sheets</p>
+        <p className="text-muted-foreground mt-2">Real-time overview across the order-to-payment pipeline</p>
       </div>
       <div className="flex gap-2">
         <Button onClick={onRefresh} variant="outline">
