@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 // Stage — Pre-Invoice.
 //
@@ -74,12 +75,20 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
+    // Debit Note (Inv.) applies unconditionally to every wave — its planned
+    // date is set right here, same timing as invoiced_at (see
+    // Database/32_otp_debit_note_for_invoice.sql). Make Invoice only gets
+    // scheduled once that stage's own POST processes this row.
+    // Planned = this record's creation time (now) + Debit Note (Inv.)'s TAT.
+    const debitNotePlanned = addTatMinutes(new Date(), await getStageTatMinutes("debit_note_for_invoice"))
+
     const { data, error } = await supabase
       .from("otp_pre_invoice_queue")
       .update({
         created_by: createdBy || null,
         status: "invoiced",
         invoiced_at: new Date().toISOString(),
+        debit_note_planned: debitNotePlanned,
         // Items get saved back finalized (per-serial rows the warehouse
         // person confirmed/adjusted in the Pre-Invoice dialog), replacing
         // the lump-qty breakdown Check Inventory originally queued.

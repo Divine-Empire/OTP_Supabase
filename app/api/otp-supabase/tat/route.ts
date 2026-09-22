@@ -1,28 +1,30 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 
+// Kept in sync with app/settings/tat-helpers.ts's TAT_STAGE_OPTIONS — these
+// are the real current pipeline stages (see Database/33_otp_stage_tat.sql).
 const STAGE_ORDER: Record<string, number> = {
   order_acceptable: 1,
-  check_inventory: 2,
-  material_received: 3,
-  senior_approval: 4,
-  make_invoice: 5,
-  warehouse: 6,
-  material_receiving: 7,
-  calibration: 8,
-  update_delivery: 9,
+  proforma_invoice: 2,
+  debit_note: 3,
+  check_inventory: 4,
+  material_received: 5,
+  pre_invoice: 6,
+  debit_note_for_invoice: 7,
+  make_invoice: 8,
+  calibration: 9,
 }
 
 const DEFAULT_STAGES = [
-  { stage_key: "order_acceptable", stage_label: "Order Acceptable", tat_minutes: 7200, description: "5 working days from order creation" },
-  { stage_key: "check_inventory", stage_label: "Check Inventory", tat_minutes: 4320, description: "3 working days from Stage 1 actual" },
-  { stage_key: "material_received", stage_label: "Indent / Material Received", tat_minutes: 1440, description: "1 working day from Stage 2 actual" },
-  { stage_key: "senior_approval", stage_label: "Senior Approval", tat_minutes: 0, description: "Same day as Stage 2/3 actual" },
-  { stage_key: "make_invoice", stage_label: "Make Invoice", tat_minutes: 7200, description: "5 working days from dispatch creation" },
-  { stage_key: "warehouse", stage_label: "Warehouse / Material RCVD", tat_minutes: 7200, description: "5 working days from Stage 5 actual" },
-  { stage_key: "material_receiving", stage_label: "Driver / Material Receiving", tat_minutes: 7200, description: "5 working days from Stage 6 actual" },
-  { stage_key: "calibration", stage_label: "Calibration Certificate", tat_minutes: 7200, description: "5 working days from dispatch creation" },
-  { stage_key: "update_delivery", stage_label: "Update Delivery Note", tat_minutes: 7200, description: "5 working days from dispatch creation" },
+  { stage_key: "order_acceptable", stage_label: "Order Acceptable", tat_minutes: 7200, description: "otp_orders.order_acceptable_planned — 5 days from order conversion" },
+  { stage_key: "proforma_invoice", stage_label: "Pro-Forma Invoice", tat_minutes: 4320, description: "otp_orders_acceptable.proforma_invoice_planned — 3 days from Order Acceptable (payment_mode = pi against advance only)" },
+  { stage_key: "debit_note", stage_label: "Debit Note", tat_minutes: 4320, description: "otp_orders_acceptable.debit_note_planned — 3 days from Order Acceptable (payment_mode = na only)" },
+  { stage_key: "check_inventory", stage_label: "Check Inventory", tat_minutes: 4320, description: "otp_orders_acceptable.check_inventory_planned — 3 days from Order Acceptable or Pro-Forma Invoice" },
+  { stage_key: "material_received", stage_label: "Material Received", tat_minutes: 1440, description: "otp_material_shortage — created on Check Inventory shortage, no fixed planned offset yet" },
+  { stage_key: "pre_invoice", stage_label: "Pre-Invoice", tat_minutes: 1440, description: "otp_pre_invoice_queue (status=pending) — created by Check Inventory/Material Received, no fixed planned offset yet" },
+  { stage_key: "debit_note_for_invoice", stage_label: "Debit Note (Inv.)", tat_minutes: 4320, description: "otp_pre_invoice_queue.debit_note_planned — 3 days from Pre-Invoice submit" },
+  { stage_key: "make_invoice", stage_label: "Make Invoice", tat_minutes: 4320, description: "otp_pre_invoice_queue.make_invoice_planned — 3 days from Debit Note (Inv.)" },
+  { stage_key: "calibration", stage_label: "Calibration Certificate", tat_minutes: 7200, description: "otp_make_invoice.calibration_planned — 5 days from Make Invoice (calibration_required only)" },
 ]
 
 export async function GET() {

@@ -3,6 +3,7 @@
 import type React from "react"
 import { useAuth } from "@/components/auth-provider"
 import { Sidebar } from "./sidebar"
+import { Footer } from "./footer"
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 
@@ -42,8 +43,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-gray-50 bg-blue-50">
       <Sidebar />
       <div className="md:pl-64">
-        <main className="p-4 md:p-6 bg-blue-50">{children}</main>
+        <main className="p-4 md:p-6 pb-16 md:pb-16 bg-blue-50">{children}</main>
       </div>
+      <Footer />
     </div>
   )
 }

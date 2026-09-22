@@ -67,6 +67,7 @@ export default function MakeInvoicePage() {
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
     pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
@@ -314,52 +315,37 @@ export default function MakeInvoicePage() {
 
   return (
     <MainLayout>
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Make Invoice
-            </h1>
-            {currentUser && (
-              <p className="text-sm text-muted-foreground mt-1">
-                Logged in as: {currentUser.fullName} ({currentUser.role})
-              </p>
-            )}
-          </div>
-          <Button onClick={fetchOrders} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
+      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
+        <Tabs
+          value={currentTab}
+          onValueChange={(value) => setCurrentTab(value)}
+          className="flex-1 flex flex-col min-h-0"
+        >
+          <Card className="flex-1 flex flex-col min-h-0">
+            <CardHeader className="border-b py-3 shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <TabsList>
+                  <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
+                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
+                    History ({filteredProcessedOrders.length})
+                  </TabsTrigger>
+                </TabsList>
 
-        <div className="flex gap-4 items-center">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-        </div>
+                <div className="relative flex-1 min-w-[200px] max-w-md">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
 
-        <Tabs defaultValue="pending" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-            <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-              History ({filteredProcessedOrders.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="pending" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Pending Make Invoice</CardTitle>
-                    <CardDescription>Pre-Invoice waves ready to be billed</CardDescription>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <Button onClick={fetchOrders} variant="outline" size="sm">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm">
@@ -371,34 +357,49 @@ export default function MakeInvoicePage() {
                       <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <div className="flex gap-2 p-2">
-                        <Button size="sm" variant="outline" onClick={showAllPendingColumns}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
+                        >
                           Show All
                         </Button>
-                        <Button size="sm" variant="outline" onClick={hideAllPendingColumns}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
+                        >
                           Hide All
                         </Button>
                       </div>
                       <DropdownMenuSeparator />
                       <div className="p-2 space-y-2">
-                        {pendingColumns.map((column) => (
-                          <div key={column.key} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`pending-${column.key}`}
-                              checked={visiblePendingColumns[column.key]}
-                              onCheckedChange={() => togglePendingColumn(column.key)}
-                            />
-                            <Label htmlFor={`pending-${column.key}`} className="text-sm">
-                              {column.label}
-                            </Label>
-                          </div>
-                        ))}
+                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
+                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
+                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
+                          return (
+                            <div key={column.key} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`col-${column.key}`}
+                                checked={visibleCols[column.key]}
+                                onCheckedChange={() => toggleCol(column.key)}
+                              />
+                              <Label htmlFor={`col-${column.key}`} className="text-sm">
+                                {column.label}
+                              </Label>
+                            </div>
+                          );
+                        })}
                       </div>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="md:hidden space-y-3">
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
+              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
+                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
                   {filteredOrders.map((order, idx) => (
                     <MobileRecordCard
                       key={order.id || idx}
@@ -415,104 +416,81 @@ export default function MakeInvoicePage() {
                   )}
                 </div>
 
-                <div className="hidden md:block border rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <div style={{ minWidth: "max-content" }}>
-                      <Table>
-                        <TableHeader className="sticky top-0 z-10 bg-gray-50">
-                          <TableRow>
+                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
+                  <div className="overflow-auto flex-1 min-h-0">
+                    <Table className="w-full relative">
+                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
+                        <TableRow>
+                          {pendingColumns
+                            .filter((col) => visiblePendingColumns[col.key])
+                            .map((column) => (
+                              <TableHead
+                                key={column.key}
+                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
+                                style={{
+                                  minWidth: column.key === 'actions' ? '120px' :
+                                    column.key === 'timestamp' ? '130px' :
+                                      column.key === 'orderNo' ? '120px' :
+                                        column.key === 'quotationNo' ? '150px' :
+                                          column.key === 'companyName' ? '250px' :
+                                            column.key === 'contactPersonName' ? '180px' :
+                                              column.key === 'contactNumber' ? '140px' :
+                                                column.key === 'sourceStage' ? '150px' :
+                                                  column.key === 'itemList' ? '130px' :
+                                                    '160px',
+                                }}
+                              >
+                                {column.label}
+                              </TableHead>
+                            ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredOrders.map((order, idx) => (
+                          <TableRow key={order.id || idx} className="hover:bg-gray-50">
                             {pendingColumns
                               .filter((col) => visiblePendingColumns[col.key])
                               .map((column) => (
-                                <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
-                                  <div className="break-words">{column.label}</div>
-                                </TableHead>
+                                <TableCell
+                                  key={column.key}
+                                  className="border-b px-4 py-3 align-top"
+                                  style={{
+                                    minWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'timestamp' ? '130px' :
+                                        column.key === 'orderNo' ? '120px' :
+                                          column.key === 'quotationNo' ? '150px' :
+                                            column.key === 'companyName' ? '250px' :
+                                              column.key === 'contactPersonName' ? '180px' :
+                                                column.key === 'contactNumber' ? '140px' :
+                                                  column.key === 'sourceStage' ? '150px' :
+                                                    column.key === 'itemList' ? '130px' :
+                                                      '160px',
+                                  }}
+                                >
+                                  <div className="break-words whitespace-normal leading-relaxed">
+                                    {renderCellContent(order, column.key)}
+                                  </div>
+                                </TableCell>
                               ))}
                           </TableRow>
-                        </TableHeader>
-                      </Table>
-                      <div className="overflow-y-auto" style={{ maxHeight: "500px" }}>
-                        <Table>
-                          <TableBody>
-                            {filteredOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {pendingColumns
-                                  .filter((col) => visiblePendingColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top">
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No pending make-invoice waves"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="history" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Make Invoice History</CardTitle>
-                    <CardDescription>Waves already invoiced</CardDescription>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button size="sm" variant="outline" onClick={showAllHistoryColumns}>
-                          Show All
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={hideAllHistoryColumns}>
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {historyColumns.map((column) => (
-                          <div key={column.key} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`history-${column.key}`}
-                              checked={visibleHistoryColumns[column.key]}
-                              onCheckedChange={() => toggleHistoryColumn(column.key)}
-                            />
-                            <Label htmlFor={`history-${column.key}`} className="text-sm">
-                              {column.label}
-                            </Label>
-                          </div>
                         ))}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        {filteredOrders.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
+                              className="text-center text-muted-foreground h-32"
+                            >
+                              {searchTerm ? "No orders match your search criteria" : "No pending make-invoice waves"}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </div>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+
+              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
                 {processedLoading ? (
                   <div className="flex items-center justify-center h-32">
                     <RefreshCw className="h-6 w-6 animate-spin" />
@@ -520,7 +498,7 @@ export default function MakeInvoicePage() {
                   </div>
                 ) : (
                   <>
-                    <div className="md:hidden space-y-3">
+                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
                       {filteredProcessedOrders.map((order, idx) => (
                         <MobileRecordCard
                           key={order.id || idx}
@@ -537,59 +515,95 @@ export default function MakeInvoicePage() {
                       )}
                     </div>
 
-                    <div className="hidden md:block border rounded-lg overflow-hidden">
-                      <div className="overflow-x-auto">
-                        <div style={{ minWidth: "max-content" }}>
-                          <Table>
-                            <TableHeader className="sticky top-0 z-10 bg-gray-50">
-                              <TableRow>
+                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
+                      <div className="overflow-auto flex-1 min-h-0">
+                        <Table className="w-full relative">
+                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
+                            <TableRow>
+                              {historyColumns
+                                .filter((col) => visibleHistoryColumns[col.key])
+                                .map((column) => (
+                                  <TableHead
+                                    key={column.key}
+                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
+                                    style={{
+                                      minWidth: column.key === 'timestamp' ? '130px' :
+                                        column.key === 'orderNo' ? '120px' :
+                                          column.key === 'quotationNo' ? '150px' :
+                                            column.key === 'companyName' ? '250px' :
+                                              column.key === 'contactPersonName' ? '180px' :
+                                                column.key === 'contactNumber' ? '140px' :
+                                                  column.key === 'sourceStage' ? '150px' :
+                                                    column.key === 'invoiceNumber' ? '150px' :
+                                                      column.key === 'invoiceDate' ? '150px' :
+                                                        column.key === 'invoiceUpload' ? '150px' :
+                                                          column.key === 'ewayBillNumber' ? '180px' :
+                                                            column.key === 'ewayBillUpload' ? '150px' :
+                                                              column.key === 'totalBillAmount' ? '150px' :
+                                                                column.key === 'remarks' ? '200px' :
+                                                                  column.key === 'createdBy' ? '150px' :
+                                                                    '160px',
+                                    }}
+                                  >
+                                    {column.label}
+                                  </TableHead>
+                                ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredProcessedOrders.map((order, idx) => (
+                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
                                 {historyColumns
                                   .filter((col) => visibleHistoryColumns[col.key])
                                   .map((column) => (
-                                    <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
-                                      <div className="break-words">{column.label}</div>
-                                    </TableHead>
+                                    <TableCell
+                                      key={column.key}
+                                      className="border-b px-4 py-3 align-top"
+                                      style={{
+                                        minWidth: column.key === 'timestamp' ? '130px' :
+                                          column.key === 'orderNo' ? '120px' :
+                                            column.key === 'quotationNo' ? '150px' :
+                                              column.key === 'companyName' ? '250px' :
+                                                column.key === 'contactPersonName' ? '180px' :
+                                                  column.key === 'contactNumber' ? '140px' :
+                                                    column.key === 'sourceStage' ? '150px' :
+                                                      column.key === 'invoiceNumber' ? '150px' :
+                                                        column.key === 'invoiceDate' ? '150px' :
+                                                          column.key === 'invoiceUpload' ? '150px' :
+                                                            column.key === 'ewayBillNumber' ? '180px' :
+                                                              column.key === 'ewayBillUpload' ? '150px' :
+                                                                column.key === 'totalBillAmount' ? '150px' :
+                                                                  column.key === 'remarks' ? '200px' :
+                                                                    column.key === 'createdBy' ? '150px' :
+                                                                      '160px',
+                                      }}
+                                    >
+                                      <div className="break-words whitespace-normal leading-relaxed">
+                                        {renderCellContent(order, column.key)}
+                                      </div>
+                                    </TableCell>
                                   ))}
                               </TableRow>
-                            </TableHeader>
-                          </Table>
-                          <div className="overflow-y-auto" style={{ maxHeight: "500px" }}>
-                            <Table>
-                              <TableBody>
-                                {filteredProcessedOrders.map((order, idx) => (
-                                  <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                    {historyColumns
-                                      .filter((col) => visibleHistoryColumns[col.key])
-                                      .map((column) => (
-                                        <TableCell key={column.key} className="border-b px-4 py-3 align-top">
-                                          <div className="break-words whitespace-normal leading-relaxed">
-                                            {renderCellContent(order, column.key)}
-                                          </div>
-                                        </TableCell>
-                                      ))}
-                                  </TableRow>
-                                ))}
-                                {filteredProcessedOrders.length === 0 && (
-                                  <TableRow>
-                                    <TableCell
-                                      colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                      className="text-center text-muted-foreground h-32"
-                                    >
-                                      {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
+                            ))}
+                            {filteredProcessedOrders.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
+                                  className="text-center text-muted-foreground h-32"
+                                >
+                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
                       </div>
                     </div>
                   </>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
+            </CardContent>
+          </Card>
         </Tabs>
 
         {/* Process Dialog */}

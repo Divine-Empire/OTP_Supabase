@@ -151,6 +151,7 @@ export default function CheckInventoryPage() {
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [currentTab, setCurrentTab] = useState("pending")
   const [selectedColumn, setSelectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -615,7 +616,7 @@ export default function CheckInventoryPage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading orders from Google Sheets...</span>
+          <span className="ml-2">Loading orders...</span>
         </div>
       </MainLayout>
     )
@@ -640,280 +641,34 @@ export default function CheckInventoryPage() {
 
   return (
     <MainLayout>
-      <div className="space-y-6">
+      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
+        <Tabs
+          value={currentTab}
+          onValueChange={(value) => setCurrentTab(value)}
+          className="flex-1 flex flex-col min-h-0"
+        >
+          <Card className="flex-1 flex flex-col min-h-0">
+            <CardHeader className="border-b py-3 shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <TabsList>
+                  <TabsTrigger value="pending">Pending ({pendingOrders.length})</TabsTrigger>
+                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
+                    History ({filteredProcessedOrders.length})
+                  </TabsTrigger>
+                </TabsList>
 
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              Check Inventory
-            </h1>
-            {currentUser && (
-              <p className="text-sm text-muted-foreground mt-1">
-                Logged in as: {currentUser.fullName} ({currentUser.role})
-              </p>
-            )}
-          </div>
-          <Button onClick={fetchOrders} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh from Sheets
-          </Button>
-        </div>
-        {/* Search and Filter Controls */}
-        <div className="flex gap-4 items-center">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          {/* <Select value={selectedColumn} onValueChange={setSelectedColumn}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Select column" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Columns</SelectItem>
-              {pendingColumns
-                .filter((col) => col.searchable)
-                .map((column) => (
-                  <SelectItem key={column.key} value={column.key}>
-                    {column.label}
-                  </SelectItem>
-                ))}
-            </SelectContent>
-          </Select> */}
-        </div>
-
-        <Tabs defaultValue="pending" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="pending">Pending ({pendingOrders.length})</TabsTrigger>
-            <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-              History ({filteredProcessedOrders.length})
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="pending" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Pending Inventory Check</CardTitle>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button size="sm" variant="outline" onClick={showAllPendingColumns}>
-                          Show All
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={hideAllPendingColumns}>
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {pendingColumns.map((column) => (
-                          <div key={column.key} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`pending-${column.key}`}
-                              checked={visiblePendingColumns[column.key]}
-                              onCheckedChange={() => togglePendingColumn(column.key)}
-                            />
-                            <Label htmlFor={`pending-${column.key}`} className="text-sm">
-                              {column.label}
-                            </Label>
-                          </div>
-                        ))}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {/* Mobile: one card per record */}
-                <div className="md:hidden space-y-3">
-                  {pendingOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || order.orderId || order.orderNo || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
-                  ))}
-                  {pendingOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending orders found in Google Sheets"}
-                    </p>
-                  )}
+                <div className="relative flex-1 min-w-[200px] max-w-md">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <Input
+                    placeholder="Search..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
                 </div>
 
-                {/* Desktop: table */}
-                <div className="hidden md:block border rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <div style={{ minWidth: 'max-content' }}>
-                      <Table>
-                        <TableHeader className="sticky top-0 z-10 bg-gray-50">
-                          <TableRow>
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableHead
-                                  key={column.key}
-                                  className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
-                                  style={{
-                                    width: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          '160px',
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          '160px',
-                                    maxWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          '160px'
-                                  }}
-                                >
-                                  <div className="break-words">
-                                    {column.label}
-                                  </div>
-                                </TableHead>
-                              ))}
-                          </TableRow>
-                        </TableHeader>
-                      </Table>
-
-                      <div className="overflow-y-auto" style={{ maxHeight: '500px' }}>
-                        <Table>
-                          <TableBody>
-                            {pendingOrders.map((order, idx) => (
-                              <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
-                                {pendingColumns
-                                  .filter((col) => visiblePendingColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        width: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              '160px',
-                                        minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              '160px',
-                                        maxWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              '160px'
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {pendingOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm
-                                    ? "No orders match your search criteria"
-                                    : "No pending orders found in Google Sheets"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="history" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle>Inventory Check History</CardTitle>
-                    <CardDescription>
-                      Previously processed inventory checks (where both BG and BH columns have data)
-                    </CardDescription>
-                  </div>
-                  <div className="flex gap-4">
+                <div className="flex items-center gap-2">
+                  {currentTab === "history" && (
                     <Select
                       value={availabilityFilter}
                       onValueChange={setAvailabilityFilter}
@@ -928,45 +683,166 @@ export default function CheckInventoryPage() {
                         <SelectItem value="Partial">Partial</SelectItem>
                       </SelectContent>
                     </Select>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          <Settings className="h-4 w-4 mr-2" />
-                          Column Visibility
+                  )}
+                  <Button onClick={fetchOrders} variant="outline" size="sm">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Settings className="h-4 w-4 mr-2" />
+                        Column Visibility
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
+                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <div className="flex gap-2 p-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
+                        >
+                          Show All
                         </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                        <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        <div className="flex gap-2 p-2">
-                          <Button size="sm" variant="outline" onClick={showAllHistoryColumns}>
-                            Show All
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={hideAllHistoryColumns}>
-                            Hide All
-                          </Button>
-                        </div>
-                        <DropdownMenuSeparator />
-                        <div className="p-2 space-y-2">
-                          {historyColumns.map((column) => (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
+                        >
+                          Hide All
+                        </Button>
+                      </div>
+                      <DropdownMenuSeparator />
+                      <div className="p-2 space-y-2">
+                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
+                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
+                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
+                          return (
                             <div key={column.key} className="flex items-center space-x-2">
                               <Checkbox
-                                id={`history-${column.key}`}
-                                checked={visibleHistoryColumns[column.key]}
-                                onCheckedChange={() => toggleHistoryColumn(column.key)}
+                                id={`col-${column.key}`}
+                                checked={visibleCols[column.key]}
+                                onCheckedChange={() => toggleCol(column.key)}
                               />
-                              <Label htmlFor={`history-${column.key}`} className="text-sm">
+                              <Label htmlFor={`col-${column.key}`} className="text-sm">
                                 {column.label}
                               </Label>
                             </div>
-                          ))}
-                        </div>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                          );
+                        })}
+                      </div>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
+              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
+                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
+                  {pendingOrders.map((order, idx) => (
+                    <MobileRecordCard
+                      key={order.id || order.orderId || order.orderNo || idx}
+                      columns={pendingColumns}
+                      visibleColumns={visiblePendingColumns}
+                      record={order}
+                      renderCellContent={renderCellContent}
+                    />
+                  ))}
+                  {pendingOrders.length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">
+                      {searchTerm
+                        ? "No orders match your search criteria"
+                        : "No pending orders found"}
+                    </p>
+                  )}
+                </div>
+
+                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
+                  <div className="overflow-auto flex-1 min-h-0">
+                    <Table className="w-full relative">
+                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
+                        <TableRow>
+                          {pendingColumns
+                            .filter((col) => visiblePendingColumns[col.key])
+                            .map((column) => (
+                              <TableHead
+                                key={column.key}
+                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
+                                style={{
+                                  minWidth: column.key === 'actions' ? '120px' :
+                                    column.key === 'itemList' ? '130px' :
+                                      column.key === 'orderNo' ? '120px' :
+                                        column.key === 'quotationNo' ? '150px' :
+                                          column.key === 'companyName' ? '250px' :
+                                            column.key === 'contactPersonName' ? '180px' :
+                                              column.key === 'contactNumber' ? '140px' :
+                                                column.key === 'billingAddress' ? '200px' :
+                                                  column.key === 'shippingAddress' ? '200px' :
+                                                    column.key === 'isOrderAcceptable' ? '150px' :
+                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
+                                                        column.key === 'remarks' ? '200px' :
+                                                          '160px',
+                                }}
+                              >
+                                {column.label}
+                              </TableHead>
+                            ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pendingOrders.map((order, idx) => (
+                          <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
+                            {pendingColumns
+                              .filter((col) => visiblePendingColumns[col.key])
+                              .map((column) => (
+                                <TableCell
+                                  key={column.key}
+                                  className="border-b px-4 py-3 align-top"
+                                  style={{
+                                    minWidth: column.key === 'actions' ? '120px' :
+                                      column.key === 'itemList' ? '130px' :
+                                        column.key === 'orderNo' ? '120px' :
+                                          column.key === 'quotationNo' ? '150px' :
+                                            column.key === 'companyName' ? '250px' :
+                                              column.key === 'contactPersonName' ? '180px' :
+                                                column.key === 'contactNumber' ? '140px' :
+                                                  column.key === 'billingAddress' ? '200px' :
+                                                    column.key === 'shippingAddress' ? '200px' :
+                                                      column.key === 'isOrderAcceptable' ? '150px' :
+                                                        column.key === 'orderAcceptanceChecklist' ? '250px' :
+                                                          column.key === 'remarks' ? '200px' :
+                                                            '160px',
+                                  }}
+                                >
+                                  <div className="break-words whitespace-normal leading-relaxed">
+                                    {renderCellContent(order, column.key)}
+                                  </div>
+                                </TableCell>
+                              ))}
+                          </TableRow>
+                        ))}
+                        {pendingOrders.length === 0 && (
+                          <TableRow>
+                            <TableCell
+                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
+                              className="text-center text-muted-foreground h-32"
+                            >
+                              {searchTerm
+                                ? "No orders match your search criteria"
+                                : "No pending orders found"}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
+              </TabsContent>
+
+              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
                 {processedLoading ? (
                   <div className="flex items-center justify-center h-32">
                     <RefreshCw className="h-6 w-6 animate-spin" />
@@ -974,175 +850,108 @@ export default function CheckInventoryPage() {
                   </div>
                 ) : (
                   <>
-                  {/* Mobile: one card per record */}
-                  <div className="md:hidden space-y-3">
-                    {filteredProcessedOrders.map((order, idx) => (
-                      <MobileRecordCard
-                        key={order.id || order.orderId || order.orderNo || idx}
-                        columns={historyColumns}
-                        visibleColumns={visibleHistoryColumns}
-                        record={order}
-                        renderCellContent={renderCellContent}
-                      />
-                    ))}
-                    {filteredProcessedOrders.length === 0 && (
-                      <p className="text-center text-muted-foreground py-8">
-                        {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                      </p>
-                    )}
-                  </div>
+                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
+                      {filteredProcessedOrders.map((order, idx) => (
+                        <MobileRecordCard
+                          key={order.id || order.orderId || order.orderNo || idx}
+                          columns={historyColumns}
+                          visibleColumns={visibleHistoryColumns}
+                          record={order}
+                          renderCellContent={renderCellContent}
+                        />
+                      ))}
+                      {filteredProcessedOrders.length === 0 && (
+                        <p className="text-center text-muted-foreground py-8">
+                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+                        </p>
+                      )}
+                    </div>
 
-                  {/* Desktop: table */}
-                  <div className="hidden md:block border rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <div style={{ minWidth: 'max-content' }}>
-                        <Table>
-                          <TableHeader className="sticky top-0 z-10 bg-gray-50">
+                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
+                      <div className="overflow-auto flex-1 min-h-0">
+                        <Table className="w-full relative">
+                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
                             <TableRow>
                               {historyColumns
                                 .filter((col) => visibleHistoryColumns[col.key])
                                 .map((column) => (
                                   <TableHead
                                     key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3"
+                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
                                     style={{
-                                      width: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          column.key === 'availabilityStatus' ? '150px' :
-                                                            column.key === 'inventoryRemarks' ? '200px' :
-                                                              '160px',
                                       minWidth: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          column.key === 'availabilityStatus' ? '150px' :
-                                                            column.key === 'inventoryRemarks' ? '200px' :
-                                                              '160px',
-                                      maxWidth: column.key === 'orderNo' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          column.key === 'availabilityStatus' ? '150px' :
-                                                            column.key === 'inventoryRemarks' ? '200px' :
-                                                              '160px'
+                                        column.key === 'itemList' ? '130px' :
+                                          column.key === 'quotationNo' ? '150px' :
+                                            column.key === 'companyName' ? '250px' :
+                                              column.key === 'contactPersonName' ? '180px' :
+                                                column.key === 'contactNumber' ? '140px' :
+                                                  column.key === 'billingAddress' ? '200px' :
+                                                    column.key === 'shippingAddress' ? '200px' :
+                                                      column.key === 'isOrderAcceptable' ? '150px' :
+                                                        column.key === 'orderAcceptanceChecklist' ? '250px' :
+                                                          column.key === 'remarks' ? '200px' :
+                                                            column.key === 'availabilityStatus' ? '150px' :
+                                                              column.key === 'inventoryRemarks' ? '200px' :
+                                                                '160px',
                                     }}
                                   >
-                                    <div className="break-words">
-                                      {column.label}
-                                    </div>
+                                    {column.label}
                                   </TableHead>
                                 ))}
                             </TableRow>
                           </TableHeader>
+                          <TableBody>
+                            {filteredProcessedOrders.map((order, idx) => (
+                              <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
+                                {historyColumns
+                                  .filter((col) => visibleHistoryColumns[col.key])
+                                  .map((column) => (
+                                    <TableCell
+                                      key={column.key}
+                                      className="border-b px-4 py-3 align-top"
+                                      style={{
+                                        minWidth: column.key === 'orderNo' ? '120px' :
+                                          column.key === 'itemList' ? '130px' :
+                                            column.key === 'quotationNo' ? '150px' :
+                                              column.key === 'companyName' ? '250px' :
+                                                column.key === 'contactPersonName' ? '180px' :
+                                                  column.key === 'contactNumber' ? '140px' :
+                                                    column.key === 'billingAddress' ? '200px' :
+                                                      column.key === 'shippingAddress' ? '200px' :
+                                                        column.key === 'isOrderAcceptable' ? '150px' :
+                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
+                                                            column.key === 'remarks' ? '200px' :
+                                                              column.key === 'availabilityStatus' ? '150px' :
+                                                                column.key === 'inventoryRemarks' ? '200px' :
+                                                                  '160px',
+                                      }}
+                                    >
+                                      <div className="break-words whitespace-normal leading-relaxed">
+                                        {renderCellContent(order, column.key)}
+                                      </div>
+                                    </TableCell>
+                                  ))}
+                              </TableRow>
+                            ))}
+                            {filteredProcessedOrders.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
+                                  className="text-center text-muted-foreground h-32"
+                                >
+                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
                         </Table>
-
-                        <div className="overflow-y-auto" style={{ maxHeight: '500px' }}>
-                          <Table>
-                            <TableBody>
-                              {filteredProcessedOrders.map((order, idx) => (
-                                <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
-                                  {historyColumns
-                                    .filter((col) => visibleHistoryColumns[col.key])
-                                    .map((column) => (
-                                      <TableCell
-                                        key={column.key}
-                                        className="border-b px-4 py-3 align-top"
-                                        style={{
-                                          width: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '130px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              column.key === 'availabilityStatus' ? '150px' :
-                                                                column.key === 'inventoryRemarks' ? '200px' :
-                                                                  '160px',
-                                          minWidth: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '130px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              column.key === 'availabilityStatus' ? '150px' :
-                                                                column.key === 'inventoryRemarks' ? '200px' :
-                                                                  '160px',
-                                          maxWidth: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '130px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              column.key === 'availabilityStatus' ? '150px' :
-                                                                column.key === 'inventoryRemarks' ? '200px' :
-                                                                  '160px'
-                                        }}
-                                      >
-                                        <div className="break-words whitespace-normal leading-relaxed">
-                                          {renderCellContent(order, column.key)}
-                                        </div>
-                                      </TableCell>
-                                    ))}
-                                </TableRow>
-                              ))}
-                              {filteredProcessedOrders.length === 0 && (
-                                <TableRow>
-                                  <TableCell
-                                    colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                    className="text-center text-muted-foreground h-32"
-                                  >
-                                    {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                  </TableCell>
-                                </TableRow>
-                              )}
-                            </TableBody>
-                          </Table>
-                        </div>
                       </div>
                     </div>
-                  </div>
                   </>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
+            </CardContent>
+          </Card>
         </Tabs>
 
         {/* Process Dialog — Scan -> Compare -> Preview/Edit -> Submit */}

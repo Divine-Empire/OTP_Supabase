@@ -70,6 +70,7 @@ export function mapOrderAcceptableRowToUI(row: any): any {
     transportMode: order.transport_mode || "",
     destination: order.destination || "",
     poNumber: order.po_number || "",
+    quotationCopy: order.quotation_copy || "",
     acceptanceCopy: order.acceptance_file_upload || "",
     amount: order.amount_with_tax || 0,
     gstNo: order.gst_number || "",
@@ -312,6 +313,60 @@ export function mapPreInvoiceRowToUI(row: any): any {
     paymentAttachmentUrl: row.payment_attachment_url || "",
     srnAttachmentUrl: row.srn_attachment_url || "",
     remarks: row.remarks || "",
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/debit-note-for-invoice (an
+// otp_pre_invoice_queue row, joined to its parent otp_orders) into the UI
+// field names debit-note-for-invoice/page.tsx expects.
+export function mapDebitNoteForInvoicePendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    queueId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: row.quotation_number || order.quotation_number || "",
+    timestamp: formatDateTime(row.invoiced_at || row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    sourceStage: row.source_stage || "",
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
+    rawItems: row.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/debit-note-for-invoice (an
+// otp_debit_note_for_invoice row, joined to its parent otp_orders +
+// otp_pre_invoice_queue) into the UI field names
+// debit-note-for-invoice/page.tsx expects.
+export function mapDebitNoteForInvoiceHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const queue = row.queue || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: queue.quotation_number || order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    sourceStage: queue.source_stage || "",
+    items: (queue.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
+    rawItems: queue.items || [],
+
+    amount: row.amount ?? "",
+    dnNumber: row.dn_number || "",
+    dnAttachmentUrl: row.dn_attachment_url || "",
+    createdBy: row.created_by || "",
   }
 }
 

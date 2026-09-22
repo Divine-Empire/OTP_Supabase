@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 // Stage — Pro-Forma Invoice (only reached when otp_orders.payment_mode =
 // 'pi against advance' — see order-acceptable/route.ts).
@@ -81,7 +82,8 @@ export async function POST(request: Request) {
 
     // Only now does Check Inventory's planned date get set for this
     // order — Pro-Forma Invoice being processed is what unlocks it.
-    const checkInventoryPlanned = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+    // Planned = this record's creation time (now) + Check Inventory's TAT.
+    const checkInventoryPlanned = addTatMinutes(new Date(), await getStageTatMinutes("check_inventory"))
     const { error: updateError } = await supabase
       .from("otp_orders_acceptable")
       .update({ check_inventory_planned: checkInventoryPlanned })

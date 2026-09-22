@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapProformaInvoicePendingRowToUI, mapProformaInvoiceHistoryRowToUI } from "@/lib/otp-utils"
+import { mapDebitNoteForInvoicePendingRowToUI, mapDebitNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -32,38 +32,35 @@ const pendingColumns = [
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
-  { key: "paymentMode", label: "Payment Mode", searchable: true },
-  { key: "amount", label: "Amount", searchable: true },
+  { key: "sourceStage", label: "Source Stage", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
 ]
 
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
-  { key: "piNumber", label: "PI Number", searchable: true },
-  { key: "piAmount", label: "PI Amount", searchable: false },
-  { key: "piUpload", label: "PI Upload", searchable: false },
-  { key: "remark", label: "Remark", searchable: true },
+  { key: "amount", label: "Amount", searchable: true },
+  { key: "dnNumber", label: "DN Number", searchable: true },
+  { key: "dnAttachment", label: "DN Attachment", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
 
-export default function ProformaInvoicePage() {
+export default function DebitNoteForInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
-  const [piNumber, setPiNumber] = useState("")
-  const [piAmount, setPiAmount] = useState("")
-  const [piUploadFile, setPiUploadFile] = useState<File | null>(null)
-  const [remark, setRemark] = useState("")
+  const [amount, setAmount] = useState("")
+  const [dnNumber, setDnNumber] = useState("")
+  const [dnAttachmentFile, setDnAttachmentFile] = useState<File | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
     pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
   )
@@ -76,15 +73,15 @@ export default function ProformaInvoicePage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/otp-supabase/proforma-invoice?status=pending")
+      const response = await fetch("/api/otp-supabase/debit-note-for-invoice?status=pending")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setOrders(result.data.map(mapProformaInvoicePendingRowToUI))
+        setOrders(result.data.map(mapDebitNoteForInvoicePendingRowToUI))
       } else {
         setOrders([])
       }
     } catch (err: any) {
-      console.error("Error fetching proforma-invoice pending queue:", err)
+      console.error("Error fetching debit-note-for-invoice pending queue:", err)
       setError(err.message)
       setOrders([])
     } finally {
@@ -95,15 +92,15 @@ export default function ProformaInvoicePage() {
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
-      const response = await fetch("/api/otp-supabase/proforma-invoice?status=history")
+      const response = await fetch("/api/otp-supabase/debit-note-for-invoice?status=history")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapProformaInvoiceHistoryRowToUI))
+        setProcessedOrders(result.data.map(mapDebitNoteForInvoiceHistoryRowToUI))
       } else {
         setProcessedOrders([])
       }
     } catch (err) {
-      console.error("Error fetching proforma-invoice history:", err)
+      console.error("Error fetching debit-note-for-invoice history:", err)
       setProcessedOrders([])
     } finally {
       setProcessedLoading(false)
@@ -116,6 +113,16 @@ export default function ProformaInvoicePage() {
 
   const handleProcessedTabClick = async () => {
     await fetchProcessedOrders()
+  }
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value as "pending" | "history")
+    if (value === "history") handleProcessedTabClick()
+  }
+
+  const handleRefresh = () => {
+    if (activeTab === "history") fetchProcessedOrders()
+    else fetchOrders()
   }
 
   const filteredOrders = useMemo(() => {
@@ -153,10 +160,9 @@ export default function ProformaInvoicePage() {
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
-    setPiNumber("")
-    setPiAmount("")
-    setPiUploadFile(null)
-    setRemark("")
+    setAmount("")
+    setDnNumber("")
+    setDnAttachmentFile(null)
     setIsDialogOpen(true)
   }
 
@@ -165,38 +171,37 @@ export default function ProformaInvoicePage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Pro-Forma Invoice — inserts a row into otp_proforma_invoice,
-  // which moves this order from Pending to History here, AND is what
-  // unlocks Check Inventory's own planned date for this order (see
-  // app/api/otp-supabase/proforma-invoice/route.ts POST).
+  // Submits Debit Note (Inv.) — inserts a row into
+  // otp_debit_note_for_invoice, moving this wave from Pending to History,
+  // AND is what unlocks Make Invoice's own planned date for this wave (see
+  // app/api/otp-supabase/debit-note-for-invoice/route.ts POST).
   const handleSubmit = async () => {
     if (!selectedOrder) return
-    if (!piNumber.trim() || !piAmount || !piUploadFile) {
-      alert("PI Number, PI Amount and PI Upload are required")
+    if (!amount || !dnNumber.trim() || !dnAttachmentFile) {
+      alert("Amount, DN Number and DN Attachment are required")
       return
     }
 
     setIsSubmitting(true)
     try {
-      let piUploadUrl = ""
-      if (piUploadFile) {
+      let dnAttachmentUrl = ""
+      if (dnAttachmentFile) {
         const formData = new FormData()
-        formData.append("file", piUploadFile)
-        formData.append("folder", "proforma-invoice")
+        formData.append("file", dnAttachmentFile)
+        formData.append("folder", "debit-note-for-invoice")
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
-        if (uploadJson.success) piUploadUrl = uploadJson.url
+        if (uploadJson.success) dnAttachmentUrl = uploadJson.url
       }
 
-      const response = await fetch("/api/otp-supabase/proforma-invoice", {
+      const response = await fetch("/api/otp-supabase/debit-note-for-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orderId: selectedOrder.orderId || selectedOrder.id,
-          piNumber: piNumber.trim(),
-          piAmount,
-          piUploadUrl,
-          remark,
+          queueId: selectedOrder.queueId || selectedOrder.id,
+          amount,
+          dnNumber: dnNumber.trim(),
+          dnAttachmentUrl,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
@@ -206,12 +211,12 @@ export default function ProformaInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — Pro-Forma Invoice recorded. Check Inventory is now scheduled.`)
+        alert(`Order ${selectedOrder.orderNo} — Debit Note (Inv.) recorded. Make Invoice is now scheduled.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
-      console.error("Error submitting proforma-invoice:", err)
+      console.error("Error submitting debit-note-for-invoice:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -239,17 +244,18 @@ export default function ProformaInvoicePage() {
             View Items
           </Button>
         )
-      case "piUpload":
-        return order.piUploadUrl ? (
-          <a href={order.piUploadUrl} target="_blank" rel="noopener noreferrer">
+      case "dnAttachment":
+        return order.dnAttachmentUrl ? (
+          <a href={order.dnAttachmentUrl} target="_blank" rel="noopener noreferrer">
             <Badge variant="default">Link</Badge>
           </a>
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
+      case "sourceStage":
+        return <Badge variant="outline">{value || "N/A"}</Badge>
       case "amount":
-      case "piAmount":
-        return value ? `₹${Number(value).toLocaleString()}` : ""
+        return value !== "" && value !== null && value !== undefined ? `₹${Number(value).toLocaleString()}` : ""
       default:
         return value || ""
     }
@@ -260,7 +266,7 @@ export default function ProformaInvoicePage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading pro-forma invoice queue...</span>
+          <span className="ml-2">Loading debit note (inv.) queue...</span>
         </div>
       </MainLayout>
     )
@@ -283,28 +289,28 @@ export default function ProformaInvoicePage() {
     )
   }
 
+  const activeColumns = activeTab === "pending" ? pendingColumns : historyColumns
+  const searchPlaceholder = `Search by ${activeColumns
+    .filter((col) => col.searchable)
+    .map((col) => col.label)
+    .join(", ")}`
+
   return (
     <MainLayout>
       <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
           <Card className="flex-1 flex flex-col min-h-0">
             <CardHeader className="border-b py-3 shrink-0">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
+                  <TabsTrigger value="history">History ({filteredProcessedOrders.length})</TabsTrigger>
                 </TabsList>
 
                 <div className="relative flex-1 min-w-[200px] max-w-md">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
-                    placeholder="Search..."
+                    placeholder={searchPlaceholder}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10"
@@ -312,7 +318,7 @@ export default function ProformaInvoicePage() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
+                  <Button onClick={handleRefresh} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
                   </Button>
@@ -330,35 +336,35 @@ export default function ProformaInvoicePage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
+                          onClick={activeTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
                         >
                           Show All
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
+                          onClick={activeTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
                         >
                           Hide All
                         </Button>
                       </div>
                       <DropdownMenuSeparator />
                       <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
+                        {(activeTab === "pending" ? pendingColumns : historyColumns).map((column) => {
+                          const visibleColumns = activeTab === "pending" ? visiblePendingColumns : visibleHistoryColumns
+                          const toggleColumn = activeTab === "pending" ? togglePendingColumn : toggleHistoryColumn
                           return (
                             <div key={column.key} className="flex items-center space-x-2">
                               <Checkbox
                                 id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
+                                checked={visibleColumns[column.key]}
+                                onCheckedChange={() => toggleColumn(column.key)}
                               />
                               <Label htmlFor={`col-${column.key}`} className="text-sm">
                                 {column.label}
                               </Label>
                             </div>
-                          );
+                          )
                         })}
                       </div>
                     </DropdownMenuContent>
@@ -381,83 +387,57 @@ export default function ProformaInvoicePage() {
                   ))}
                   {filteredOrders.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending pro-forma invoices"}
+                      {searchTerm ? "No orders match your search criteria" : "No pending debit note (inv.) records"}
                     </p>
                   )}
                 </div>
 
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'itemList' ? '90px' :
-                                      column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'paymentMode' ? '140px' :
-                                                    column.key === 'amount' ? '120px' :
-                                                      '160px',
-                                }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredOrders.map((order, idx) => (
-                          <TableRow key={order.id || idx} className="hover:bg-gray-50">
+                <div className="hidden md:flex md:flex-col flex-1 min-h-0 border rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto flex-1 min-h-0 flex flex-col">
+                    <div style={{ minWidth: "max-content" }} className="flex flex-col flex-1 min-h-0">
+                      <Table>
+                        <TableHeader className="sticky top-0 z-10 bg-gray-50">
+                          <TableRow>
                             {pendingColumns
                               .filter((col) => visiblePendingColumns[col.key])
                               .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
-                                        column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'paymentMode' ? '140px' :
-                                                      column.key === 'amount' ? '120px' :
-                                                        '160px',
-                                  }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
+                                <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
+                                  <div className="break-words">{column.label}</div>
+                                </TableHead>
                               ))}
                           </TableRow>
-                        ))}
-                        {filteredOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm ? "No orders match your search criteria" : "No pending pro-forma invoices"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                      </Table>
+                      <div className="overflow-y-auto flex-1">
+                        <Table>
+                          <TableBody>
+                            {filteredOrders.map((order, idx) => (
+                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
+                                {pendingColumns
+                                  .filter((col) => visiblePendingColumns[col.key])
+                                  .map((column) => (
+                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top">
+                                      <div className="break-words whitespace-normal leading-relaxed">
+                                        {renderCellContent(order, column.key)}
+                                      </div>
+                                    </TableCell>
+                                  ))}
+                              </TableRow>
+                            ))}
+                            {filteredOrders.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
+                                  className="text-center text-muted-foreground h-32"
+                                >
+                                  {searchTerm ? "No orders match your search criteria" : "No pending debit note (inv.) records"}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
@@ -482,91 +462,57 @@ export default function ProformaInvoicePage() {
                       ))}
                       {filteredProcessedOrders.length === 0 && (
                         <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
+                          {searchTerm ? "No orders match your search criteria" : "No processed records found"}
                         </p>
                       )}
                     </div>
 
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'itemList' ? '90px' :
-                                        column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'paymentMode' ? '140px' :
-                                                      column.key === 'amount' ? '120px' :
-                                                        column.key === 'piNumber' ? '140px' :
-                                                          column.key === 'piAmount' ? '120px' :
-                                                            column.key === 'piUpload' ? '100px' :
-                                                              column.key === 'remark' ? '200px' :
-                                                                column.key === 'createdBy' ? '150px' :
-                                                                  '160px',
-                                    }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
+                    <div className="hidden md:flex md:flex-col flex-1 min-h-0 border rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto flex-1 min-h-0 flex flex-col">
+                        <div style={{ minWidth: "max-content" }} className="flex flex-col flex-1 min-h-0">
+                          <Table>
+                            <TableHeader className="sticky top-0 z-10 bg-gray-50">
+                              <TableRow>
                                 {historyColumns
                                   .filter((col) => visibleHistoryColumns[col.key])
                                   .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'itemList' ? '90px' :
-                                          column.key === 'timestamp' ? '130px' :
-                                            column.key === 'orderNo' ? '120px' :
-                                              column.key === 'quotationNo' ? '150px' :
-                                                column.key === 'companyName' ? '250px' :
-                                                  column.key === 'contactPersonName' ? '180px' :
-                                                    column.key === 'contactNumber' ? '140px' :
-                                                      column.key === 'paymentMode' ? '140px' :
-                                                        column.key === 'amount' ? '120px' :
-                                                          column.key === 'piNumber' ? '140px' :
-                                                            column.key === 'piAmount' ? '120px' :
-                                                              column.key === 'piUpload' ? '100px' :
-                                                                column.key === 'remark' ? '200px' :
-                                                                  column.key === 'createdBy' ? '150px' :
-                                                                    '160px',
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
+                                    <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
+                                      <div className="break-words">{column.label}</div>
+                                    </TableHead>
                                   ))}
                               </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
+                            </TableHeader>
+                          </Table>
+                          <div className="overflow-y-auto flex-1">
+                            <Table>
+                              <TableBody>
+                                {filteredProcessedOrders.map((order, idx) => (
+                                  <TableRow key={order.id || idx} className="hover:bg-gray-50">
+                                    {historyColumns
+                                      .filter((col) => visibleHistoryColumns[col.key])
+                                      .map((column) => (
+                                        <TableCell key={column.key} className="border-b px-4 py-3 align-top">
+                                          <div className="break-words whitespace-normal leading-relaxed">
+                                            {renderCellContent(order, column.key)}
+                                          </div>
+                                        </TableCell>
+                                      ))}
+                                  </TableRow>
+                                ))}
+                                {filteredProcessedOrders.length === 0 && (
+                                  <TableRow>
+                                    <TableCell
+                                      colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
+                                      className="text-center text-muted-foreground h-32"
+                                    >
+                                      {searchTerm ? "No orders match your search criteria" : "No processed records found"}
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </>
@@ -580,8 +526,8 @@ export default function ProformaInvoicePage() {
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Process Pro-Forma Invoice</DialogTitle>
-              <DialogDescription>Enter the Pro-Forma Invoice details for this order</DialogDescription>
+              <DialogTitle>Process Debit Note (Inv.)</DialogTitle>
+              <DialogDescription>Enter the Debit Note details for this wave</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -597,35 +543,30 @@ export default function ProformaInvoicePage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="piNumber">PI Number *</Label>
+                  <Label htmlFor="amount">Amount *</Label>
                   <Input
-                    id="piNumber"
-                    value={piNumber}
-                    onChange={(e) => setPiNumber(e.target.value)}
-                    placeholder="Enter PI number"
+                    id="amount"
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="Enter amount"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="piAmount">PI Amount *</Label>
+                  <Label htmlFor="dnNumber">DN Number *</Label>
                   <Input
-                    id="piAmount"
-                    type="number"
-                    value={piAmount}
-                    onChange={(e) => setPiAmount(e.target.value)}
-                    placeholder="Enter PI amount"
+                    id="dnNumber"
+                    value={dnNumber}
+                    onChange={(e) => setDnNumber(e.target.value)}
+                    placeholder="Enter DN number"
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="piUpload">PI Upload *</Label>
-                <Input id="piUpload" type="file" onChange={(e) => setPiUploadFile(e.target.files?.[0] || null)} />
-                {piUploadFile && <p className="text-sm text-muted-foreground">Selected: {piUploadFile.name}</p>}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="remark">Remarks</Label>
-                <Input id="remark" value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="Enter any remarks..." />
+                <Label htmlFor="dnAttachment">DN Attachment *</Label>
+                <Input id="dnAttachment" type="file" onChange={(e) => setDnAttachmentFile(e.target.files?.[0] || null)} />
+                {dnAttachmentFile && <p className="text-sm text-muted-foreground">Selected: {dnAttachmentFile.name}</p>}
               </div>
 
               <div className="flex justify-end gap-2">
@@ -634,7 +575,7 @@ export default function ProformaInvoicePage() {
                 </Button>
                 <Button
                   onClick={handleSubmit}
-                  disabled={!piNumber.trim() || !piAmount || !piUploadFile || isSubmitting}
+                  disabled={!amount || !dnNumber.trim() || !dnAttachmentFile || isSubmitting}
                 >
                   {isSubmitting ? (
                     <>
@@ -676,7 +617,7 @@ export default function ProformaInvoicePage() {
                     <TableRow key={idx}>
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-right">{item.qty}</TableCell>
                     </TableRow>
                   ))
                 )}

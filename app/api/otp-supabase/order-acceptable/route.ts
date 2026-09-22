@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 // Stage 1 — Order Acceptable.
 //
@@ -65,9 +66,8 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
-    // Stage 2 (Check Inventory) planned date — only meaningful if the order
-    // actually moves forward. Simple fixed 3-day offset for now; a real
-    // otp_stage_tat-driven calculation is a later phase.
+    // Next stage's planned date = this Order Acceptable record's creation
+    // time (now) + that stage's TAT duration (Settings > TAT Management).
     //
     // Orders paying "pi against advance" get a Pro-Forma Invoice stage
     // inserted before Check Inventory (see Database/28_otp_proforma_invoice.sql):
@@ -93,13 +93,13 @@ export async function POST(request: Request) {
         .maybeSingle()
       if (orderError) throw orderError
 
-      const threeDaysOut = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString()
+      const now = new Date()
       if (order?.payment_mode === "pi against advance") {
-        proformaInvoicePlanned = threeDaysOut
+        proformaInvoicePlanned = addTatMinutes(now, await getStageTatMinutes("proforma_invoice"))
       } else if (order?.payment_mode === "na") {
-        debitNotePlanned = threeDaysOut
+        debitNotePlanned = addTatMinutes(now, await getStageTatMinutes("debit_note"))
       } else {
-        checkInventoryPlanned = threeDaysOut
+        checkInventoryPlanned = addTatMinutes(now, await getStageTatMinutes("check_inventory"))
       }
     }
 

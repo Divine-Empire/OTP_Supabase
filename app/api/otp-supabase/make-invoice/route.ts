@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 // Stage — Make Invoice.
 //
-// Pending: otp_pre_invoice_queue.status = 'invoiced' AND no matching
-//          otp_make_invoice row yet (one row per queue wave).
+// Pending: otp_pre_invoice_queue.make_invoice_planned IS NOT NULL (set once
+//          Debit Note (Inv.) has been processed for this wave — see
+//          Database/32_otp_debit_note_for_invoice.sql and
+//          app/api/otp-supabase/debit-note-for-invoice/route.ts) AND no
+//          matching otp_make_invoice row yet (one row per queue wave).
 // History: a matching otp_make_invoice row exists.
 export async function GET(request: Request) {
   try {
@@ -29,8 +33,8 @@ export async function GET(request: Request) {
     let query = supabase
       .from("otp_pre_invoice_queue")
       .select("*, order:otp_orders(*)")
-      .eq("status", "invoiced")
-      .order("invoiced_at", { ascending: false })
+      .not("make_invoice_planned", "is", null)
+      .order("make_invoice_planned", { ascending: false })
 
     if (doneIds.length > 0) {
       query = query.not("id", "in", `(${doneIds.join(",")})`)
@@ -92,12 +96,10 @@ export async function POST(request: Request) {
     // flagged for calibration back at Pre-Invoice; a wave with
     // calibration_required = false leaves this null, so it never appears
     // in Calibration Certificate's pending list (see
-    // Database/27_otp_calibration_certificate.sql). Simple fixed 5-day
-    // offset for now, matching otp_stage_tat's own 'calibration' default —
-    // a real TAT-table-driven calculation is a later phase, same as every
-    // other planned date in this pipeline.
+    // Database/27_otp_calibration_certificate.sql).
+    // Planned = this record's creation time (now) + Calibration's TAT.
     const calibrationPlanned = queueRow.calibration_required
-      ? new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+      ? addTatMinutes(new Date(), await getStageTatMinutes("calibration"))
       : null
 
     const { data, error } = await supabase
