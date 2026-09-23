@@ -21,6 +21,8 @@ export const TAT_STAGE_OPTIONS: TatStageOption[] = [
   { key: "debit_note_for_invoice", label: "Debit Note (Inv.)", plannedField: "otp_pre_invoice_queue.debit_note_planned" },
   { key: "make_invoice", label: "Make Invoice", plannedField: "otp_pre_invoice_queue.make_invoice_planned" },
   { key: "calibration", label: "Calibration Certificate", plannedField: "otp_make_invoice.calibration_planned" },
+  { key: "packaging_transport", label: "Packaging and Transport", plannedField: "otp_make_invoice.packaging_transport_planned" },
+  { key: "bilty_upload", label: "Bilty Upload", plannedField: "otp_packaging_transport.bilty_upload_planned" },
 ]
 
 export interface DHM {

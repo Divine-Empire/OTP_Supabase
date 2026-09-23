@@ -11,6 +11,10 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 //          calibration_required = false never gets a planned date, so it
 //          never appears here — it just stays done in Make Invoice's own
 //          History, as intended.
+//
+// Packaging and Transport branches directly off Make Invoice in parallel
+// with this stage (see make-invoice/route.ts) — not chained after it —
+// so this route does not touch packaging_transport_planned.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapMakeInvoicePendingRowToUI, mapMakeInvoiceHistoryRowToUI } from "@/lib/otp-utils"
+import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -32,38 +33,64 @@ const pendingColumns = [
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
-  { key: "sourceStage", label: "Source Stage", searchable: true },
-  { key: "debitNoteForInvoiceRequired", label: "Debit Note", searchable: true },
+  { key: "invoiceNumber", label: "Invoice Number", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
 ]
 
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
-  { key: "invoiceNumber", label: "Invoice Number", searchable: true },
-  { key: "invoiceDate", label: "Invoice Date", searchable: true },
-  { key: "invoiceUpload", label: "Invoice Upload", searchable: false },
-  { key: "ewayBillNumber", label: "Eway Bill Number", searchable: true },
-  { key: "ewayBillUpload", label: "Eway Bill Upload", searchable: false },
-  { key: "totalBillAmount", label: "Total Bill Amount", searchable: false },
-  { key: "remarks", label: "Remarks", searchable: true },
+  { key: "transporterName", label: "Transporter Name", searchable: true },
+  { key: "transporterContact", label: "Transporter Contact", searchable: true },
+  { key: "biltyNumber", label: "Bilty/Docket No.", searchable: true },
+  { key: "freightCharge", label: "Freight Charge", searchable: false },
+  { key: "hamaliCharge", label: "Hamali Charge", searchable: false },
+  { key: "parkingCharge", label: "Parking Charge", searchable: false },
+  { key: "expenseAmount", label: "Expense Amount", searchable: false },
+  { key: "beforePhoto", label: "Before Photo", searchable: false },
+  { key: "afterPhoto", label: "After Photo", searchable: false },
+  { key: "biltyUpload", label: "Bilty Upload", searchable: false },
+  { key: "transporterRemarks", label: "Transporter Assign", searchable: true },
+  { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
+  { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
 
-export default function MakeInvoicePage() {
+async function uploadFiles(files: File[], folder: string): Promise<string[]> {
+  const urls: string[] = []
+  for (const file of files) {
+    const formData = new FormData()
+    formData.append("file", file)
+    formData.append("folder", folder)
+    const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+    const uploadJson = await uploadRes.json()
+    if (uploadJson.success) urls.push(uploadJson.url)
+  }
+  return urls
+}
+
+export default function PackagingTransportPage() {
   const [orders, setOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
-  const [invoiceNumber, setInvoiceNumber] = useState("")
-  const [invoiceDate, setInvoiceDate] = useState("")
-  const [invoiceUploadFile, setInvoiceUploadFile] = useState<File | null>(null)
-  const [ewayBillNumber, setEwayBillNumber] = useState("")
-  const [ewayBillUploadFile, setEwayBillUploadFile] = useState<File | null>(null)
-  const [totalBillAmount, setTotalBillAmount] = useState("")
-  const [remarks, setRemarks] = useState("")
+
+  const [beforePhotoFiles, setBeforePhotoFiles] = useState<File[]>([])
+  const [afterPhotoFiles, setAfterPhotoFiles] = useState<File[]>([])
+  const [biltyUploadFiles, setBiltyUploadFiles] = useState<File[]>([])
+  const [transporterName, setTransporterName] = useState("")
+  const [transporterContact, setTransporterContact] = useState("")
+  const [biltyNumber, setBiltyNumber] = useState("")
+  const [freightCharge, setFreightCharge] = useState("")
+  const [hamaliCharge, setHamaliCharge] = useState("")
+  const [parkingCharge, setParkingCharge] = useState("")
+  const [transporterRemarks, setTransporterRemarks] = useState("")
+  const [expenseAmount, setExpenseAmount] = useState("")
+  const [dispatchStatus, setDispatchStatus] = useState("okay")
+  const [notOkReason, setNotOkReason] = useState("")
+
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
@@ -82,15 +109,15 @@ export default function MakeInvoicePage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/otp-supabase/make-invoice?status=pending")
+      const response = await fetch("/api/otp-supabase/packaging-transport?status=pending")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setOrders(result.data.map(mapMakeInvoicePendingRowToUI))
+        setOrders(result.data.map(mapPackagingTransportPendingRowToUI))
       } else {
         setOrders([])
       }
     } catch (err: any) {
-      console.error("Error fetching make-invoice pending queue:", err)
+      console.error("Error fetching packaging-transport pending queue:", err)
       setError(err.message)
       setOrders([])
     } finally {
@@ -101,15 +128,15 @@ export default function MakeInvoicePage() {
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
-      const response = await fetch("/api/otp-supabase/make-invoice?status=history")
+      const response = await fetch("/api/otp-supabase/packaging-transport?status=history")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapMakeInvoiceHistoryRowToUI))
+        setProcessedOrders(result.data.map(mapPackagingTransportHistoryRowToUI))
       } else {
         setProcessedOrders([])
       }
     } catch (err) {
-      console.error("Error fetching make-invoice history:", err)
+      console.error("Error fetching packaging-transport history:", err)
       setProcessedOrders([])
     } finally {
       setProcessedLoading(false)
@@ -159,13 +186,19 @@ export default function MakeInvoicePage() {
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
-    setInvoiceNumber("")
-    setInvoiceDate("")
-    setInvoiceUploadFile(null)
-    setEwayBillNumber("")
-    setEwayBillUploadFile(null)
-    setTotalBillAmount("")
-    setRemarks("")
+    setBeforePhotoFiles([])
+    setAfterPhotoFiles([])
+    setBiltyUploadFiles([])
+    setTransporterName("")
+    setTransporterContact("")
+    setBiltyNumber("")
+    setFreightCharge("")
+    setHamaliCharge("")
+    setParkingCharge("")
+    setTransporterRemarks("")
+    setExpenseAmount("")
+    setDispatchStatus("okay")
+    setNotOkReason("")
     setIsDialogOpen(true)
   }
 
@@ -174,51 +207,51 @@ export default function MakeInvoicePage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Make Invoice — inserts a row into otp_make_invoice (one per
-  // otp_pre_invoice_queue wave), which is what moves this wave from
-  // Pending to History here. This is where the Invoice Number actually
-  // gets captured, one stage later than the wave was first queued.
+  // Submits Packaging and Transport — inserts a row into
+  // otp_packaging_transport (one per otp_calibration_certificate record),
+  // which is what moves this order from Pending to History here.
   const handleSubmit = async () => {
     if (!selectedOrder) return
-    if (!invoiceNumber.trim() || !invoiceDate || !totalBillAmount || !invoiceUploadFile) {
-      alert("Invoice Number, Invoice Date, Total Bill Amount and Invoice Upload are required")
+
+    if (beforePhotoFiles.length === 0) {
+      alert("Please upload at least one Before Photo (Packing).")
+      return
+    }
+    if (!transporterName.trim()) {
+      alert("Please enter Transporter / Driver Name.")
+      return
+    }
+    if (dispatchStatus === "notokay" && !notOkReason.trim()) {
+      alert("Please provide a reason for 'Not Okay' status.")
       return
     }
 
     setIsSubmitting(true)
     try {
-      let invoiceUploadUrl = ""
-      if (invoiceUploadFile) {
-        const formData = new FormData()
-        formData.append("file", invoiceUploadFile)
-        formData.append("folder", "make-invoice")
-        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
-        const uploadJson = await uploadRes.json()
-        if (uploadJson.success) invoiceUploadUrl = uploadJson.url
-      }
+      const [beforePhotoUrls, afterPhotoUrls, biltyUploadUrls] = await Promise.all([
+        uploadFiles(beforePhotoFiles, "packaging_transport/before"),
+        uploadFiles(afterPhotoFiles, "packaging_transport/after"),
+        uploadFiles(biltyUploadFiles, "packaging_transport/bilty"),
+      ])
 
-      let ewayBillUploadUrl = ""
-      if (ewayBillUploadFile) {
-        const formData = new FormData()
-        formData.append("file", ewayBillUploadFile)
-        formData.append("folder", "make-invoice-eway")
-        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
-        const uploadJson = await uploadRes.json()
-        if (uploadJson.success) ewayBillUploadUrl = uploadJson.url
-      }
-
-      const response = await fetch("/api/otp-supabase/make-invoice", {
+      const response = await fetch("/api/otp-supabase/packaging-transport", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          queueId: selectedOrder.queueId || selectedOrder.id,
-          invoiceNumber: invoiceNumber.trim(),
-          invoiceDate: invoiceDate || null,
-          invoiceUploadUrl,
-          ewayBillNumber,
-          ewayBillUploadUrl,
-          totalBillAmount: totalBillAmount || null,
-          remarks,
+          makeInvoiceId: selectedOrder.makeInvoiceId || selectedOrder.id,
+          beforePhotoUrls,
+          afterPhotoUrls,
+          transporterName,
+          transporterContact,
+          biltyNumber,
+          biltyUploadUrls,
+          freightCharge,
+          hamaliCharge,
+          parkingCharge,
+          transporterRemarks,
+          expenseAmount,
+          dispatchStatus,
+          notOkReason,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
@@ -228,12 +261,12 @@ export default function MakeInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — Invoice ${invoiceNumber.trim()} created.`)
+        alert(`Order ${selectedOrder.orderNo} — packaging and transport recorded.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
-      console.error("Error submitting make-invoice:", err)
+      console.error("Error submitting packaging-transport:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -261,37 +294,52 @@ export default function MakeInvoicePage() {
             View Items
           </Button>
         )
-      case "invoiceUpload":
-        return order.invoiceUploadUrl ? (
-          <a href={order.invoiceUploadUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
-          </a>
+      case "beforePhoto":
+        return order.beforePhotoUrls && order.beforePhotoUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {order.beforePhotoUrls.map((url: string, idx: number) => (
+              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                <Badge variant="default">{idx + 1}</Badge>
+              </a>
+            ))}
+          </div>
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
-      case "ewayBillUpload":
-        return order.ewayBillUploadUrl ? (
-          <a href={order.ewayBillUploadUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
-          </a>
+      case "afterPhoto":
+        return order.afterPhotoUrls && order.afterPhotoUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {order.afterPhotoUrls.map((url: string, idx: number) => (
+              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                <Badge variant="default">{idx + 1}</Badge>
+              </a>
+            ))}
+          </div>
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
-      case "totalBillAmount":
-        return value ? `₹${Number(value).toLocaleString()}` : ""
-      case "sourceStage":
-        return <Badge variant="outline">{value || "N/A"}</Badge>
-      case "debitNoteForInvoiceRequired":
-        return value ? (
-          <span
-            className={`inline-flex items-center justify-center rounded-md px-2.5 py-1 text-xs font-bold ${
-              value === "YES" ? "bg-amber-100 text-amber-800 border border-amber-300" : "bg-emerald-100 text-emerald-800 border border-emerald-300"
-            }`}
-          >
-            {value}
-          </span>
+      case "biltyUpload":
+        return order.biltyUploadUrls && order.biltyUploadUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {order.biltyUploadUrls.map((url: string, idx: number) => (
+              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                <Badge variant="default">{idx + 1}</Badge>
+              </a>
+            ))}
+          </div>
         ) : (
-          ""
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "freightCharge":
+      case "hamaliCharge":
+      case "parkingCharge":
+      case "expenseAmount":
+        return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
+      case "dispatchStatus":
+        return (
+          <Badge variant={value === "notokay" ? "destructive" : "default"}>
+            {value === "notokay" ? "Not Okay" : "Okay"}
+          </Badge>
         )
       default:
         return value || ""
@@ -303,7 +351,7 @@ export default function MakeInvoicePage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading make-invoice queue...</span>
+          <span className="ml-2">Loading packaging and transport queue...</span>
         </div>
       </MainLayout>
     )
@@ -424,7 +472,7 @@ export default function MakeInvoicePage() {
                   ))}
                   {filteredOrders.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending make-invoice waves"}
+                      {searchTerm ? "No orders match your search criteria" : "No pending packaging/transport records"}
                     </p>
                   )}
                 </div>
@@ -440,19 +488,7 @@ export default function MakeInvoicePage() {
                               <TableHead
                                 key={column.key}
                                 className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'timestamp' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'sourceStage' ? '150px' :
-                                                  column.key === 'debitNoteForInvoiceRequired' ? '110px' :
-                                                    column.key === 'itemList' ? '130px' :
-                                                      '160px',
-                                }}
+                                style={{ minWidth: column.key === "actions" ? "120px" : "160px" }}
                               >
                                 {column.label}
                               </TableHead>
@@ -468,19 +504,7 @@ export default function MakeInvoicePage() {
                                 <TableCell
                                   key={column.key}
                                   className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'sourceStage' ? '150px' :
-                                                    column.key === 'debitNoteForInvoiceRequired' ? '110px' :
-                                                      column.key === 'itemList' ? '130px' :
-                                                        '160px',
-                                  }}
+                                  style={{ minWidth: column.key === "actions" ? "120px" : "160px" }}
                                 >
                                   <div className="break-words whitespace-normal leading-relaxed">
                                     {renderCellContent(order, column.key)}
@@ -495,7 +519,7 @@ export default function MakeInvoicePage() {
                               colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
                               className="text-center text-muted-foreground h-32"
                             >
-                              {searchTerm ? "No orders match your search criteria" : "No pending make-invoice waves"}
+                              {searchTerm ? "No orders match your search criteria" : "No pending packaging/transport records"}
                             </TableCell>
                           </TableRow>
                         )}
@@ -541,24 +565,7 @@ export default function MakeInvoicePage() {
                                   <TableHead
                                     key={column.key}
                                     className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'sourceStage' ? '150px' :
-                                                    column.key === 'invoiceNumber' ? '150px' :
-                                                      column.key === 'invoiceDate' ? '150px' :
-                                                        column.key === 'invoiceUpload' ? '150px' :
-                                                          column.key === 'ewayBillNumber' ? '180px' :
-                                                            column.key === 'ewayBillUpload' ? '150px' :
-                                                              column.key === 'totalBillAmount' ? '150px' :
-                                                                column.key === 'remarks' ? '200px' :
-                                                                  column.key === 'createdBy' ? '150px' :
-                                                                    '160px',
-                                    }}
+                                    style={{ minWidth: "160px" }}
                                   >
                                     {column.label}
                                   </TableHead>
@@ -571,28 +578,7 @@ export default function MakeInvoicePage() {
                                 {historyColumns
                                   .filter((col) => visibleHistoryColumns[col.key])
                                   .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'sourceStage' ? '150px' :
-                                                      column.key === 'invoiceNumber' ? '150px' :
-                                                        column.key === 'invoiceDate' ? '150px' :
-                                                          column.key === 'invoiceUpload' ? '150px' :
-                                                            column.key === 'ewayBillNumber' ? '180px' :
-                                                              column.key === 'ewayBillUpload' ? '150px' :
-                                                                column.key === 'totalBillAmount' ? '150px' :
-                                                                  column.key === 'remarks' ? '200px' :
-                                                                    column.key === 'createdBy' ? '150px' :
-                                                                      '160px',
-                                      }}
-                                    >
+                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top" style={{ minWidth: "160px" }}>
                                       <div className="break-words whitespace-normal leading-relaxed">
                                         {renderCellContent(order, column.key)}
                                       </div>
@@ -623,12 +609,12 @@ export default function MakeInvoicePage() {
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Process Make Invoice</DialogTitle>
-              <DialogDescription>Enter the invoice details for this order's available quantity</DialogDescription>
+              <DialogTitle>Packaging and Transport</DialogTitle>
+              <DialogDescription>Upload packaging photos and enter transportation details for this order</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="orderNo">Order No.</Label>
@@ -640,70 +626,176 @@ export default function MakeInvoicePage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Documentation */}
+              <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-200 space-y-4">
+                <h4 className="text-sm font-bold text-emerald-900">Documentation</h4>
                 <div className="space-y-2">
-                  <Label htmlFor="invoiceNumber">Invoice Number *</Label>
+                  <Label htmlFor="beforePhoto" className="text-emerald-700">
+                    Before Photo (Packing) <span className="text-red-500 font-bold">*</span>
+                  </Label>
                   <Input
-                    id="invoiceNumber"
-                    value={invoiceNumber}
-                    onChange={(e) => setInvoiceNumber(e.target.value)}
-                    placeholder="Enter invoice number"
+                    id="beforePhoto"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => setBeforePhotoFiles(Array.from(e.target.files || []))}
                   />
+                  {beforePhotoFiles.length > 0 && (
+                    <p className="text-xs text-muted-foreground">{beforePhotoFiles.length} file(s) selected</p>
+                  )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="invoiceDate">Invoice Date *</Label>
-                  <Input id="invoiceDate" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                  <Label htmlFor="afterPhoto" className="text-emerald-700">
+                    After Photo (Final Package)
+                  </Label>
+                  <Input
+                    id="afterPhoto"
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={(e) => setAfterPhotoFiles(Array.from(e.target.files || []))}
+                  />
+                  {afterPhotoFiles.length > 0 && (
+                    <p className="text-xs text-muted-foreground">{afterPhotoFiles.length} file(s) selected</p>
+                  )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* Transportation details */}
+              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-4">
+                <h4 className="text-sm font-bold text-indigo-900">Transportation Details</h4>
                 <div className="space-y-2">
-                  <Label htmlFor="ewayBillNumber">Eway Bill Number</Label>
+                  <Label htmlFor="transporterName" className="text-indigo-700">
+                    Assign Driver for Material Dispatch <span className="text-red-500 font-bold">*</span>
+                  </Label>
                   <Input
-                    id="ewayBillNumber"
-                    value={ewayBillNumber}
-                    onChange={(e) => setEwayBillNumber(e.target.value)}
-                    placeholder="Enter eway bill number"
+                    id="transporterName"
+                    value={transporterName}
+                    onChange={(e) => setTransporterName(e.target.value)}
+                    placeholder="Enter transporter name"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="transporterContact" className="text-indigo-700">
+                      Transporter Contact No.
+                    </Label>
+                    <Input
+                      id="transporterContact"
+                      value={transporterContact}
+                      onChange={(e) => setTransporterContact(e.target.value)}
+                      placeholder="Enter contact number"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="biltyNumber" className="text-indigo-700">
+                      Bilty No. / Docket No.
+                    </Label>
+                    <Input
+                      id="biltyNumber"
+                      value={biltyNumber}
+                      onChange={(e) => setBiltyNumber(e.target.value)}
+                      placeholder="Enter bilty/docket number"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="freightCharge" className="text-indigo-700">
+                      Freight Charge
+                    </Label>
+                    <Input id="freightCharge" type="number" value={freightCharge} onChange={(e) => setFreightCharge(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hamaliCharge" className="text-indigo-700">
+                      Hamali Charge
+                    </Label>
+                    <Input id="hamaliCharge" type="number" value={hamaliCharge} onChange={(e) => setHamaliCharge(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="parkingCharge" className="text-indigo-700">
+                      Parking Charge
+                    </Label>
+                    <Input id="parkingCharge" type="number" value={parkingCharge} onChange={(e) => setParkingCharge(e.target.value)} placeholder="0" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="biltyUpload" className="text-indigo-700">
+                    Bilty / Docket Upload
+                  </Label>
+                  <Input
+                    id="biltyUpload"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    multiple
+                    onChange={(e) => setBiltyUploadFiles(Array.from(e.target.files || []))}
+                  />
+                  {biltyUploadFiles.length > 0 && (
+                    <p className="text-xs text-muted-foreground">{biltyUploadFiles.length} file(s) selected</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="transporterRemarks" className="text-indigo-700">
+                    Transporter Assign
+                  </Label>
+                  <Textarea
+                    id="transporterRemarks"
+                    value={transporterRemarks}
+                    onChange={(e) => setTransporterRemarks(e.target.value)}
+                    placeholder="Enter additional warehouse/dispatch remarks..."
+                    rows={3}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="totalBillAmount">Total Bill Amount *</Label>
-                  <Input
-                    id="totalBillAmount"
-                    type="number"
-                    value={totalBillAmount}
-                    onChange={(e) => setTotalBillAmount(e.target.value)}
-                    placeholder="Enter total bill amount"
-                  />
+                  <Label htmlFor="expenseAmount" className="text-indigo-700">
+                    Expense Amount
+                  </Label>
+                  <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="invoiceUpload">Invoice Upload *</Label>
-                  <Input id="invoiceUpload" type="file" onChange={(e) => setInvoiceUploadFile(e.target.files?.[0] || null)} />
-                  {invoiceUploadFile && <p className="text-sm text-muted-foreground">Selected: {invoiceUploadFile.name}</p>}
+              {/* Dispatch Confirmation */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-slate-800">Dispatch Confirmation</h4>
+                  <div className="flex bg-slate-200/50 p-1 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setDispatchStatus("okay")}
+                      className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${dispatchStatus === "okay" ? "bg-green-600 text-white shadow-md" : "text-slate-500 hover:text-slate-700"}`}
+                    >
+                      OKAY
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDispatchStatus("notokay")}
+                      className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${dispatchStatus === "notokay" ? "bg-red-600 text-white shadow-md" : "text-slate-500 hover:text-slate-700"}`}
+                    >
+                      NOT OKAY
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="ewayBillUpload">Eway Bill Upload</Label>
-                  <Input id="ewayBillUpload" type="file" onChange={(e) => setEwayBillUploadFile(e.target.files?.[0] || null)} />
-                  {ewayBillUploadFile && <p className="text-sm text-muted-foreground">Selected: {ewayBillUploadFile.name}</p>}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="remarks">Remarks</Label>
-                <Input id="remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Enter any remarks..." />
+                {dispatchStatus === "notokay" && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200">
+                    <Label htmlFor="notOkReason" className="text-red-700 font-semibold">
+                      Reason for NOT OKAY
+                    </Label>
+                    <Textarea
+                      id="notOkReason"
+                      value={notOkReason}
+                      onChange={(e) => setNotOkReason(e.target.value)}
+                      placeholder="Please specify why this order is not okay for dispatch..."
+                      className="border-red-100"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!invoiceNumber.trim() || !invoiceDate || !totalBillAmount || !invoiceUploadFile || isSubmitting}
-                >
+                <Button onClick={handleSubmit} disabled={isSubmitting}>
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
@@ -730,13 +822,12 @@ export default function MakeInvoicePage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-center">Installation</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -746,11 +837,6 @@ export default function MakeInvoicePage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.qty}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={item.installation === "Yes" ? "default" : "secondary"}>
-                          {item.installation === "Yes" ? "Yes" : "No"}
-                        </Badge>
-                      </TableCell>
                     </TableRow>
                   ))
                 )}

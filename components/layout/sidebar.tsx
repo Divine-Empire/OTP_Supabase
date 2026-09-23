@@ -20,6 +20,8 @@ import {
   LogOut,
   Menu,
   FileMinus,
+  Truck,
+  FileCheck2,
 } from "lucide-react";
 
 const menuItems = [
@@ -76,6 +78,18 @@ const menuItems = [
     label: "Calibration Certificate",
     icon: Award,
     step: "calibration",
+  },
+  {
+    href: "/packaging-transport",
+    label: "Packaging and Transport",
+    icon: Truck,
+    step: "packaging-transport",
+  },
+  {
+    href: "/bilty-upload",
+    label: "Bilty Upload",
+    icon: FileCheck2,
+    step: "bilty-upload",
   },
   // { href: "/make-pi", label: "Make PI", icon: FileSpreadsheet, step: "make-pi" },
     {

@@ -54,6 +54,8 @@ const allSteps = [
   { id: "debit-note-for-invoice", label: "Debit Note (Inv.)" },
   { id: "make-invoice", label: "Make Invoice" },
   { id: "calibration", label: "Calibration Certificate" },
+  { id: "packaging-transport", label: "Packaging and Transport" },
+  { id: "bilty-upload", label: "Bilty Upload" },
   { id: "debit-note", label: "Debit Note" },
   { id: "settings", label: "Settings" },
 ]

@@ -43,6 +43,7 @@ const historyColumns = [
   { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "calibrationRequired", label: "Calibration Required", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "debitNoteForInvoiceRequired", label: "Debit Note (Inv.) Required", searchable: true },
   { key: "transportId", label: "Transport Id/Name", searchable: true },
   { key: "gstNumber", label: "GST Number", searchable: true },
   { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
@@ -120,6 +121,7 @@ export default function PreInvoicePage() {
   const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
   const [calibrationRequired, setCalibrationRequired] = useState("")
   const [calibrationType, setCalibrationType] = useState("")
+  const [debitNoteForInvoiceRequired, setDebitNoteForInvoiceRequired] = useState("")
   const [transportId, setTransportId] = useState("")
   const [gstNumber, setGstNumber] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
@@ -250,6 +252,7 @@ export default function PreInvoicePage() {
     setSelectedOrder(order)
     setCalibrationRequired("")
     setCalibrationType("")
+    setDebitNoteForInvoiceRequired("")
     setTransportId("")
     setGstNumber("")
     setVehicleNumber("")
@@ -291,6 +294,11 @@ export default function PreInvoicePage() {
   // this same row — so status is the sole pending/history signal now.
   const handleSubmit = async () => {
     if (!selectedOrder) return
+
+    if (!debitNoteForInvoiceRequired) {
+      alert("Please select whether Debit Note (Inv.) is required.")
+      return
+    }
 
     setIsSubmitting(true)
     try {
@@ -338,6 +346,7 @@ export default function PreInvoicePage() {
           srnAttachmentUrl,
           remarks: preInvoiceRemarks,
           paymentMode,
+          debitNoteForInvoiceRequired,
         }),
       })
       const result = await response.json()
@@ -431,6 +440,7 @@ export default function PreInvoicePage() {
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
       case "calibrationRequired":
+      case "debitNoteForInvoiceRequired":
         return value ? <Badge variant={value === "YES" ? "default" : "secondary"}>{value}</Badge> : ""
       case "paymentMode":
         return formatPaymentModeLabel(value)
@@ -804,7 +814,7 @@ export default function PreInvoicePage() {
                 </div>
               </div>
 
-              {/* Row 1: Calibration Required, Dispatch Location, Calibration Type */}
+              {/* Row 1: Calibration Required, Dispatch Location, Debit Note (Inv.) Required */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="calibration">Calibration Certificate Required</Label>
@@ -832,6 +842,21 @@ export default function PreInvoicePage() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="debitNoteForInvoiceRequired">Debit Note (Inv.) Required</Label>
+                  <Select value={debitNoteForInvoiceRequired} onValueChange={setDebitNoteForInvoiceRequired}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="YES">YES</SelectItem>
+                      <SelectItem value="NO">NO</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    YES sends this order to Debit Note (Inv.) first; NO skips straight to Make Invoice.
+                  </p>
                 </div>
                 {calibrationRequired === "YES" && (
                   <div className="space-y-2">

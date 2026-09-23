@@ -102,6 +102,15 @@ export async function POST(request: Request) {
       ? addTatMinutes(new Date(), await getStageTatMinutes("calibration"))
       : null
 
+    // Packaging and Transport planned date — set unconditionally, for
+    // every wave, independently of calibration_required. Packaging and
+    // Transport branches directly off Make Invoice in PARALLEL with
+    // Calibration Certificate (not chained after it), so both stages'
+    // pending queues populate from this same submit at the same time and
+    // are processed independently of each other — see
+    // Database/36_packaging_transport_off_make_invoice.sql.
+    const packagingTransportPlanned = addTatMinutes(new Date(), await getStageTatMinutes("packaging_transport"))
+
     const { data, error } = await supabase
       .from("otp_make_invoice")
       .insert({
@@ -117,6 +126,7 @@ export async function POST(request: Request) {
         remarks: remarks || null,
         created_by: createdBy || null,
         calibration_planned: calibrationPlanned,
+        packaging_transport_planned: packagingTransportPlanned,
       })
       .select()
       .single()

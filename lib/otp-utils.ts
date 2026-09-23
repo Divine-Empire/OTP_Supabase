@@ -305,6 +305,8 @@ export function mapPreInvoiceRowToUI(row: any): any {
 
     calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
     calibrationType: row.calibration_type || "",
+    debitNoteForInvoiceRequired:
+      row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     transportId: row.transport_id || "",
     gstNumber: row.gst_number || "",
     vehicleNumber: row.vehicle_number || "",
@@ -389,6 +391,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     sourceStage: row.source_stage || "",
+    debitNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
   }
@@ -476,6 +479,140 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     certificateType: row.certificate_type || "",
     certificateUploadUrl: row.certificate_upload_url || "",
     remarks: row.remarks || "",
+    createdBy: row.created_by || "",
+
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/packaging-transport (an
+// otp_make_invoice row, joined to its parent otp_orders — the pending
+// source table, since no otp_packaging_transport row exists yet) into the
+// UI field names packaging-transport/page.tsx expects. Packaging and
+// Transport branches directly off Make Invoice, in parallel with
+// Calibration Certificate — not chained after it.
+export function mapPackagingTransportPendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+
+  return {
+    id: row.id,
+    makeInvoiceId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: row.invoice_number || "",
+    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: row.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/packaging-transport (an
+// otp_packaging_transport row, joined to its parent otp_orders +
+// otp_make_invoice) into the UI field names packaging-transport/page.tsx
+// expects.
+export function mapPackagingTransportHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const makeInvoice = row.makeInvoice || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+
+    beforePhotoUrls: row.before_photo_urls || [],
+    afterPhotoUrls: row.after_photo_urls || [],
+    transporterName: row.transporter_name || "",
+    transporterContact: row.transporter_contact || "",
+    biltyNumber: row.bilty_number || "",
+    biltyUploadUrls: row.bilty_upload_urls || [],
+    freightCharge: row.freight_charge ?? "",
+    hamaliCharge: row.hamali_charge ?? "",
+    parkingCharge: row.parking_charge ?? "",
+    transporterRemarks: row.transporter_remarks || "",
+    expenseAmount: row.expense_amount ?? "",
+    dispatchStatus: row.dispatch_status || "okay",
+    notOkReason: row.not_ok_reason || "",
+    createdBy: row.created_by || "",
+
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/bilty-upload (an
+// otp_packaging_transport row, joined to its parent otp_orders +
+// otp_make_invoice — the pending source table, since no otp_bilty_upload
+// row exists yet) into the UI field names bilty-upload/page.tsx expects.
+export function mapBiltyUploadPendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const makeInvoice = row.makeInvoice || {}
+
+  return {
+    id: row.id,
+    packagingTransportId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+    transporterName: row.transporter_name || "",
+    transporterContact: row.transporter_contact || "",
+    biltyNumber: row.bilty_number || "",
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/bilty-upload (an
+// otp_bilty_upload row, joined to its parent otp_orders +
+// otp_packaging_transport + otp_make_invoice) into the UI field names
+// bilty-upload/page.tsx expects.
+export function mapBiltyUploadHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const packagingTransport = row.packagingTransport || {}
+  const makeInvoice = packagingTransport.makeInvoice || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+    transporterName: packagingTransport.transporter_name || "",
+
+    transporterContact: row.transporter_contact || "",
+    biltyNumber: row.bilty_number || "",
+    biltyUploadUrls: row.bilty_upload_urls || [],
+    freightCharge: row.freight_charge ?? "",
+    hamaliCharge: row.hamali_charge ?? "",
+    parkingCharge: row.parking_charge ?? "",
+    transporterRemarks: row.transporter_remarks || "",
     createdBy: row.created_by || "",
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),

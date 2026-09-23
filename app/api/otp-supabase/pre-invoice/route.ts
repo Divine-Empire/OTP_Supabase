@@ -13,6 +13,17 @@ import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 //          Make Invoice's job, one stage later, on its own otp_make_invoice
 //          table (see Database/25_otp_make_invoice.sql). status is the sole
 //          pending/history signal here, same as every other stage.
+//
+// The Process dialog's "Debit Note (Inv.) Required" choice decides which
+// of the two downstream planned dates gets set here (see
+// Database/37_pre_invoice_debit_note_choice.sql):
+//   YES -> debit_note_planned set, make_invoice_planned left null — wave
+//          goes to Debit Note (Inv.)'s Pending first; make_invoice_planned
+//          only gets set once THAT stage is processed (unchanged, see
+//          debit-note-for-invoice/route.ts).
+//   NO  -> make_invoice_planned set directly, debit_note_planned left
+//          null — wave skips Debit Note (Inv.) and goes straight to Make
+//          Invoice's Pending.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -52,6 +63,7 @@ export async function POST(request: Request) {
       srnAttachmentUrl,
       remarks,
       paymentMode,
+      debitNoteForInvoiceRequired,
     } = body as {
       id: string
       createdBy?: string
@@ -67,6 +79,7 @@ export async function POST(request: Request) {
       srnAttachmentUrl?: string
       remarks?: string
       paymentMode?: string
+      debitNoteForInvoiceRequired?: "YES" | "NO" | ""
     }
 
     if (!id) {
@@ -75,12 +88,18 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
-    // Debit Note (Inv.) applies unconditionally to every wave — its planned
-    // date is set right here, same timing as invoiced_at (see
-    // Database/32_otp_debit_note_for_invoice.sql). Make Invoice only gets
-    // scheduled once that stage's own POST processes this row.
-    // Planned = this record's creation time (now) + Debit Note (Inv.)'s TAT.
-    const debitNotePlanned = addTatMinutes(new Date(), await getStageTatMinutes("debit_note_for_invoice"))
+    // Debit Note (Inv.) is now a user choice made right here in the Process
+    // dialog — YES routes the wave through Debit Note (Inv.) first (its
+    // planned date set now, same timing as invoiced_at, unchanged from
+    // before); NO skips it and unlocks Make Invoice directly instead.
+    // Planned = this record's creation time (now) + that stage's TAT.
+    const debitNoteRequired = debitNoteForInvoiceRequired === "YES"
+    const debitNotePlanned = debitNoteRequired
+      ? addTatMinutes(new Date(), await getStageTatMinutes("debit_note_for_invoice"))
+      : null
+    const makeInvoicePlanned = debitNoteRequired
+      ? null
+      : addTatMinutes(new Date(), await getStageTatMinutes("make_invoice"))
 
     const { data, error } = await supabase
       .from("otp_pre_invoice_queue")
@@ -88,7 +107,9 @@ export async function POST(request: Request) {
         created_by: createdBy || null,
         status: "invoiced",
         invoiced_at: new Date().toISOString(),
+        debit_note_for_invoice_required: debitNoteRequired,
         debit_note_planned: debitNotePlanned,
+        make_invoice_planned: makeInvoicePlanned,
         // Items get saved back finalized (per-serial rows the warehouse
         // person confirmed/adjusted in the Pre-Invoice dialog), replacing
         // the lump-qty breakdown Check Inventory originally queued.

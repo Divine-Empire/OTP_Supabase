@@ -11,6 +11,8 @@ const FALLBACK_TAT_MINUTES: Record<string, number> = {
   debit_note_for_invoice: 4320,
   make_invoice: 4320,
   calibration: 7200,
+  packaging_transport: 4320,
+  bilty_upload: 1440,
 }
 
 // Reads a stage's configured TAT (Settings > TAT Management) in minutes.
