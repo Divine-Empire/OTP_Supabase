@@ -36,6 +36,8 @@ const pendingColumns = [
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
+  { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
+  { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
 ]
 
@@ -48,6 +50,21 @@ const historyColumns = [
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
+
+// Only Timestamp, Order No., Quotation No., Company Name, Contact Person
+// Name, Contact Number, Invoice Number, Invoice Copy, Invoice Date are
+// shown by default -- everything else (CRM Name, Item List, and this
+// stage's own certificate/remarks/created-by fields) is still toggleable
+// via Column Visibility, just hidden by default.
+const DEFAULT_HIDDEN_COLUMNS = new Set([
+  "crmName",
+  "itemList",
+  "certificateNumber",
+  "certificateType",
+  "certificateUpload",
+  "remarks",
+  "createdBy",
+])
 
 export default function CalibrationPage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -68,10 +85,10 @@ export default function CalibrationPage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
 
@@ -252,6 +269,14 @@ export default function CalibrationPage() {
       case "certificateUpload":
         return order.certificateUploadUrl ? (
           <a href={order.certificateUploadUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "invoiceCopy":
+        return order.invoiceCopyUrl ? (
+          <a href={order.invoiceCopyUrl} target="_blank" rel="noopener noreferrer">
             <Badge variant="default">Link</Badge>
           </a>
         ) : (

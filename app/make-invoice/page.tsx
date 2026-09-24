@@ -35,6 +35,19 @@ const pendingColumns = [
   { key: "crmName", label: "CRM Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
+  { key: "billingAddress", label: "Billing Address", searchable: true },
+  { key: "shippingAddress", label: "Shipping Address", searchable: true },
+  { key: "paymentMode", label: "Payment Mode", searchable: true },
+  { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
+  { key: "transportMode", label: "Transport Mode", searchable: true },
+  { key: "destination", label: "Destination", searchable: true },
+  { key: "poNumber", label: "Po Number", searchable: true },
+  { key: "quotationCopy", label: "Quotation Copy", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
+  { key: "offerShow", label: "Offer Show", searchable: true },
+  { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
+  { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
+  { key: "amount", label: "Amount", searchable: true },
   { key: "sourceStage", label: "Source Stage", searchable: true },
   { key: "debitNoteForInvoiceRequired", label: "Debit Note", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
@@ -49,9 +62,20 @@ const historyColumns = [
   { key: "ewayBillNumber", label: "Eway Bill Number", searchable: true },
   { key: "ewayBillUpload", label: "Eway Bill Upload", searchable: false },
   { key: "totalBillAmount", label: "Total Bill Amount", searchable: false },
+  { key: "transportId", label: "Transport Id/Name", searchable: true },
+  { key: "gstNumber", label: "GST Number", searchable: true },
+  { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
+  { key: "paymentAttachment", label: "Payment Details (Attachment) - In case of Advance", searchable: false },
+  { key: "srnAttachment", label: "SRN Attachment", searchable: false },
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
+
+// Offer Show / Conveyed For Registration Form have no backing DB column
+// (same as order-acceptable, which this page's columns mirror) so are
+// always blank; Source Stage / Debit Note are internal routing fields, not
+// requested for display. All hidden by default, still toggleable.
+const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration", "sourceStage", "debitNoteForInvoiceRequired"])
 
 export default function MakeInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -66,6 +90,11 @@ export default function MakeInvoicePage() {
   const [ewayBillNumber, setEwayBillNumber] = useState("")
   const [ewayBillUploadFile, setEwayBillUploadFile] = useState<File | null>(null)
   const [totalBillAmount, setTotalBillAmount] = useState("")
+  const [transportId, setTransportId] = useState("")
+  const [gstNumber, setGstNumber] = useState("")
+  const [vehicleNumber, setVehicleNumber] = useState("")
+  const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null)
+  const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
   const [remarks, setRemarks] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
@@ -75,10 +104,10 @@ export default function MakeInvoicePage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
 
@@ -181,6 +210,11 @@ export default function MakeInvoicePage() {
     setEwayBillNumber("")
     setEwayBillUploadFile(null)
     setTotalBillAmount("")
+    setTransportId("")
+    setGstNumber("")
+    setVehicleNumber("")
+    setPaymentAttachmentFile(null)
+    setSrnAttachmentFile(null)
     setRemarks("")
     setIsDialogOpen(true)
   }
@@ -223,6 +257,26 @@ export default function MakeInvoicePage() {
         if (uploadJson.success) ewayBillUploadUrl = uploadJson.url
       }
 
+      let paymentAttachmentUrl = ""
+      if (paymentAttachmentFile) {
+        const formData = new FormData()
+        formData.append("file", paymentAttachmentFile)
+        formData.append("folder", "make-invoice-payment")
+        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+        const uploadJson = await uploadRes.json()
+        if (uploadJson.success) paymentAttachmentUrl = uploadJson.url
+      }
+
+      let srnAttachmentUrl = ""
+      if (srnAttachmentFile) {
+        const formData = new FormData()
+        formData.append("file", srnAttachmentFile)
+        formData.append("folder", "make-invoice-srn")
+        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+        const uploadJson = await uploadRes.json()
+        if (uploadJson.success) srnAttachmentUrl = uploadJson.url
+      }
+
       const response = await fetch("/api/otp-supabase/make-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,6 +288,11 @@ export default function MakeInvoicePage() {
           ewayBillNumber,
           ewayBillUploadUrl,
           totalBillAmount: totalBillAmount || null,
+          transportId,
+          gstNumber,
+          vehicleNumber,
+          paymentAttachmentUrl,
+          srnAttachmentUrl,
           remarks,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
@@ -292,6 +351,34 @@ export default function MakeInvoicePage() {
           </a>
         ) : (
           <Badge variant="secondary">N/A</Badge>
+        )
+      case "paymentAttachment":
+        return order.paymentAttachmentUrl ? (
+          <a href={order.paymentAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "srnAttachment":
+        return order.srnAttachmentUrl ? (
+          <a href={order.srnAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "billingAddress":
+      case "shippingAddress":
+        return <div className="address-cell">{value}</div>
+      case "quotationCopy":
+      case "acceptanceCopy":
+        return value && (value.startsWith("http") || value.startsWith("https")) ? (
+          <a href={value} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">{value || "N/A"}</Badge>
         )
       case "totalBillAmount":
         return value ? `₹${Number(value).toLocaleString()}` : ""
@@ -717,6 +804,61 @@ export default function MakeInvoicePage() {
                   <Label htmlFor="ewayBillUpload">Eway Bill Upload</Label>
                   <Input id="ewayBillUpload" type="file" onChange={(e) => setEwayBillUploadFile(e.target.files?.[0] || null)} />
                   {ewayBillUploadFile && <p className="text-sm text-muted-foreground">Selected: {ewayBillUploadFile.name}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="transportId">Transport Id/Name</Label>
+                  <Input
+                    id="transportId"
+                    value={transportId}
+                    onChange={(e) => setTransportId(e.target.value)}
+                    placeholder="Enter transport id/name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="gstNumber">GST Number</Label>
+                  <Input
+                    id="gstNumber"
+                    value={gstNumber}
+                    onChange={(e) => setGstNumber(e.target.value)}
+                    placeholder="Enter GST Number"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vehicleNumber">Vehicle Number</Label>
+                  <Input
+                    id="vehicleNumber"
+                    value={vehicleNumber}
+                    onChange={(e) => setVehicleNumber(e.target.value)}
+                    placeholder="Enter Vehicle Number"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="paymentAttachment">Payment Details (Attachment) - In case of Advance</Label>
+                  <Input
+                    id="paymentAttachment"
+                    type="file"
+                    onChange={(e) => setPaymentAttachmentFile(e.target.files?.[0] || null)}
+                  />
+                  {paymentAttachmentFile && (
+                    <p className="text-sm text-muted-foreground">Selected: {paymentAttachmentFile.name}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="srnAttachment">SRN Attachment</Label>
+                  <Input
+                    id="srnAttachment"
+                    type="file"
+                    onChange={(e) => setSrnAttachmentFile(e.target.files?.[0] || null)}
+                  />
+                  {srnAttachmentFile && (
+                    <p className="text-sm text-muted-foreground">Selected: {srnAttachmentFile.name}</p>
+                  )}
                 </div>
               </div>
 

@@ -61,6 +61,11 @@ export async function POST(request: Request) {
       ewayBillNumber,
       ewayBillUploadUrl,
       totalBillAmount,
+      transportId,
+      gstNumber,
+      vehicleNumber,
+      paymentAttachmentUrl,
+      srnAttachmentUrl,
       remarks,
       createdBy,
     } = body as {
@@ -71,6 +76,11 @@ export async function POST(request: Request) {
       ewayBillNumber?: string
       ewayBillUploadUrl?: string
       totalBillAmount?: number | string
+      transportId?: string
+      gstNumber?: string
+      vehicleNumber?: string
+      paymentAttachmentUrl?: string
+      srnAttachmentUrl?: string
       remarks?: string
       createdBy?: string
     }
@@ -122,6 +132,11 @@ export async function POST(request: Request) {
         eway_bill_number: ewayBillNumber || null,
         eway_bill_upload_url: ewayBillUploadUrl || null,
         total_bill_amount: totalBillAmount ? Number(totalBillAmount) : null,
+        transport_id: transportId || null,
+        gst_number: gstNumber || null,
+        vehicle_number: vehicleNumber || null,
+        payment_attachment_url: paymentAttachmentUrl || null,
+        srn_attachment_url: srnAttachmentUrl || null,
         items: queueRow.items || [],
         remarks: remarks || null,
         created_by: createdBy || null,

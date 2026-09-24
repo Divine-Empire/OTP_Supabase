@@ -14,7 +14,6 @@ import {
   FileText,
   Receipt,
   FileSpreadsheet,
-  Warehouse,
   Award,
   Settings,
   LogOut,
@@ -99,7 +98,6 @@ const menuItems = [
     icon: UserCheck,
     step: "client-confirmation",
   },
-  // { href: "/make-pi", label: "Make PI", icon: FileSpreadsheet, step: "make-pi" },
     {
       href: "/debit-note",
       label: "Debit Note",

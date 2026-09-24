@@ -35,7 +35,18 @@ const pendingColumns = [
   { key: "crmName", label: "CRM Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
+  { key: "billingAddress", label: "Billing Address", searchable: true },
+  { key: "shippingAddress", label: "Shipping Address", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
+  { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
+  { key: "transportMode", label: "Transport Mode", searchable: true },
+  { key: "destination", label: "Destination", searchable: true },
+  { key: "poNumber", label: "Po Number", searchable: true },
+  { key: "quotationCopy", label: "Quotation Copy", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
+  { key: "offerShow", label: "Offer Show", searchable: true },
+  { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
+  { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
 ]
@@ -47,6 +58,11 @@ const historyColumns = [
   { key: "dnAttachment", label: "DN Attachment", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
+
+// Offer Show / Conveyed For Registration Form have no backing DB column
+// (same as order-acceptable, which this page's columns mirror), so are
+// always blank -- hidden by default, still toggleable.
+const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
 
 export default function DebitNotePage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -65,10 +81,10 @@ export default function DebitNotePage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
 
@@ -253,6 +269,18 @@ export default function DebitNotePage() {
           </a>
         ) : (
           <Badge variant="secondary">N/A</Badge>
+        )
+      case "billingAddress":
+      case "shippingAddress":
+        return <div className="address-cell">{value}</div>
+      case "quotationCopy":
+      case "acceptanceCopy":
+        return value && (value.startsWith("http") || value.startsWith("https")) ? (
+          <a href={value} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">{value || "N/A"}</Badge>
         )
       case "amount":
         return value ? `₹${Number(value).toLocaleString()}` : ""

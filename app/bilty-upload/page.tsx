@@ -37,6 +37,8 @@ const pendingColumns = [
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
+  { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
+  { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "transporterName", label: "Assigned Driver for Dispatch", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
 ]
@@ -53,6 +55,23 @@ const historyColumns = [
   { key: "transporterRemarks", label: "Transporter Assign", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
+
+// Only Timestamp, Order No., Quotation No., Company Name, Contact Person
+// Name, Contact Number, Invoice Number, Invoice Copy, Invoice Date, and
+// Assigned Driver for Dispatch are shown by default -- everything else is
+// still toggleable via Column Visibility, just hidden by default.
+const DEFAULT_HIDDEN_COLUMNS = new Set([
+  "crmName",
+  "itemList",
+  "transporterContact",
+  "biltyNumber",
+  "biltyUpload",
+  "freightCharge",
+  "hamaliCharge",
+  "parkingCharge",
+  "transporterRemarks",
+  "createdBy",
+])
 
 async function uploadFiles(files: File[], folder: string): Promise<string[]> {
   const urls: string[] = []
@@ -91,10 +110,10 @@ export default function BiltyUploadPage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
 
@@ -295,6 +314,14 @@ export default function BiltyUploadPage() {
       case "hamaliCharge":
       case "parkingCharge":
         return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
+      case "invoiceCopy":
+        return order.invoiceCopyUrl ? (
+          <a href={order.invoiceCopyUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
       default:
         return value || ""
     }
