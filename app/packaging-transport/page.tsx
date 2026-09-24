@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,15 +23,18 @@ import {
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
 const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
+  { key: "draftStatus", label: "Status", searchable: false },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
@@ -39,18 +43,13 @@ const pendingColumns = [
 
 // Column definitions for History tab
 const historyColumns = [
-  ...pendingColumns.filter((col) => col.key !== "actions"),
-  { key: "transporterName", label: "Transporter Name", searchable: true },
-  { key: "transporterContact", label: "Transporter Contact", searchable: true },
-  { key: "biltyNumber", label: "Bilty/Docket No.", searchable: true },
-  { key: "freightCharge", label: "Freight Charge", searchable: false },
-  { key: "hamaliCharge", label: "Hamali Charge", searchable: false },
-  { key: "parkingCharge", label: "Parking Charge", searchable: false },
-  { key: "expenseAmount", label: "Expense Amount", searchable: false },
+  ...pendingColumns.filter((col) => col.key !== "actions" && col.key !== "draftStatus"),
   { key: "beforePhoto", label: "Before Photo", searchable: false },
   { key: "afterPhoto", label: "After Photo", searchable: false },
-  { key: "biltyUpload", label: "Bilty Upload", searchable: false },
-  { key: "transporterRemarks", label: "Transporter Assign", searchable: true },
+  { key: "transporterName", label: "Assigned Driver", searchable: true },
+  { key: "transporterContact", label: "Driver Contact", searchable: true },
+  { key: "expenseAmount", label: "Expense Amount", searchable: false },
+  { key: "transporterRemarks", label: "Transporter's Remark", searchable: true },
   { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
   { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
@@ -79,22 +78,26 @@ export default function PackagingTransportPage() {
 
   const [beforePhotoFiles, setBeforePhotoFiles] = useState<File[]>([])
   const [afterPhotoFiles, setAfterPhotoFiles] = useState<File[]>([])
-  const [biltyUploadFiles, setBiltyUploadFiles] = useState<File[]>([])
+  // Already-saved photo URLs from a prior "Save Photos" draft (see
+  // Database/39_packaging_transport_draft_save.sql) — shown as a preview
+  // instead of a re-upload input; new selections above are appended to
+  // these on save.
+  const [existingBeforePhotoUrls, setExistingBeforePhotoUrls] = useState<string[]>([])
+  const [existingAfterPhotoUrls, setExistingAfterPhotoUrls] = useState<string[]>([])
+  const [isSavingPhotos, setIsSavingPhotos] = useState(false)
   const [transporterName, setTransporterName] = useState("")
   const [transporterContact, setTransporterContact] = useState("")
-  const [biltyNumber, setBiltyNumber] = useState("")
-  const [freightCharge, setFreightCharge] = useState("")
-  const [hamaliCharge, setHamaliCharge] = useState("")
-  const [parkingCharge, setParkingCharge] = useState("")
   const [transporterRemarks, setTransporterRemarks] = useState("")
   const [expenseAmount, setExpenseAmount] = useState("")
   const [dispatchStatus, setDispatchStatus] = useState("okay")
   const [notOkReason, setNotOkReason] = useState("")
+  const [assignedDriverOptions, setAssignedDriverOptions] = useState<string[]>([])
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [crmNameFilter, setCrmNameFilter] = useState("all")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
@@ -147,29 +150,52 @@ export default function PackagingTransportPage() {
     fetchOrders()
   }, [])
 
+  useEffect(() => {
+    fetch("/api/otp-supabase/dropdowns?category=assign_driver_for_dispatch")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && Array.isArray(result.data)) {
+          setAssignedDriverOptions(result.data.map((d: any) => d.value))
+        }
+      })
+      .catch((err) => console.error("Error fetching assigned driver options:", err))
+  }, [])
+
   const handleProcessedTabClick = async () => {
     await fetchProcessedOrders()
   }
 
+  // Role-based access: 'user' role only sees rows whose crmName is in their
+  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
   const filteredOrders = useMemo(() => {
-    if (!searchTerm) return orders
-    return orders.filter((order) => {
-      const searchableFields = pendingColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [orders, searchTerm])
+    let filtered = filterByCrmAccess(orders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = pendingColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [orders, searchTerm, crmNameFilter, currentUser])
+
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    if (!searchTerm) return processedOrders
-    return processedOrders.filter((order) => {
-      const searchableFields = historyColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [processedOrders, searchTerm])
+    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = historyColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -188,13 +214,10 @@ export default function PackagingTransportPage() {
     setSelectedOrder(order)
     setBeforePhotoFiles([])
     setAfterPhotoFiles([])
-    setBiltyUploadFiles([])
+    setExistingBeforePhotoUrls(order.beforePhotoUrls || [])
+    setExistingAfterPhotoUrls(order.afterPhotoUrls || [])
     setTransporterName("")
     setTransporterContact("")
-    setBiltyNumber("")
-    setFreightCharge("")
-    setHamaliCharge("")
-    setParkingCharge("")
     setTransporterRemarks("")
     setExpenseAmount("")
     setDispatchStatus("okay")
@@ -207,13 +230,60 @@ export default function PackagingTransportPage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Packaging and Transport — inserts a row into
-  // otp_packaging_transport (one per otp_calibration_certificate record),
-  // which is what moves this order from Pending to History here.
+  // Step 1 — "Save Photos": only Before/After Photo required. Saves (or
+  // updates) a draft otp_packaging_transport row and keeps the order in
+  // Pending — see Database/39_packaging_transport_draft_save.sql.
+  const handleSavePhotos = async () => {
+    if (!selectedOrder) return
+
+    const totalBeforeCount = existingBeforePhotoUrls.length + beforePhotoFiles.length
+    if (totalBeforeCount === 0) {
+      alert("Please upload at least one Before Photo (Packing).")
+      return
+    }
+
+    setIsSavingPhotos(true)
+    try {
+      const [newBeforeUrls, newAfterUrls] = await Promise.all([
+        uploadFiles(beforePhotoFiles, "packaging_transport/before"),
+        uploadFiles(afterPhotoFiles, "packaging_transport/after"),
+      ])
+
+      const response = await fetch("/api/otp-supabase/packaging-transport", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "draft",
+          makeInvoiceId: selectedOrder.makeInvoiceId || selectedOrder.id,
+          beforePhotoUrls: [...existingBeforePhotoUrls, ...newBeforeUrls],
+          afterPhotoUrls: [...existingAfterPhotoUrls, ...newAfterUrls],
+        }),
+      })
+      const result = await response.json()
+
+      if (result.success) {
+        setIsDialogOpen(false)
+        setSelectedOrder(null)
+        await fetchOrders()
+        alert(`Order ${selectedOrder.orderNo} — photos saved. Still pending; open again to complete the rest.`)
+      } else {
+        throw new Error(result.error || "Save failed")
+      }
+    } catch (err: any) {
+      console.error("Error saving packaging-transport photos:", err)
+      alert(`Error: ${err.message}`)
+    } finally {
+      setIsSavingPhotos(false)
+    }
+  }
+
+  // Step 2 — "Submit" (final): the rest of the form. Flips the same row
+  // to status='submitted', which is what moves it to History here.
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
-    if (beforePhotoFiles.length === 0) {
+    const totalBeforeCount = existingBeforePhotoUrls.length + beforePhotoFiles.length
+    if (totalBeforeCount === 0) {
       alert("Please upload at least one Before Photo (Packing).")
       return
     }
@@ -228,26 +298,21 @@ export default function PackagingTransportPage() {
 
     setIsSubmitting(true)
     try {
-      const [beforePhotoUrls, afterPhotoUrls, biltyUploadUrls] = await Promise.all([
+      const [newBeforeUrls, newAfterUrls] = await Promise.all([
         uploadFiles(beforePhotoFiles, "packaging_transport/before"),
         uploadFiles(afterPhotoFiles, "packaging_transport/after"),
-        uploadFiles(biltyUploadFiles, "packaging_transport/bilty"),
       ])
 
       const response = await fetch("/api/otp-supabase/packaging-transport", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode: "final",
           makeInvoiceId: selectedOrder.makeInvoiceId || selectedOrder.id,
-          beforePhotoUrls,
-          afterPhotoUrls,
+          beforePhotoUrls: [...existingBeforePhotoUrls, ...newBeforeUrls],
+          afterPhotoUrls: [...existingAfterPhotoUrls, ...newAfterUrls],
           transporterName,
           transporterContact,
-          biltyNumber,
-          biltyUploadUrls,
-          freightCharge,
-          hamaliCharge,
-          parkingCharge,
           transporterRemarks,
           expenseAmount,
           dispatchStatus,
@@ -279,7 +344,7 @@ export default function PackagingTransportPage() {
       case "actions":
         return (
           <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Process"}
+            {currentUser?.role === "user" ? "View Only" : order.isDraft ? "Continue" : "Process"}
           </Button>
         )
       case "itemList":
@@ -293,6 +358,12 @@ export default function PackagingTransportPage() {
             <Eye className="h-3.5 w-3.5" />
             View Items
           </Button>
+        )
+      case "draftStatus":
+        return order.isDraft ? (
+          <Badge className="bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100">Photos Saved</Badge>
+        ) : (
+          <Badge variant="secondary">New</Badge>
         )
       case "beforePhoto":
         return order.beforePhotoUrls && order.beforePhotoUrls.length > 0 ? (
@@ -318,21 +389,6 @@ export default function PackagingTransportPage() {
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
-      case "biltyUpload":
-        return order.biltyUploadUrls && order.biltyUploadUrls.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {order.biltyUploadUrls.map((url: string, idx: number) => (
-              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="default">{idx + 1}</Badge>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <Badge variant="secondary">N/A</Badge>
-        )
-      case "freightCharge":
-      case "hamaliCharge":
-      case "parkingCharge":
       case "expenseAmount":
         return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
       case "dispatchStatus":
@@ -403,6 +459,19 @@ export default function PackagingTransportPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All CRM Names" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM Names</SelectItem>
+                      {crmNameOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -628,11 +697,33 @@ export default function PackagingTransportPage() {
 
               {/* Documentation */}
               <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-200 space-y-4">
-                <h4 className="text-sm font-bold text-emerald-900">Documentation</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-emerald-900">Documentation</h4>
+                  {selectedOrder?.isDraft && (
+                    <Badge className="bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100">
+                      Draft — photos already saved
+                    </Badge>
+                  )}
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="beforePhoto" className="text-emerald-700">
                     Before Photo (Packing) <span className="text-red-500 font-bold">*</span>
                   </Label>
+                  {existingBeforePhotoUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pb-1">
+                      {existingBeforePhotoUrls.map((url, idx) => (
+                        <a
+                          key={idx}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block h-16 w-16 overflow-hidden rounded-lg border border-emerald-200 bg-white"
+                        >
+                          <img src={url} alt={`Before ${idx + 1}`} className="h-full w-full object-cover" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   <Input
                     id="beforePhoto"
                     type="file"
@@ -641,13 +732,28 @@ export default function PackagingTransportPage() {
                     onChange={(e) => setBeforePhotoFiles(Array.from(e.target.files || []))}
                   />
                   {beforePhotoFiles.length > 0 && (
-                    <p className="text-xs text-muted-foreground">{beforePhotoFiles.length} file(s) selected</p>
+                    <p className="text-xs text-muted-foreground">{beforePhotoFiles.length} new file(s) selected</p>
                   )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="afterPhoto" className="text-emerald-700">
                     After Photo (Final Package)
                   </Label>
+                  {existingAfterPhotoUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pb-1">
+                      {existingAfterPhotoUrls.map((url, idx) => (
+                        <a
+                          key={idx}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block h-16 w-16 overflow-hidden rounded-lg border border-emerald-200 bg-white"
+                        >
+                          <img src={url} alt={`After ${idx + 1}`} className="h-full w-full object-cover" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   <Input
                     id="afterPhoto"
                     type="file"
@@ -656,29 +762,47 @@ export default function PackagingTransportPage() {
                     onChange={(e) => setAfterPhotoFiles(Array.from(e.target.files || []))}
                   />
                   {afterPhotoFiles.length > 0 && (
-                    <p className="text-xs text-muted-foreground">{afterPhotoFiles.length} file(s) selected</p>
+                    <p className="text-xs text-muted-foreground">{afterPhotoFiles.length} new file(s) selected</p>
                   )}
+                </div>
+                <div className="flex justify-end">
+                  <Button type="button" variant="outline" size="sm" onClick={handleSavePhotos} disabled={isSavingPhotos || isSubmitting}>
+                    {isSavingPhotos ? (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      "Save Photos"
+                    )}
+                  </Button>
                 </div>
               </div>
 
               {/* Transportation details */}
               <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-4">
                 <h4 className="text-sm font-bold text-indigo-900">Transportation Details</h4>
-                <div className="space-y-2">
-                  <Label htmlFor="transporterName" className="text-indigo-700">
-                    Assign Driver for Material Dispatch <span className="text-red-500 font-bold">*</span>
-                  </Label>
-                  <Input
-                    id="transporterName"
-                    value={transporterName}
-                    onChange={(e) => setTransporterName(e.target.value)}
-                    placeholder="Enter transporter name"
-                  />
-                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
+                    <Label htmlFor="transporterName" className="text-indigo-700">
+                      Assigned Driver <span className="text-red-500 font-bold">*</span>
+                    </Label>
+                    <Select value={transporterName} onValueChange={setTransporterName}>
+                      <SelectTrigger id="transporterName">
+                        <SelectValue placeholder="Select driver" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assignedDriverOptions.map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
                     <Label htmlFor="transporterContact" className="text-indigo-700">
-                      Transporter Contact No.
+                      Driver Contact
                     </Label>
                     <Input
                       id="transporterContact"
@@ -687,70 +811,26 @@ export default function PackagingTransportPage() {
                       placeholder="Enter contact number"
                     />
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="biltyNumber" className="text-indigo-700">
-                      Bilty No. / Docket No.
+                    <Label htmlFor="expenseAmount" className="text-indigo-700">
+                      Expense Amount
                     </Label>
-                    <Input
-                      id="biltyNumber"
-                      value={biltyNumber}
-                      onChange={(e) => setBiltyNumber(e.target.value)}
-                      placeholder="Enter bilty/docket number"
+                    <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="transporterRemarks" className="text-indigo-700">
+                      Transporter's Remark
+                    </Label>
+                    <Textarea
+                      id="transporterRemarks"
+                      value={transporterRemarks}
+                      onChange={(e) => setTransporterRemarks(e.target.value)}
+                      placeholder="Enter transporter's remark..."
+                      rows={1}
                     />
                   </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="freightCharge" className="text-indigo-700">
-                      Freight Charge
-                    </Label>
-                    <Input id="freightCharge" type="number" value={freightCharge} onChange={(e) => setFreightCharge(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hamaliCharge" className="text-indigo-700">
-                      Hamali Charge
-                    </Label>
-                    <Input id="hamaliCharge" type="number" value={hamaliCharge} onChange={(e) => setHamaliCharge(e.target.value)} placeholder="0" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="parkingCharge" className="text-indigo-700">
-                      Parking Charge
-                    </Label>
-                    <Input id="parkingCharge" type="number" value={parkingCharge} onChange={(e) => setParkingCharge(e.target.value)} placeholder="0" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="biltyUpload" className="text-indigo-700">
-                    Bilty / Docket Upload
-                  </Label>
-                  <Input
-                    id="biltyUpload"
-                    type="file"
-                    accept="image/*,application/pdf"
-                    multiple
-                    onChange={(e) => setBiltyUploadFiles(Array.from(e.target.files || []))}
-                  />
-                  {biltyUploadFiles.length > 0 && (
-                    <p className="text-xs text-muted-foreground">{biltyUploadFiles.length} file(s) selected</p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="transporterRemarks" className="text-indigo-700">
-                    Transporter Assign
-                  </Label>
-                  <Textarea
-                    id="transporterRemarks"
-                    value={transporterRemarks}
-                    onChange={(e) => setTransporterRemarks(e.target.value)}
-                    placeholder="Enter additional warehouse/dispatch remarks..."
-                    rows={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expenseAmount" className="text-indigo-700">
-                    Expense Amount
-                  </Label>
-                  <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
                 </div>
               </div>
 

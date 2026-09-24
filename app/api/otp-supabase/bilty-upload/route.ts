@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
-// Stage — Bilty Upload, the final stage right after Packaging and
-// Transport (see Database/38_otp_bilty_upload.sql).
+// Stage — Bilty Upload, right after Packaging and Transport (see
+// Database/38_otp_bilty_upload.sql).
 //
 // Pending: otp_packaging_transport.bilty_upload_planned IS NOT NULL AND no
 //          matching otp_bilty_upload row yet — same planned-date pattern
 //          as every other stage.
 // History: a matching otp_bilty_upload row exists.
+//
+// On submit here, this route also sets client_confirmation_planned so the
+// row shows up in the Client Confirmation stage's Pending queue (see
+// Database/42_otp_client_confirmation.sql).
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -95,6 +100,8 @@ export async function POST(request: Request) {
       return Number.isFinite(n) ? n : null
     }
 
+    const clientConfirmationPlanned = addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation"))
+
     const { data, error } = await supabase
       .from("otp_bilty_upload")
       .insert({
@@ -108,6 +115,7 @@ export async function POST(request: Request) {
         parking_charge: toNumberOrNull(parkingCharge),
         transporter_remarks: transporterRemarks || null,
         created_by: createdBy || null,
+        client_confirmation_planned: clientConfirmationPlanned,
       })
       .select()
       .single()

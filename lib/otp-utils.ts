@@ -60,6 +60,7 @@ export function mapOrderAcceptableRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     billingAddress: order.billing_address || "",
@@ -106,6 +107,7 @@ export function mapProformaInvoicePendingRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
@@ -130,6 +132,7 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
@@ -161,6 +164,7 @@ export function mapDebitNotePendingRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
@@ -185,6 +189,7 @@ export function mapDebitNoteHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
@@ -225,8 +230,8 @@ export function mapCheckInventoryRowToUI(row: any): any {
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(order.created_at),
-    creName: order.crm_name || "",
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     billingAddress: order.billing_address || "",
@@ -288,6 +293,7 @@ export function mapPreInvoiceRowToUI(row: any): any {
     quotationNo: row.quotation_number || order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     email: order.email || "",
@@ -334,6 +340,7 @@ export function mapDebitNoteForInvoicePendingRowToUI(row: any): any {
     quotationNo: row.quotation_number || order.quotation_number || "",
     timestamp: formatDateTime(row.invoiced_at || row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     sourceStage: row.source_stage || "",
@@ -359,6 +366,7 @@ export function mapDebitNoteForInvoiceHistoryRowToUI(row: any): any {
     quotationNo: queue.quotation_number || order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     sourceStage: queue.source_stage || "",
@@ -388,6 +396,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     quotationNo: row.quotation_number || order.quotation_number || "",
     timestamp: formatDateTime(row.invoiced_at || row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     sourceStage: row.source_stage || "",
@@ -414,6 +423,7 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
     quotationNo: queue.quotation_number || order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
 
@@ -447,6 +457,7 @@ export function mapCalibrationPendingRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: row.invoice_number || "",
@@ -471,6 +482,7 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
@@ -492,24 +504,40 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
 // UI field names packaging-transport/page.tsx expects. Packaging and
 // Transport branches directly off Make Invoice, in parallel with
 // Calibration Certificate — not chained after it.
+//
+// Two shapes can land here (see
+// Database/39_packaging_transport_draft_save.sql):
+// - a "fresh" otp_make_invoice row (never opened/saved here yet) —
+//   detected by the ABSENCE of `make_invoice_id` (only otp_packaging_
+//   transport rows carry that column on themselves).
+// - a "draft" otp_packaging_transport row (status='draft' — Before/After
+//   Photo already saved, rest of the form not yet submitted) — carries
+//   its own `make_invoice_id` plus a nested `makeInvoice`.
 export function mapPackagingTransportPendingRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
+  const isDraft = row.make_invoice_id !== undefined && row.make_invoice_id !== null
+  const makeInvoice = isDraft ? row.makeInvoice || {} : row
 
   return {
-    id: row.id,
-    makeInvoiceId: row.id,
+    id: isDraft ? row.make_invoice_id : row.id,
+    makeInvoiceId: isDraft ? row.make_invoice_id : row.id,
+    packagingTransportId: isDraft ? row.id : undefined,
     orderId: order.id || row.order_id,
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
-    timestamp: formatDateTime(row.created_at),
+    timestamp: formatDateTime(isDraft ? makeInvoice.created_at : row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
-    invoiceNumber: row.invoice_number || "",
-    items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
-    rawItems: row.items || [],
+    invoiceNumber: makeInvoice.invoice_number || "",
+    isDraft,
+    beforePhotoUrls: row.before_photo_urls || [],
+    afterPhotoUrls: row.after_photo_urls || [],
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
   }
 }
 
@@ -530,6 +558,7 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
@@ -538,11 +567,6 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     afterPhotoUrls: row.after_photo_urls || [],
     transporterName: row.transporter_name || "",
     transporterContact: row.transporter_contact || "",
-    biltyNumber: row.bilty_number || "",
-    biltyUploadUrls: row.bilty_upload_urls || [],
-    freightCharge: row.freight_charge ?? "",
-    hamaliCharge: row.hamali_charge ?? "",
-    parkingCharge: row.parking_charge ?? "",
     transporterRemarks: row.transporter_remarks || "",
     expenseAmount: row.expense_amount ?? "",
     dispatchStatus: row.dispatch_status || "okay",
@@ -572,6 +596,7 @@ export function mapBiltyUploadPendingRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
@@ -601,6 +626,7 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
@@ -613,6 +639,72 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     hamaliCharge: row.hamali_charge ?? "",
     parkingCharge: row.parking_charge ?? "",
     transporterRemarks: row.transporter_remarks || "",
+    createdBy: row.created_by || "",
+
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a Pending row from /api/otp-supabase/client-confirmation (an
+// otp_bilty_upload row, joined to its parent otp_orders +
+// otp_packaging_transport + otp_make_invoice — the pending source table,
+// since no otp_client_confirmation row exists yet) into the UI field
+// names client-confirmation/page.tsx expects.
+export function mapClientConfirmationPendingRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const packagingTransport = row.packagingTransport || {}
+  const makeInvoice = packagingTransport.makeInvoice || {}
+
+  return {
+    id: row.id,
+    biltyUploadId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    crmName: order.crm_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+    transporterName: packagingTransport.transporter_name || "",
+    biltyNumber: row.bilty_number || "",
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a History row from /api/otp-supabase/client-confirmation (an
+// otp_client_confirmation row, joined to its parent otp_orders +
+// otp_bilty_upload + otp_packaging_transport + otp_make_invoice) into the
+// UI field names client-confirmation/page.tsx expects.
+export function mapClientConfirmationHistoryRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const biltyUpload = row.biltyUpload || {}
+  const packagingTransport = biltyUpload.packagingTransport || {}
+  const makeInvoice = packagingTransport.makeInvoice || {}
+
+  return {
+    id: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    crmName: order.crm_name || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+    transporterName: packagingTransport.transporter_name || "",
+
+    materialReceived: row.material_received || "",
+    sitePersonName: row.site_person_name || "",
+    clientContactNumber: row.contact_number || "",
     createdBy: row.created_by || "",
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
@@ -641,8 +733,8 @@ export function mapMaterialReceivedPendingRowToUI(row: any): any {
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(order.created_at),
-    creName: order.crm_name || "",
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
 
@@ -673,6 +765,7 @@ export function mapMaterialReceivedHistoryRowToUI(row: any): any {
     quotationNo: order.quotation_number || "",
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
+    crmName: order.crm_name || "",
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
 

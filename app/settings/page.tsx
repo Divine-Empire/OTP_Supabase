@@ -23,8 +23,9 @@ interface User {
   username: string
   fullName: string
   password: string
-  role: "admin" | "user" | "super_admin"
+  role: "admin" | "user"
   assignedSteps: string[]
+  assignedCrmNames: string[]
 }
 
 interface StageTat {
@@ -56,7 +57,9 @@ const allSteps = [
   { id: "calibration", label: "Calibration Certificate" },
   { id: "packaging-transport", label: "Packaging and Transport" },
   { id: "bilty-upload", label: "Bilty Upload" },
+  { id: "client-confirmation", label: "Client Confirmation" },
   { id: "debit-note", label: "Debit Note" },
+  { id: "order-cancel", label: "Order Cancel" },
   { id: "settings", label: "Settings" },
 ]
 
@@ -79,7 +82,9 @@ export default function SettingsPage() {
     password: "",
     role: "user" as "admin" | "user",
     assignedSteps: [] as string[],
+    assignedCrmNames: [] as string[],
   })
+  const [crmNameOptions, setCrmNameOptions] = useState<string[]>([])
 
   // TAT State
   const [stageTats, setStageTats] = useState<StageTat[]>([])
@@ -122,6 +127,7 @@ export default function SettingsPage() {
           password: u.password_hash || "",
           role: u.role || "user",
           assignedSteps: Array.isArray(u.assigned_steps) ? u.assigned_steps : [],
+          assignedCrmNames: Array.isArray(u.assigned_crm_names) ? u.assigned_crm_names : [],
         }))
         setUsers(usersData)
       }
@@ -154,6 +160,20 @@ export default function SettingsPage() {
     }
   }
 
+  // Fetch distinct otp_orders.crm_name values for the User Management CRM
+  // Name Access multi-select.
+  const fetchCrmNameOptions = async () => {
+    try {
+      const response = await fetch("/api/otp-supabase/crm-names")
+      const result = await response.json()
+      if (result.success && Array.isArray(result.data)) {
+        setCrmNameOptions(result.data)
+      }
+    } catch (error) {
+      console.error("Error fetching CRM name options:", error)
+    }
+  }
+
   // Fetch dropdown options from Supabase API
   const fetchDropdownOptions = async () => {
     setDropdownLoading(true)
@@ -180,6 +200,7 @@ export default function SettingsPage() {
     fetchUsers()
     fetchStageTats()
     fetchDropdownOptions()
+    fetchCrmNameOptions()
   }, [])
 
   const togglePasswordVisibility = (userId: string) => {
@@ -206,6 +227,7 @@ export default function SettingsPage() {
       password: "",
       role: "user",
       assignedSteps: [],
+      assignedCrmNames: [],
     })
     setShowPassword(false)
     setIsUserDialogOpen(true)
@@ -222,6 +244,7 @@ export default function SettingsPage() {
       // full-access rule — normalize it to every step the moment the dialog
       // opens, same as a fresh admin selection would.
       assignedSteps: user.role === "admin" ? allSteps.map((s) => s.id) : user.assignedSteps,
+      assignedCrmNames: user.role === "admin" ? crmNameOptions : user.assignedCrmNames || [],
     })
     setShowPassword(true)
     setIsUserDialogOpen(true)
@@ -235,6 +258,7 @@ export default function SettingsPage() {
       ...prev,
       role: value,
       assignedSteps: value === "admin" ? allSteps.map((s) => s.id) : prev.assignedSteps,
+      assignedCrmNames: value === "admin" ? crmNameOptions : prev.assignedCrmNames,
     }))
   }
 
@@ -281,6 +305,7 @@ export default function SettingsPage() {
     // Safety net: an admin always gets every step, regardless of what the
     // checkbox grid happened to hold when Save was clicked.
     const finalAssignedSteps = userFormData.role === "admin" ? allSteps.map((s) => s.id) : userFormData.assignedSteps
+    const finalAssignedCrmNames = userFormData.role === "admin" ? crmNameOptions : userFormData.assignedCrmNames
 
     try {
       let response: Response
@@ -295,6 +320,7 @@ export default function SettingsPage() {
             password: userFormData.password || undefined,
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
+            assignedCrmNames: finalAssignedCrmNames,
           }),
         })
       } else {
@@ -307,6 +333,7 @@ export default function SettingsPage() {
             password: userFormData.password,
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
+            assignedCrmNames: finalAssignedCrmNames,
           }),
         })
       }
@@ -343,6 +370,20 @@ export default function SettingsPage() {
       setUserFormData((prev) => ({
         ...prev,
         assignedSteps: prev.assignedSteps.filter((s) => s !== stepId),
+      }))
+    }
+  }
+
+  const handleCrmNameChange = (name: string, checked: boolean) => {
+    if (checked) {
+      setUserFormData((prev) => ({
+        ...prev,
+        assignedCrmNames: [...prev.assignedCrmNames, name],
+      }))
+    } else {
+      setUserFormData((prev) => ({
+        ...prev,
+        assignedCrmNames: prev.assignedCrmNames.filter((n) => n !== name),
       }))
     }
   }
@@ -512,7 +553,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (currentUser?.role !== "admin" && currentUser?.role !== "super_admin") {
+  if (currentUser?.role !== "admin") {
     return (
       <MainLayout>
         <div className="flex items-center justify-center h-64">
@@ -628,16 +669,10 @@ export default function SettingsPage() {
                             </TableCell>
                             <TableCell>
                               <Badge
-                                variant={
-                                  user.role === "super_admin"
-                                    ? "destructive"
-                                    : user.role === "admin"
-                                    ? "default"
-                                    : "secondary"
-                                }
+                                variant={user.role === "admin" ? "default" : "secondary"}
                                 className="capitalize text-xs font-semibold"
                               >
-                                {user.role.replace("_", " ")}
+                                {user.role}
                               </Badge>
                             </TableCell>
                             <TableCell>
@@ -941,6 +976,64 @@ export default function SettingsPage() {
                       </Label>
                     </div>
                   ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>CRM Name Access</Label>
+                  {userFormData.role === "admin" ? (
+                    <span className="flex items-center gap-1 text-xs text-indigo-600 font-medium">
+                      <Lock className="h-3 w-3" />
+                      Auto-granted (Admin)
+                    </span>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="p-0 h-auto text-xs text-indigo-600"
+                      onClick={() => {
+                        if (userFormData.assignedCrmNames.length === crmNameOptions.length) {
+                          setUserFormData((prev) => ({ ...prev, assignedCrmNames: [] }))
+                        } else {
+                          setUserFormData((prev) => ({ ...prev, assignedCrmNames: crmNameOptions }))
+                        }
+                      }}
+                    >
+                      {userFormData.assignedCrmNames.length === crmNameOptions.length ? "Deselect All" : "Select All"}
+                    </Button>
+                  )}
+                </div>
+                {userFormData.role === "admin" ? (
+                  <p className="text-xs text-muted-foreground">
+                    Admins automatically see every CRM Name — the list below is locked and informational only.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    A 'user' role only sees, in every stage, orders whose CRM Name is checked here.
+                  </p>
+                )}
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-slate-50/50">
+                  {crmNameOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground col-span-2">No CRM names found in otp_orders yet.</p>
+                  ) : (
+                    crmNameOptions.map((name) => (
+                      <div key={name} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`crm-${name}`}
+                          checked={userFormData.assignedCrmNames.includes(name)}
+                          disabled={userFormData.role === "admin"}
+                          onCheckedChange={(checked) => handleCrmNameChange(name, checked as boolean)}
+                        />
+                        <Label
+                          htmlFor={`crm-${name}`}
+                          className={`text-sm font-normal ${userFormData.role === "admin" ? "text-muted-foreground" : "cursor-pointer"}`}
+                        >
+                          {name}
+                        </Label>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">

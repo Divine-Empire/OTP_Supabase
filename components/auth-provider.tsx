@@ -8,8 +8,9 @@ interface User {
   id: string
   username: string
   fullName: string
-  role: "super_admin" | "admin" | "user"
+  role: "admin" | "user"
   assignedSteps: string[]
+  assignedCrmNames?: string[]
   warehousePageAccess?: string
   location?: string
 }

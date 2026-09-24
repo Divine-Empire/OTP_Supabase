@@ -15,6 +15,7 @@ const STAGE_ORDER: Record<string, number> = {
   calibration: 9,
   packaging_transport: 10,
   bilty_upload: 11,
+  client_confirmation: 12,
 }
 
 const DEFAULT_STAGES = [
@@ -29,6 +30,7 @@ const DEFAULT_STAGES = [
   { stage_key: "calibration", stage_label: "Calibration Certificate", tat_minutes: 7200, description: "otp_make_invoice.calibration_planned — 5 days from Make Invoice (calibration_required only)" },
   { stage_key: "packaging_transport", stage_label: "Packaging and Transport", tat_minutes: 4320, description: "otp_make_invoice.packaging_transport_planned — 3 days from Make Invoice" },
   { stage_key: "bilty_upload", stage_label: "Bilty Upload", tat_minutes: 1440, description: "otp_packaging_transport.bilty_upload_planned — 1 day from Packaging and Transport" },
+  { stage_key: "client_confirmation", stage_label: "Client Confirmation", tat_minutes: 1440, description: "otp_bilty_upload.client_confirmation_planned — 1 day from Bilty Upload" },
 ]
 
 export async function GET() {

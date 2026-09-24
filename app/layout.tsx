@@ -8,7 +8,7 @@ import { DataProvider } from "@/components/data-provider"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "OTP System - Order To Payment",
+  title: "Order to Payment",
   description: "Complete Order To Payment Management System",
   generator: 'v0.dev',
   icons: {

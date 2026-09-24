@@ -22,6 +22,7 @@ import {
 import { Trash2, RefreshCw, Search, Settings, Eye, ArrowLeftRight } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapMaterialReceivedPendingRowToUI, mapMaterialReceivedHistoryRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
@@ -60,7 +61,7 @@ const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
-  { key: "creName", label: "CRE Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
@@ -73,6 +74,7 @@ const historyColumns = [
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "itemName", label: "Item Name", searchable: true },
   { key: "indentedQty", label: "Indented Qty", searchable: false },
   { key: "receivedQty", label: "Received (this attempt)", searchable: false },
@@ -103,6 +105,7 @@ export default function MaterialReceivedPage() {
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [crmNameFilter, setCrmNameFilter] = useState("all")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
@@ -159,25 +162,37 @@ export default function MaterialReceivedPage() {
     await fetchProcessedOrders()
   }
 
+  // Role-based access: 'user' role only sees rows whose crmName is in their
+  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
   const filteredOrders = useMemo(() => {
-    if (!searchTerm) return orders
-    return orders.filter((order) => {
-      const searchableFields = pendingColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [orders, searchTerm])
+    let filtered = filterByCrmAccess(orders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = pendingColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [orders, searchTerm, crmNameFilter, currentUser])
+
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    if (!searchTerm) return processedOrders
-    return processedOrders.filter((order) => {
-      const searchableFields = historyColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [processedOrders, searchTerm])
+    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = historyColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -199,7 +214,7 @@ export default function MaterialReceivedPage() {
     setScannerError(null)
     setCompareItems([])
     setComputedStatus("")
-    setCreatedByPerson(order.creName || currentUser?.fullName || currentUser?.username || "")
+    setCreatedByPerson(order.crmName || currentUser?.fullName || currentUser?.username || "")
     setWarehouseLocationValue("")
     setRemarks("")
     setIsDialogOpen(true)
@@ -455,6 +470,19 @@ export default function MaterialReceivedPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All CRM Names" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM Names</SelectItem>
+                      {crmNameOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -545,7 +573,7 @@ export default function MaterialReceivedPage() {
                                     column.key === 'itemList' ? '130px' :
                                       column.key === 'timestamp' ? '130px' :
                                         column.key === 'orderNo' ? '120px' :
-                                          column.key === 'creName' ? '150px' :
+                                          column.key === 'crmName' ? '150px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -572,7 +600,7 @@ export default function MaterialReceivedPage() {
                                       column.key === 'itemList' ? '130px' :
                                         column.key === 'timestamp' ? '130px' :
                                           column.key === 'orderNo' ? '120px' :
-                                            column.key === 'creName' ? '150px' :
+                                            column.key === 'crmName' ? '150px' :
                                               column.key === 'quotationNo' ? '150px' :
                                                 column.key === 'companyName' ? '250px' :
                                                   column.key === 'contactPersonName' ? '180px' :

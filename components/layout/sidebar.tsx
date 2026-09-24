@@ -22,6 +22,8 @@ import {
   FileMinus,
   Truck,
   FileCheck2,
+  XCircle,
+  UserCheck,
 } from "lucide-react";
 
 const menuItems = [
@@ -91,6 +93,12 @@ const menuItems = [
     icon: FileCheck2,
     step: "bilty-upload",
   },
+  {
+    href: "/client-confirmation",
+    label: "Client Confirmation",
+    icon: UserCheck,
+    step: "client-confirmation",
+  },
   // { href: "/make-pi", label: "Make PI", icon: FileSpreadsheet, step: "make-pi" },
     {
       href: "/debit-note",
@@ -98,6 +106,12 @@ const menuItems = [
       icon: FileMinus,
       step: "debit-note",
     },
+  {
+    href: "/order-cancel",
+    label: "Order Cancel",
+    icon: XCircle,
+    step: "order-cancel",
+  },
   { href: "/settings", label: "Settings", icon: Settings, step: "settings" },
 ];
 

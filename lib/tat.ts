@@ -13,6 +13,7 @@ const FALLBACK_TAT_MINUTES: Record<string, number> = {
   calibration: 7200,
   packaging_transport: 4320,
   bilty_upload: 1440,
+  client_confirmation: 1440,
 }
 
 // Reads a stage's configured TAT (Settings > TAT Management) in minutes.

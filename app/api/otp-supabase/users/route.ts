@@ -6,7 +6,7 @@ export async function GET() {
     const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from("otp_users")
-      .select("id, username, full_name, password_hash, role, assigned_steps, warehouse_page_access, location, is_active, created_at, updated_at")
+      .select("id, username, full_name, password_hash, role, assigned_steps, assigned_crm_names, warehouse_page_access, location, is_active, created_at, updated_at")
       .order("created_at", { ascending: true })
 
     if (error) {
@@ -73,6 +73,7 @@ export async function POST(request: Request) {
         fullName: user.full_name,
         role: user.role,
         assignedSteps: user.assigned_steps || [],
+        assignedCrmNames: user.assigned_crm_names || [],
         warehousePageAccess: user.warehouse_page_access || "",
         location: user.location || "",
       }
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
     }
 
     // Create User Action (Settings page)
-    const { username, fullName, password, role, assignedSteps, deployLink, warehousePageAccess, location } = body
+    const { username, fullName, password, role, assignedSteps, assignedCrmNames, deployLink, warehousePageAccess, location } = body
     if (!username || !fullName) {
       return NextResponse.json(
         { success: false, error: "Username and Full Name are required" },
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
         password_hash: password || "123456",
         role: role || "user",
         assigned_steps: assignedSteps || [],
+        assigned_crm_names: assignedCrmNames || [],
         warehouse_page_access: warehousePageAccess || null,
         location: location || null,
       }])
@@ -118,7 +120,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json()
-    const { id, username, fullName, password, role, assignedSteps, warehousePageAccess, location, isActive } = body
+    const { id, username, fullName, password, role, assignedSteps, assignedCrmNames, warehousePageAccess, location, isActive } = body
 
     if (!id && !username) {
       return NextResponse.json({ success: false, error: "User ID or username required" }, { status: 400 })
@@ -130,6 +132,7 @@ export async function PUT(request: Request) {
     if (password !== undefined && password !== "") updateData.password_hash = password
     if (role !== undefined) updateData.role = role
     if (assignedSteps !== undefined) updateData.assigned_steps = assignedSteps
+    if (assignedCrmNames !== undefined) updateData.assigned_crm_names = assignedCrmNames
     if (warehousePageAccess !== undefined) updateData.warehouse_page_access = warehousePageAccess
     if (location !== undefined) updateData.location = location
     if (isActive !== undefined) updateData.is_active = isActive

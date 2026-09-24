@@ -24,6 +24,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 
 import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -31,7 +32,7 @@ const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
-  { key: "creName", label: "CRE Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
@@ -40,11 +41,8 @@ const pendingColumns = [
   { key: "shippingAddress", label: "Shipping Address", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
-  { key: "referenceName", label: "Reference Name", searchable: true },
-  { key: "email", label: "Email", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "transportMode", label: "Transport Mode", searchable: true },
-  { key: "freightType", label: "Freight Type", searchable: true },
   { key: "destination", label: "Destination", searchable: true },
   { key: "poNumber", label: "Po Number", searchable: true },
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
@@ -91,11 +89,14 @@ export default function OrderAcceptablePage() {
   const [pendingCreFilter, setPendingCreFilter] = useState("all")
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [processedLoading, setProcessedLoading] = useState(false)
+  // Offer Show / Conveyed For Registration Form are hidden by default (still
+  // toggleable via Column Visibility) — everything else starts visible.
+  const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [historyCreFilter, setHistoryCreFilter] = useState("all")
   const [creName, setCreName] = useState("")
@@ -146,34 +147,11 @@ export default function OrderAcceptablePage() {
     fetchOrders()
   }, [])
 
-  // Filter orders based on search term
-  const filterOrdersByUserRole = (orders: any[], currentUser: any) => {
-    if (!currentUser) return orders;
-
-    // Super admin and admin see all orders
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") {
-      return orders;
-    }
-
-    // If user has 'all' or this step assigned
-    if (currentUser.assignedSteps?.includes("all") || currentUser.assignedSteps?.includes("order-acceptable")) {
-      return orders;
-    }
-
-    // Otherwise filter by CRE Name matching username or full name
-    return orders.filter(order =>
-      !order.creName ||
-      order.creName.toLowerCase() === (currentUser.username || "").toLowerCase() ||
-      (currentUser.fullName && order.creName.toLowerCase() === currentUser.fullName.toLowerCase())
-    );
-  };
-
-  // Update the filteredOrders useMemo to include role-based filtering
+  // Role-based access: 'user' role only sees rows whose crmName is in their
+  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // admin is unrestricted.
   const filteredOrders = useMemo(() => {
-    let filtered = orders;
-
-    // Apply user role-based filtering
-    filtered = filterOrdersByUserRole(filtered, currentUser);
+    let filtered = filterByCrmAccess(orders, currentUser);
 
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -185,9 +163,9 @@ export default function OrderAcceptablePage() {
       });
     }
 
-    // Apply CRE filter - only filter if pendingCreFilter is not empty and not "all"
+    // Apply CRM filter - only filter if pendingCreFilter is not empty and not "all"
     if (pendingCreFilter && pendingCreFilter !== "all") {
-      filtered = filtered.filter((order) => order.creName === pendingCreFilter);
+      filtered = filtered.filter((order) => order.crmName === pendingCreFilter);
     }
 
     return filtered;
@@ -198,17 +176,14 @@ export default function OrderAcceptablePage() {
 
   const creOptions = useMemo(() => {
     const options = new Set<string>()
-    orders.forEach((order) => {
-      if (order.creName) options.add(order.creName)
+    filterByCrmAccess(orders, currentUser).forEach((order) => {
+      if (order.crmName) options.add(order.crmName)
     })
     return Array.from(options)
-  }, [orders])
+  }, [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = processedOrders;
-
-    // Apply user role-based filtering
-    filtered = filterOrdersByUserRole(filtered, currentUser);
+    let filtered = filterByCrmAccess(processedOrders, currentUser);
 
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -221,31 +196,11 @@ export default function OrderAcceptablePage() {
     }
 
     if (historyCreFilter && historyCreFilter !== "all") {
-      filtered = filtered.filter((order) => order.creName === historyCreFilter);
+      filtered = filtered.filter((order) => order.crmName === historyCreFilter);
     }
 
     return filtered;
   }, [processedOrders, searchTerm, historyCreFilter, currentUser]);
-
-  // const filteredOrders = useMemo(() => {
-  //   let filtered = orders
-
-  //   if (searchTerm) {
-  //     filtered = filtered.filter((order) => {
-  //       const searchableFields = pendingColumns
-  //         .filter((col) => col.searchable)
-  //         .map((col) => String(order[col.key] || "").toLowerCase())
-
-  //       return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-  //     })
-  //   }
-
-  //   if (pendingCreFilter && pendingCreFilter !== "all") {
-  //     filtered = filtered.filter((order) => order.creName === pendingCreFilter)
-  //   }
-
-  //   return filtered
-  // }, [orders, searchTerm, pendingCreFilter])
 
   const handleProcessedTabClick = async () => {
     setProcessedLoading(true)
@@ -399,7 +354,7 @@ export default function OrderAcceptablePage() {
         return <Badge variant="outline">{value}</Badge>
       case "isOrderAcceptable":
         return <Badge variant={value === "Yes" ? "default" : "destructive"}>{value || "N/A"}</Badge>
-      case "creName":
+      case "crmName":
         return <Badge variant="outline">{value || "N/A"}</Badge>
       case "orderAcceptanceChecklist":
       case "remarks":
@@ -479,10 +434,10 @@ export default function OrderAcceptablePage() {
                     <div className="w-[200px]">
                       <Select value={pendingCreFilter} onValueChange={setPendingCreFilter}>
                         <SelectTrigger>
-                          <SelectValue placeholder="All CRE Names" />
+                          <SelectValue placeholder="All CRM Names" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All CRE Names</SelectItem>
+                          <SelectItem value="all">All CRM Names</SelectItem>
                           {creOptions.map((cre) => (
                             <SelectItem key={cre} value={cre}>
                               {cre}
@@ -496,10 +451,10 @@ export default function OrderAcceptablePage() {
                     <div className="w-[200px]">
                       <Select value={historyCreFilter} onValueChange={setHistoryCreFilter}>
                         <SelectTrigger>
-                          <SelectValue placeholder="All CRE Names" />
+                          <SelectValue placeholder="All CRM Names" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="all">All CRE Names</SelectItem>
+                          <SelectItem value="all">All CRM Names</SelectItem>
                           {creOptions.map((cre) => (
                             <SelectItem key={cre} value={cre}>
                               {cre}
@@ -604,7 +559,7 @@ export default function OrderAcceptablePage() {
                                     column.key === 'itemList' ? '90px' :
                                       column.key === 'timestamp' ? '130px' :
                                         column.key === 'orderNo' ? '120px' :
-                                          column.key === 'creName' ? '150px' :
+                                          column.key === 'crmName' ? '150px' :
                                             column.key === 'quotationNo' ? '150px' :
                                               column.key === 'companyName' ? '250px' :
                                                 column.key === 'contactPersonName' ? '180px' :
@@ -633,7 +588,7 @@ export default function OrderAcceptablePage() {
                                       column.key === 'itemList' ? '90px' :
                                         column.key === 'timestamp' ? '130px' :
                                           column.key === 'orderNo' ? '120px' :
-                                            column.key === 'creName' ? '150px' :
+                                            column.key === 'crmName' ? '150px' :
                                               column.key === 'quotationNo' ? '150px' :
                                                 column.key === 'companyName' ? '250px' :
                                                   column.key === 'contactPersonName' ? '180px' :
@@ -711,7 +666,7 @@ export default function OrderAcceptablePage() {
                                         column.key === 'itemList' ? '90px' :
                                           column.key === 'timestamp' ? '130px' :
                                             column.key === 'orderNo' ? '120px' :
-                                              column.key === 'creName' ? '150px' :
+                                              column.key === 'crmName' ? '150px' :
                                                 column.key === 'quotationNo' ? '150px' :
                                                   column.key === 'companyName' ? '250px' :
                                                     column.key === 'contactPersonName' ? '180px' :
@@ -740,7 +695,7 @@ export default function OrderAcceptablePage() {
                                           column.key === 'itemList' ? '90px' :
                                             column.key === 'timestamp' ? '130px' :
                                               column.key === 'orderNo' ? '120px' :
-                                                column.key === 'creName' ? '150px' :
+                                                column.key === 'crmName' ? '150px' :
                                                   column.key === 'quotationNo' ? '150px' :
                                                     column.key === 'companyName' ? '250px' :
                                                       column.key === 'contactPersonName' ? '180px' :

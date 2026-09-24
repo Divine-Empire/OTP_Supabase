@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   DropdownMenu,
@@ -22,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapBiltyUploadPendingRowToUI, mapBiltyUploadHistoryRowToUI } from "@/lib/otp-utils"
+import { mapClientConfirmationPendingRowToUI, mapClientConfirmationHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
@@ -44,30 +43,13 @@ const pendingColumns = [
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
-  { key: "transporterContact", label: "Transporter Contact", searchable: true },
-  { key: "biltyNumber", label: "Bilty/Docket No.", searchable: true },
-  { key: "biltyUpload", label: "Bilty Upload", searchable: false },
-  { key: "freightCharge", label: "Freight Charge", searchable: false },
-  { key: "hamaliCharge", label: "Hamali Charge", searchable: false },
-  { key: "parkingCharge", label: "Parking Charge", searchable: false },
-  { key: "transporterRemarks", label: "Transporter Assign", searchable: true },
+  { key: "materialReceived", label: "Material Received", searchable: true },
+  { key: "sitePersonName", label: "Site-Person Name", searchable: true },
+  { key: "clientContactNumber", label: "Contact Number", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
 
-async function uploadFiles(files: File[], folder: string): Promise<string[]> {
-  const urls: string[] = []
-  for (const file of files) {
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("folder", folder)
-    const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
-    const uploadJson = await uploadRes.json()
-    if (uploadJson.success) urls.push(uploadJson.url)
-  }
-  return urls
-}
-
-export default function BiltyUploadPage() {
+export default function ClientConfirmationPage() {
   const [orders, setOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -75,13 +57,9 @@ export default function BiltyUploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
 
-  const [transporterContact, setTransporterContact] = useState("")
-  const [biltyNumber, setBiltyNumber] = useState("")
-  const [biltyUploadFiles, setBiltyUploadFiles] = useState<File[]>([])
-  const [freightCharge, setFreightCharge] = useState("")
-  const [hamaliCharge, setHamaliCharge] = useState("")
-  const [parkingCharge, setParkingCharge] = useState("")
-  const [transporterRemarks, setTransporterRemarks] = useState("")
+  const [materialReceived, setMaterialReceived] = useState("")
+  const [sitePersonName, setSitePersonName] = useState("")
+  const [clientContactNumber, setClientContactNumber] = useState("")
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
@@ -102,15 +80,15 @@ export default function BiltyUploadPage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/otp-supabase/bilty-upload?status=pending")
+      const response = await fetch("/api/otp-supabase/client-confirmation?status=pending")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setOrders(result.data.map(mapBiltyUploadPendingRowToUI))
+        setOrders(result.data.map(mapClientConfirmationPendingRowToUI))
       } else {
         setOrders([])
       }
     } catch (err: any) {
-      console.error("Error fetching bilty-upload pending queue:", err)
+      console.error("Error fetching client-confirmation pending queue:", err)
       setError(err.message)
       setOrders([])
     } finally {
@@ -121,15 +99,15 @@ export default function BiltyUploadPage() {
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
-      const response = await fetch("/api/otp-supabase/bilty-upload?status=history")
+      const response = await fetch("/api/otp-supabase/client-confirmation?status=history")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapBiltyUploadHistoryRowToUI))
+        setProcessedOrders(result.data.map(mapClientConfirmationHistoryRowToUI))
       } else {
         setProcessedOrders([])
       }
     } catch (err) {
-      console.error("Error fetching bilty-upload history:", err)
+      console.error("Error fetching client-confirmation history:", err)
       setProcessedOrders([])
     } finally {
       setProcessedLoading(false)
@@ -191,13 +169,9 @@ export default function BiltyUploadPage() {
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
-    setTransporterContact("")
-    setBiltyNumber("")
-    setBiltyUploadFiles([])
-    setFreightCharge("")
-    setHamaliCharge("")
-    setParkingCharge("")
-    setTransporterRemarks("")
+    setMaterialReceived("")
+    setSitePersonName("")
+    setClientContactNumber("")
     setIsDialogOpen(true)
   }
 
@@ -206,37 +180,29 @@ export default function BiltyUploadPage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Bilty Upload — inserts a row into otp_bilty_upload (one per
-  // otp_packaging_transport record), which is what moves this order from
-  // Pending to History here.
+  const isFormValid = materialReceived !== "" && sitePersonName.trim() !== "" && clientContactNumber.trim() !== ""
+
+  // Submits Client Confirmation — inserts a row into
+  // otp_client_confirmation (one per otp_bilty_upload record), which is
+  // what moves this order from Pending to History here. Terminal stage:
+  // nothing downstream gets scheduled from here.
   const handleSubmit = async () => {
     if (!selectedOrder) return
-
-    if (!freightCharge.trim()) {
-      alert("Please enter the Freight Charge.")
-      return
-    }
-    if (biltyUploadFiles.length === 0) {
-      alert("Please upload at least one Bilty / Docket file.")
+    if (!isFormValid) {
+      alert("Material Received, Site-Person Name and Contact Number are all required.")
       return
     }
 
     setIsSubmitting(true)
     try {
-      const biltyUploadUrls = await uploadFiles(biltyUploadFiles, "bilty_upload")
-
-      const response = await fetch("/api/otp-supabase/bilty-upload", {
+      const response = await fetch("/api/otp-supabase/client-confirmation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          packagingTransportId: selectedOrder.packagingTransportId || selectedOrder.id,
-          transporterContact,
-          biltyNumber,
-          biltyUploadUrls,
-          freightCharge,
-          hamaliCharge,
-          parkingCharge,
-          transporterRemarks,
+          biltyUploadId: selectedOrder.biltyUploadId || selectedOrder.id,
+          materialReceived,
+          sitePersonName,
+          contactNumber: clientContactNumber,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
@@ -246,12 +212,12 @@ export default function BiltyUploadPage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — bilty uploaded.`)
+        alert(`Order ${selectedOrder.orderNo} — client confirmation recorded.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
-      console.error("Error submitting bilty-upload:", err)
+      console.error("Error submitting client-confirmation:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -264,7 +230,7 @@ export default function BiltyUploadPage() {
       case "actions":
         return (
           <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Upload Bilty"}
+            {currentUser?.role === "user" ? "View Only" : "Process"}
           </Button>
         )
       case "itemList":
@@ -279,22 +245,8 @@ export default function BiltyUploadPage() {
             View Items
           </Button>
         )
-      case "biltyUpload":
-        return order.biltyUploadUrls && order.biltyUploadUrls.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {order.biltyUploadUrls.map((url: string, idx: number) => (
-              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="default">{idx + 1}</Badge>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <Badge variant="secondary">N/A</Badge>
-        )
-      case "freightCharge":
-      case "hamaliCharge":
-      case "parkingCharge":
-        return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
+      case "materialReceived":
+        return value ? <Badge variant={value === "Yes" ? "default" : "secondary"}>{value}</Badge> : ""
       default:
         return value || ""
     }
@@ -305,7 +257,7 @@ export default function BiltyUploadPage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading bilty upload queue...</span>
+          <span className="ml-2">Loading client confirmation queue...</span>
         </div>
       </MainLayout>
     )
@@ -439,7 +391,7 @@ export default function BiltyUploadPage() {
                   ))}
                   {filteredOrders.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending bilty uploads"}
+                      {searchTerm ? "No orders match your search criteria" : "No pending client confirmations"}
                     </p>
                   )}
                 </div>
@@ -486,7 +438,7 @@ export default function BiltyUploadPage() {
                               colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
                               className="text-center text-muted-foreground h-32"
                             >
-                              {searchTerm ? "No orders match your search criteria" : "No pending bilty uploads"}
+                              {searchTerm ? "No orders match your search criteria" : "No pending client confirmations"}
                             </TableCell>
                           </TableRow>
                         )}
@@ -576,10 +528,10 @@ export default function BiltyUploadPage() {
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Upload Bilty</DialogTitle>
-              <DialogDescription>Upload the Bilty/Docket and enter driver charges for this order</DialogDescription>
+              <DialogTitle>Client Confirmation</DialogTitle>
+              <DialogDescription>Confirm delivery details for this order with the client</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -593,68 +545,42 @@ export default function BiltyUploadPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="transporterContact">Transporter Contact No.</Label>
-                  <Input
-                    id="transporterContact"
-                    value={transporterContact}
-                    onChange={(e) => setTransporterContact(e.target.value)}
-                    placeholder="Enter contact number"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="biltyNumber">Bilty No. / Docket No.</Label>
-                  <Input
-                    id="biltyNumber"
-                    value={biltyNumber}
-                    onChange={(e) => setBiltyNumber(e.target.value)}
-                    placeholder="Enter bilty/docket number"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="freightCharge">
-                    Freight Charge <span className="text-red-500 font-bold">*</span>
-                  </Label>
-                  <Input id="freightCharge" type="number" value={freightCharge} onChange={(e) => setFreightCharge(e.target.value)} placeholder="0" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="hamaliCharge">Hamali Charge</Label>
-                  <Input id="hamaliCharge" type="number" value={hamaliCharge} onChange={(e) => setHamaliCharge(e.target.value)} placeholder="0" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="parkingCharge">Parking Charge</Label>
-                  <Input id="parkingCharge" type="number" value={parkingCharge} onChange={(e) => setParkingCharge(e.target.value)} placeholder="0" />
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="materialReceived">
+                  Material Received <span className="text-red-500 font-bold">*</span>
+                </Label>
+                <Select value={materialReceived} onValueChange={setMaterialReceived}>
+                  <SelectTrigger id="materialReceived">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Yes">Yes</SelectItem>
+                    <SelectItem value="No">No</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="biltyUpload">
-                  Bilty / Docket Upload <span className="text-red-500 font-bold">*</span>
+                <Label htmlFor="sitePersonName">
+                  Site-Person Name <span className="text-red-500 font-bold">*</span>
                 </Label>
                 <Input
-                  id="biltyUpload"
-                  type="file"
-                  accept="image/*,application/pdf"
-                  multiple
-                  onChange={(e) => setBiltyUploadFiles(Array.from(e.target.files || []))}
+                  id="sitePersonName"
+                  value={sitePersonName}
+                  onChange={(e) => setSitePersonName(e.target.value)}
+                  placeholder="Enter site-person name"
                 />
-                {biltyUploadFiles.length > 0 && (
-                  <p className="text-xs text-muted-foreground">{biltyUploadFiles.length} file(s) selected</p>
-                )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="transporterRemarks">Transporter Assign</Label>
-                <Textarea
-                  id="transporterRemarks"
-                  value={transporterRemarks}
-                  onChange={(e) => setTransporterRemarks(e.target.value)}
-                  placeholder="Enter additional warehouse/dispatch remarks..."
-                  rows={3}
+                <Label htmlFor="clientContactNumber">
+                  Contact Number <span className="text-red-500 font-bold">*</span>
+                </Label>
+                <Input
+                  id="clientContactNumber"
+                  value={clientContactNumber}
+                  onChange={(e) => setClientContactNumber(e.target.value)}
+                  placeholder="Enter contact number"
                 />
               </div>
 
@@ -662,7 +588,7 @@ export default function BiltyUploadPage() {
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={isSubmitting}>
+                <Button onClick={handleSubmit} disabled={!isFormValid || isSubmitting}>
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />

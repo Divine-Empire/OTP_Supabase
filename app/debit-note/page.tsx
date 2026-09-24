@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,6 +22,7 @@ import {
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapDebitNotePendingRowToUI, mapDebitNoteHistoryRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -30,6 +32,7 @@ const pendingColumns = [
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
@@ -58,6 +61,7 @@ export default function DebitNotePage() {
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [crmNameFilter, setCrmNameFilter] = useState("all")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
@@ -114,25 +118,37 @@ export default function DebitNotePage() {
     await fetchProcessedOrders()
   }
 
+  // Role-based access: 'user' role only sees rows whose crmName is in their
+  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
   const filteredOrders = useMemo(() => {
-    if (!searchTerm) return orders
-    return orders.filter((order) => {
-      const searchableFields = pendingColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [orders, searchTerm])
+    let filtered = filterByCrmAccess(orders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = pendingColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [orders, searchTerm, crmNameFilter, currentUser])
+
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    if (!searchTerm) return processedOrders
-    return processedOrders.filter((order) => {
-      const searchableFields = historyColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(order[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [processedOrders, searchTerm])
+    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = historyColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -302,6 +318,19 @@ export default function DebitNotePage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All CRM Names" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM Names</SelectItem>
+                      {crmNameOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh

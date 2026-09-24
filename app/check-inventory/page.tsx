@@ -23,6 +23,7 @@ import {
 import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
@@ -95,7 +96,7 @@ const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
-  { key: "creName", label: "CRE Name", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
@@ -104,11 +105,8 @@ const pendingColumns = [
   { key: "shippingAddress", label: "Shipping Address", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
-  { key: "referenceName", label: "Reference Name", searchable: true },
-  { key: "email", label: "Email", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "transportMode", label: "Transport Mode", searchable: true },
-  { key: "freightType", label: "Freight Type", searchable: true },
   { key: "destination", label: "Destination", searchable: true },
   { key: "poNumber", label: "Po Number", searchable: true },
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
@@ -154,12 +152,16 @@ export default function CheckInventoryPage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [selectedColumn, setSelectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
+  const [crmNameFilter, setCrmNameFilter] = useState<string>("all")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Offer Show / Conveyed For Registration Form are hidden by default (still
+  // toggleable via Column Visibility) — everything else starts visible.
+  const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
 
   const [inventoryPhotoAttachment, setInventoryPhotoAttachment] = useState<File | null>(null)
@@ -211,26 +213,17 @@ export default function CheckInventoryPage() {
     fetchOrders()
   }, [])
 
-  // Filter orders based on search term and selected column
-  // Add this function after the useAuth hook
-  const filterOrdersByUserRole = (orders: any[], currentUser: any) => {
-    if (!currentUser) return orders;
-
-    // Super admin and admin see all data
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") {
-      return orders;
-    }
-
-    // Regular users only see data where CRE Name matches their username
-    return orders.filter(order => order.creName === currentUser.username);
-  };
+  // Role-based access: 'user' role only sees rows whose crmName is in their
+  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // admin is unrestricted.
 
   // Update the filteredOrders useMemo to include role-based filtering
   const filteredOrders = useMemo(() => {
-    let filtered = orders;
+    let filtered = filterByCrmAccess(orders, currentUser);
 
-    // Apply user role-based filtering
-    filtered = filterOrdersByUserRole(filtered, currentUser);
+    if (crmNameFilter !== "all") {
+      filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    }
 
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -247,20 +240,24 @@ export default function CheckInventoryPage() {
     }
 
     return filtered
-  }, [orders, searchTerm, selectedColumn, currentUser])
+  }, [orders, searchTerm, selectedColumn, currentUser, crmNameFilter])
 
   // Filter orders based on status (pre-filtered by fetchOrders)
   const pendingOrders = filteredOrders;
 
-
+  const crmNameOptions = useMemo(
+    () => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)),
+    [orders, currentUser]
+  )
 
   // Filter processed orders based on search term
   // Update the filteredProcessedOrders useMemo
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = processedOrders;
+    let filtered = filterByCrmAccess(processedOrders, currentUser);
 
-    // Apply user role-based filtering
-    filtered = filterOrdersByUserRole(filtered, currentUser);
+    if (crmNameFilter !== "all") {
+      filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    }
 
     // Apply availability filter if not "all"
     if (availabilityFilter !== "all") {
@@ -285,7 +282,7 @@ export default function CheckInventoryPage() {
     }
 
     return filtered;
-  }, [processedOrders, searchTerm, selectedColumn, availabilityFilter, currentUser]);
+  }, [processedOrders, searchTerm, selectedColumn, availabilityFilter, currentUser, crmNameFilter]);
 
   const handleProcessedTabClick = async () => {
     setProcessedLoading(true)
@@ -335,7 +332,7 @@ export default function CheckInventoryPage() {
     setCompareItems([])
     setComputedStatus("")
     setCustomerWantsMaterialAs("")
-    setCreatedByPerson(order.creName || currentUser?.fullName || currentUser?.username || "")
+    setCreatedByPerson(order.crmName || currentUser?.fullName || currentUser?.username || "")
     setWarehouseLocationValue("")
     setLeadTime("")
     setRemarks("")
@@ -668,6 +665,19 @@ export default function CheckInventoryPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All CRM Names" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM Names</SelectItem>
+                      {crmNameOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {currentTab === "history" && (
                     <Select
                       value={availabilityFilter}
