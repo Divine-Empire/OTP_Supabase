@@ -124,12 +124,18 @@ interface ScanItemPayload {
   serials?: string[]
 }
 
+interface AccessoryPayload {
+  item_name: string
+  quantity: number
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json()
     const {
       orderId,
       items, // ScanItemPayload[] — every item on the order, scanned or not
+      accessories, // AccessoryPayload[] — scanned separately, not part of the order's own item list
       customerWantsMaterialAs,
       createdBy,
       warehouseLocation,
@@ -139,6 +145,7 @@ export async function POST(request: Request) {
     } = body as {
       orderId: string
       items: ScanItemPayload[]
+      accessories?: AccessoryPayload[]
       customerWantsMaterialAs?: string
       createdBy?: string
       warehouseLocation?: string
@@ -187,6 +194,21 @@ export async function POST(request: Request) {
     if (orderError) throw orderError
     if (!order) {
       return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 })
+    }
+
+    // Accessories scanned at this stage aren't part of the order's own item
+    // list -- written straight onto otp_orders (not otp_check_inventory) so
+    // every later stage's Pending/History view can read it via the same
+    // `order` join they already have, same as items/total_qty/crm_name etc.
+    if (Array.isArray(accessories)) {
+      const normalizedAccessories = accessories
+        .filter((a) => a?.item_name)
+        .map((a) => ({ item_name: a.item_name, quantity: Number(a.quantity) || 0 }))
+      const { error: accessoriesError } = await supabase
+        .from("otp_orders")
+        .update({ items_accessories: normalizedAccessories })
+        .eq("id", orderId)
+      if (accessoriesError) throw accessoriesError
     }
 
     // 1. otp_check_inventory

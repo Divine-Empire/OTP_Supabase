@@ -47,9 +47,11 @@ export function parseItemQr(raw: string): ScannedQrItem | null {
 export function QrScanner({
   onScan,
   onError,
+  label = "Scan Item QR",
 }: {
   onScan: (rawValue: string) => void
   onError?: (message: string) => void
+  label?: string
 }) {
   const containerId = useRef(`qr-scanner-${Math.random().toString(36).slice(2)}`)
   const scannerRef = useRef<any>(null)
@@ -125,7 +127,7 @@ export function QrScanner({
       {!active ? (
         <Button type="button" variant="outline" onClick={start} disabled={starting} className="gap-2">
           <Camera className="h-4 w-4" />
-          {starting ? "Starting camera..." : "Scan Item QR"}
+          {starting ? "Starting camera..." : label}
         </Button>
       ) : (
         <Button type="button" variant="outline" onClick={stop} className="gap-2">

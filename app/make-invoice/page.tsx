@@ -51,6 +51,7 @@ const pendingColumns = [
   { key: "sourceStage", label: "Source Stage", searchable: true },
   { key: "debitNoteForInvoiceRequired", label: "Debit Note", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab

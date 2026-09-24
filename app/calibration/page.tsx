@@ -39,6 +39,7 @@ const pendingColumns = [
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab

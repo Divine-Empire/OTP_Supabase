@@ -67,6 +67,7 @@ const pendingColumns = [
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab (item-level — one row per past attempt)
@@ -75,6 +76,7 @@ const historyColumns = [
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "crmName", label: "CRM Name", searchable: true },
+  { key: "accessories", label: "Accessories", searchable: true },
   { key: "itemName", label: "Item Name", searchable: true },
   { key: "indentedQty", label: "Indented Qty", searchable: false },
   { key: "receivedQty", label: "Received (this attempt)", searchable: false },

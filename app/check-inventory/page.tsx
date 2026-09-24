@@ -45,6 +45,16 @@ interface ScanRow {
   serials: string[] // numbered sub-rows for this item; empty for a non-serialized (bulk) item
 }
 
+// Accessories aren't part of the order's own item list -- they're
+// Purchase-FMS-Supabase items too (same QR format/QrScanner), just scanned
+// separately and kept as a summary count only (name + qty, no serial
+// traceability -- see OTP_Supabase/Database/48_item_description_and_accessories_column.sql).
+interface AccessoryScanRow {
+  itemName: string
+  itemCode: string
+  qty: number
+}
+
 // The trailing segment of the serial (after the last "/") is the per-unit
 // sequence number. Present -> this label uniquely identifies one physical
 // unit. Empty -> the label is shared across the whole batch/bulk item.
@@ -122,6 +132,7 @@ const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "availabilityStatus", label: "Availability Status", searchable: true },
   { key: "inventoryRemarks", label: "Remarks", searchable: true },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 export default function CheckInventoryPage() {
@@ -138,6 +149,8 @@ export default function CheckInventoryPage() {
   const [dialogStep, setDialogStep] = useState<"scan" | "preview">("scan")
   const [scanRows, setScanRows] = useState<ScanRow[]>([])
   const [scannerError, setScannerError] = useState<string | null>(null)
+  const [accessoryScanRows, setAccessoryScanRows] = useState<AccessoryScanRow[]>([])
+  const [accessoryScannerError, setAccessoryScannerError] = useState<string | null>(null)
   const [compareItems, setCompareItems] = useState<CompareItem[]>([])
   const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
   const [customerWantsMaterialAs, setCustomerWantsMaterialAs] = useState("")
@@ -329,6 +342,8 @@ export default function CheckInventoryPage() {
     setDialogStep("scan")
     setScanRows([])
     setScannerError(null)
+    setAccessoryScanRows([])
+    setAccessoryScannerError(null)
     setCompareItems([])
     setComputedStatus("")
     setCustomerWantsMaterialAs("")
@@ -390,6 +405,40 @@ export default function CheckInventoryPage() {
       next[groupIndex] = { ...group, serials, qty: String(serials.length) }
       return next
     })
+  }
+
+  // Accessories aren't checked against the order's item list (there's no
+  // baseline to belong to) -- any valid Purchase-FMS-Supabase QR is
+  // accepted. No serial traceability, just a running per-item scan count.
+  const handleAccessoryQrScan = (raw: string) => {
+    const parsed = parseItemQr(raw)
+    if (!parsed) {
+      setAccessoryScannerError(`Unrecognized QR: "${raw.slice(0, 60)}"`)
+      return
+    }
+
+    setAccessoryScannerError(null)
+    const key = itemMatchKey(parsed.itemName)
+
+    setAccessoryScanRows((prev) => {
+      const index = prev.findIndex((r) => itemMatchKey(r.itemName) === key)
+      if (index === -1) {
+        return [...prev, { itemName: parsed.itemName, itemCode: parsed.itemCode, qty: 1 }]
+      }
+      const next = [...prev]
+      next[index] = { ...next[index], qty: next[index].qty + 1 }
+      return next
+    })
+  }
+
+  const updateAccessoryQty = (index: number, qty: string) => {
+    setAccessoryScanRows((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, qty: Math.max(Number(qty) || 0, 0) } : r))
+    )
+  }
+
+  const removeAccessoryRow = (index: number) => {
+    setAccessoryScanRows((prev) => prev.filter((_, i) => i !== index))
   }
 
   // Bulk (non-serialized) items only — their qty can't come from a scan
@@ -523,6 +572,7 @@ export default function CheckInventoryPage() {
             scanned_qty: it.scannedQty,
             serials: it.serials,
           })),
+          accessories: accessoryScanRows.map((r) => ({ item_name: r.itemName, quantity: r.qty })),
           customerWantsMaterialAs: computedStatus !== "Available" ? customerWantsMaterialAs || null : null,
           createdBy: createdByPerson || currentUser?.fullName || currentUser?.username || "Admin",
           warehouseLocation: warehouseLocationValue || null,
@@ -998,6 +1048,7 @@ export default function CheckInventoryPage() {
                           <TableRow>
                             <TableHead className="font-semibold">Item Name</TableHead>
                             <TableHead className="font-semibold text-right">Ordered Qty</TableHead>
+                            <TableHead className="font-semibold">Description</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1005,11 +1056,12 @@ export default function CheckInventoryPage() {
                             <TableRow key={idx}>
                               <TableCell>{it.item_name}</TableCell>
                               <TableCell className="text-right">{it.quantity}</TableCell>
+                              <TableCell className="text-sm text-muted-foreground whitespace-pre-wrap">{it.description || ""}</TableCell>
                             </TableRow>
                           ))}
                           {(selectedOrder?.rawItems || []).length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={2} className="text-center text-muted-foreground">
+                              <TableCell colSpan={3} className="text-center text-muted-foreground">
                                 No items on this order
                               </TableCell>
                             </TableRow>
@@ -1077,6 +1129,46 @@ export default function CheckInventoryPage() {
                         ))}
                       </div>
                     )}
+                  </div>
+
+                  <div className="space-y-2 border-t pt-4">
+                    <Label>Accessories (optional)</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Scan each accessory's QR label -- these aren't part of the order's item list, just a
+                      running count carried forward to later stages.
+                    </p>
+                    <QrScanner onScan={handleAccessoryQrScan} onError={setAccessoryScannerError} label="Scan Accessory QR" />
+                    {accessoryScannerError && <p className="text-sm text-destructive">{accessoryScannerError}</p>}
+
+                    <div className="space-y-2">
+                      <Label>Scanned Accessories ({accessoryScanRows.length})</Label>
+                      {accessoryScanRows.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No accessories scanned yet. Point the camera at each accessory's QR label.
+                        </p>
+                      ) : (
+                        <div className="border rounded-lg divide-y">
+                          {accessoryScanRows.map((row, index) => (
+                            <div key={itemMatchKey(row.itemName)} className="flex items-center gap-2 p-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{row.itemName}</p>
+                                <p className="text-xs text-muted-foreground">Code: {row.itemCode}</p>
+                              </div>
+                              <Input
+                                type="number"
+                                className="w-24"
+                                placeholder="Qty"
+                                value={row.qty}
+                                onChange={(e) => updateAccessoryQty(index, e.target.value)}
+                              />
+                              <Button type="button" size="icon" variant="ghost" onClick={() => removeAccessoryRow(index)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex justify-end gap-2">
@@ -1319,7 +1411,7 @@ export default function CheckInventoryPage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
@@ -1329,12 +1421,13 @@ export default function CheckInventoryPage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Description</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -1344,6 +1437,7 @@ export default function CheckInventoryPage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-pre-wrap">{item.description || ""}</TableCell>
                     </TableRow>
                   ))
                 )}

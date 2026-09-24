@@ -49,6 +49,7 @@ const pendingColumns = [
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab

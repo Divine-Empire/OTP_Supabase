@@ -41,6 +41,7 @@ const pendingColumns = [
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "transporterName", label: "Assigned Driver for Dispatch", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab
