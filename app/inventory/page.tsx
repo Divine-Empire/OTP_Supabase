@@ -242,7 +242,7 @@ export default function InventoryPage() {
 
   return (
     <MainLayout>
-      <div className="p-2 space-y-4">
+      <div className="p-2">
         <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
 
         <Card>
@@ -256,7 +256,7 @@ export default function InventoryPage() {
                     placeholder="Search item, code..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 w-48"
+                    className="pl-8 w-80"
                   />
                 </div>
                 <Button
