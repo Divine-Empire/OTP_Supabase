@@ -74,6 +74,12 @@ export default function DebitNotePage() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [dnNumber, setDnNumber] = useState("")
   const [dnAttachmentFile, setDnAttachmentFile] = useState<File | null>(null)
+  // Order's item list, editable qty (capped at ordered qty) -- this is
+  // what gets OUT'd from IMS on submit, since this stage never goes
+  // through Check Inventory (payment_mode = 'na' orders skip it entirely).
+  const [dnItems, setDnItems] = useState<{ itemName: string; orderedQty: number; qty: string }[]>([])
+  const [dnLocationLabel, setDnLocationLabel] = useState("")
+  const [imsStockWarnings, setImsStockWarnings] = useState<{ itemName: string; requestedQty: number }[]>([])
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
@@ -184,7 +190,25 @@ export default function DebitNotePage() {
     setSelectedOrder(order)
     setDnNumber("")
     setDnAttachmentFile(null)
+    setDnItems(
+      (order.rawItems || [])
+        .filter((it: any) => it.item_name)
+        .map((it: any) => ({ itemName: it.item_name, orderedQty: Number(it.quantity) || 0, qty: String(it.quantity ?? "") }))
+    )
+    setDnLocationLabel("")
     setIsDialogOpen(true)
+  }
+
+  const updateDnItemQty = (index: number, qty: string) => {
+    setDnItems((prev) =>
+      prev.map((it, i) => {
+        if (i !== index) return it
+        // Capped at ordered qty -- can be reduced (what actually got
+        // dispatched), never increased.
+        const capped = Math.min(Math.max(Number(qty) || 0, 0), it.orderedQty)
+        return { ...it, qty: String(capped) }
+      })
+    )
   }
 
   const handleViewItemList = (order: any) => {
@@ -221,6 +245,8 @@ export default function DebitNotePage() {
           orderId: selectedOrder.orderId || selectedOrder.id,
           dnNumber: dnNumber.trim(),
           dnAttachmentUrl,
+          items: dnItems.filter((it) => Number(it.qty) > 0).map((it) => ({ itemName: it.itemName, qty: Number(it.qty) })),
+          locationLabel: dnLocationLabel || null,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
@@ -230,6 +256,9 @@ export default function DebitNotePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
+        if (Array.isArray(result.imsWarnings) && result.imsWarnings.length > 0) {
+          setImsStockWarnings(result.imsWarnings)
+        }
         alert(`Order ${selectedOrder.orderNo} moved to Debit Note History`)
       } else {
         throw new Error(result.error || "Update failed")
@@ -321,6 +350,16 @@ export default function DebitNotePage() {
   return (
     <MainLayout>
       <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
+        {imsStockWarnings.length > 0 && (
+          <div className="animate-pulse mb-3 flex items-center justify-between gap-3 rounded-md border-2 border-red-500 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 shrink-0">
+            <span>
+              ⚠️ IMS stock went negative for: {imsStockWarnings.map((w) => `${w.itemName} (${w.requestedQty})`).join(", ")}
+            </span>
+            <Button size="sm" variant="ghost" className="text-red-700 hover:bg-red-100" onClick={() => setImsStockWarnings([])}>
+              Dismiss
+            </Button>
+          </div>
+        )}
         <Tabs
           value={currentTab}
           onValueChange={(value) => setCurrentTab(value)}
@@ -638,6 +677,62 @@ export default function DebitNotePage() {
               </div>
 
               <div className="space-y-2">
+                <Label>Item List (qty editable — capped at ordered qty)</Label>
+                <div className="border rounded-md overflow-hidden max-h-48 overflow-y-auto">
+                  <Table>
+                    <TableHeader className="bg-muted/50 sticky top-0">
+                      <TableRow>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead className="text-right w-28">Ordered Qty</TableHead>
+                        <TableHead className="text-right w-28">Qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dnItems.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-center text-muted-foreground">
+                            No items on this order
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        dnItems.map((it, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>{it.itemName}</TableCell>
+                            <TableCell className="text-right">{it.orderedQty}</TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={it.orderedQty}
+                                className="w-24 ml-auto"
+                                value={it.qty}
+                                onChange={(e) => updateDnItemQty(idx, e.target.value)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="dnLocation">Warehouse Location</Label>
+                <Select value={dnLocationLabel} onValueChange={setDnLocationLabel}>
+                  <SelectTrigger id="dnLocation">
+                    <SelectValue placeholder="Select warehouse" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="C.G Warehouse">C.G Warehouse</SelectItem>
+                    <SelectItem value="NE Warehouse">NE Warehouse</SelectItem>
+                    <SelectItem value="Head Office">Head Office</SelectItem>
+                    <SelectItem value="Maniquip Store">Maniquip Store</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="dnNumber">DN Number *</Label>
                 <Input
                   id="dnNumber"
@@ -677,7 +772,7 @@ export default function DebitNotePage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
@@ -687,12 +782,13 @@ export default function DebitNotePage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Serial No.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -702,6 +798,9 @@ export default function DebitNotePage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {item.serial_no || (Array.isArray(item.serials) ? item.serials.join(", ") : "")}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

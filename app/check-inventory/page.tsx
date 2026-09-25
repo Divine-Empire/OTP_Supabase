@@ -24,7 +24,7 @@ import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight } fr
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
-import { QrScanner, parseItemQr } from "@/components/qr-scanner"
+import { QrScanner, parseItemQr, decodeInvoiceDateFromSerial } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
@@ -43,6 +43,7 @@ interface ScanRow {
   itemCode: string
   qty: string
   serials: string[] // numbered sub-rows for this item; empty for a non-serialized (bulk) item
+  invoiceDates: (string | null)[] // decoded invoice date per serial, same index as `serials` (null = couldn't decode)
 }
 
 // Accessories aren't part of the order's own item list -- they're
@@ -71,6 +72,7 @@ interface CompareItem {
   scannedQty: number
   shortageQty: number
   serials: string[] // carried through from the matching ScanRow, for traceability in otp_check_inventory.items
+  scannedInvoiceDate: string | null // oldest decoded invoice date among this item's scanned serials
 }
 
 // Shared key for matching a scanned item against an order's item list.
@@ -380,6 +382,7 @@ export default function CheckInventoryPage() {
     setScannerError(null)
     const key = itemMatchKey(parsed.itemName)
     const numbered = isNumberedSerial(parsed.serialNo)
+    const invoiceDate = decodeInvoiceDateFromSerial(parsed.serialNo)
 
     setScanRows((prev) => {
       const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
@@ -391,6 +394,7 @@ export default function CheckInventoryPage() {
           itemCode: parsed.itemCode,
           qty: numbered ? "1" : "",
           serials: numbered ? [parsed.serialNo] : [],
+          invoiceDates: numbered ? [invoiceDate] : [],
         }
         return [...prev, newGroup]
       }
@@ -401,8 +405,9 @@ export default function CheckInventoryPage() {
       if (group.serials.includes(parsed.serialNo)) return prev // same physical unit scanned twice — ignore
 
       const serials = [...group.serials, parsed.serialNo]
+      const invoiceDates = [...group.invoiceDates, invoiceDate]
       const next = [...prev]
-      next[groupIndex] = { ...group, serials, qty: String(serials.length) }
+      next[groupIndex] = { ...group, serials, invoiceDates, qty: String(serials.length) }
       return next
     })
   }
@@ -460,9 +465,10 @@ export default function CheckInventoryPage() {
       const group = prev[groupIndex]
       if (!group) return prev
       const serials = group.serials.filter((_, i) => i !== serialIndex)
+      const invoiceDates = group.invoiceDates.filter((_, i) => i !== serialIndex)
       if (serials.length === 0) return prev.filter((_, i) => i !== groupIndex)
       const next = [...prev]
-      next[groupIndex] = { ...group, serials, qty: String(serials.length) }
+      next[groupIndex] = { ...group, serials, invoiceDates, qty: String(serials.length) }
       return next
     })
   }
@@ -477,14 +483,15 @@ export default function CheckInventoryPage() {
   // Purchase-FMS-Supabase's item master — see qr-scanner.tsx) as a real,
   // matchable code, so a scanned row keyed "N/A" never matched an order
   // item keyed by its real code and silently compared as 0 scanned.
-  const handleCompare = () => {
-    const scannedByCode = new Map<string, { qty: number; serials: string[] }>()
+  const handleCompare = async () => {
+    const scannedByCode = new Map<string, { qty: number; serials: string[]; invoiceDates: (string | null)[] }>()
     for (const row of scanRows) {
       const key = itemMatchKey(row.itemName)
       const existing = scannedByCode.get(key)
       scannedByCode.set(key, {
         qty: (existing?.qty || 0) + (Number(row.qty) || 0),
         serials: [...(existing?.serials || []), ...row.serials],
+        invoiceDates: [...(existing?.invoiceDates || []), ...row.invoiceDates],
       })
     }
 
@@ -494,6 +501,10 @@ export default function CheckInventoryPage() {
       const ordered = Number(it.quantity) || 0
       const matched = scannedByCode.get(key)
       const scanned = matched?.qty || 0
+      // Oldest decoded date among this item's scans -- that's the one worth
+      // FIFO-checking (a newer scan could still be fine if it's the oldest
+      // batch physically pulled).
+      const decodedDates = (matched?.invoiceDates || []).filter((d): d is string => !!d).sort()
       return {
         itemCode: it.item_code || "",
         itemName: it.item_name,
@@ -501,6 +512,7 @@ export default function CheckInventoryPage() {
         scannedQty: scanned,
         shortageQty: Math.max(ordered - scanned, 0),
         serials: matched?.serials || [],
+        scannedInvoiceDate: decodedDates[0] || null,
       }
     })
 
@@ -511,6 +523,32 @@ export default function CheckInventoryPage() {
     setCompareItems(items)
     setComputedStatus(status)
     setDialogStep("preview")
+
+    // Informational only -- see app/api/otp-supabase/ims/check-fifo/route.ts.
+    // Skipped silently if no warehouse was picked yet.
+    if (warehouseLocationValue) {
+      for (const item of items) {
+        if (!item.scannedInvoiceDate) continue
+        try {
+          const params = new URLSearchParams({
+            itemName: item.itemName,
+            locationLabel: warehouseLocationValue,
+            scannedDate: item.scannedInvoiceDate,
+          })
+          const res = await fetch(`/api/otp-supabase/ims/check-fifo?${params}`)
+          const result = await res.json()
+          if (result.success && result.hasOlderStock) {
+            toast({
+              title: "Older stock available",
+              description: `${item.itemName}: stock from an earlier invoice date (${result.oldestDate}) is still in IMS — use that first (FIFO).`,
+              variant: "destructive",
+            })
+          }
+        } catch (err) {
+          console.error(`FIFO check failed for ${item.itemName}:`, err)
+        }
+      }
+    }
   }
 
   // Editable in the preview step — adjusting scannedQty recomputes that
@@ -1169,6 +1207,25 @@ export default function CheckInventoryPage() {
                         </div>
                       )}
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="warehouseLocationScan">Warehouse location</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Picked here so Compare can check IMS for older (FIFO) stock of the same item —
+                      can still be changed below before final submit.
+                    </p>
+                    <Select value={warehouseLocationValue} onValueChange={setWarehouseLocationValue}>
+                      <SelectTrigger id="warehouseLocationScan">
+                        <SelectValue placeholder="Select location" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="C.G Warehouse">C.G Warehouse</SelectItem>
+                        <SelectItem value="NE Warehouse">NE Warehouse</SelectItem>
+                        <SelectItem value="Maniquip Store">Maniquip Store</SelectItem>
+                        <SelectItem value="Head Office">Head Office</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="flex justify-end gap-2">

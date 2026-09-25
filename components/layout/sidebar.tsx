@@ -23,6 +23,7 @@ import {
   FileCheck2,
   XCircle,
   UserCheck,
+  Warehouse,
 } from "lucide-react";
 
 const menuItems = [
@@ -109,6 +110,12 @@ const menuItems = [
     label: "Order Cancel",
     icon: XCircle,
     step: "order-cancel",
+  },
+  {
+    href: "/inventory",
+    label: "Inventory (IMS)",
+    icon: Warehouse,
+    step: "inventory",
   },
   { href: "/settings", label: "Settings", icon: Settings, step: "settings" },
 ];

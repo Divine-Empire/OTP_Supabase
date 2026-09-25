@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { consumeImsStock, resolveImsLocationCode } from "@/lib/ims"
 
 // Stage — Debit Note (only reached when otp_orders.payment_mode = 'na' —
 // see order-acceptable/route.ts). Terminal: processing here just moves the
@@ -51,10 +52,12 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { orderId, dnNumber, dnAttachmentUrl, createdBy } = body as {
+    const { orderId, dnNumber, dnAttachmentUrl, items, locationLabel, createdBy } = body as {
       orderId: string
       dnNumber?: string
       dnAttachmentUrl?: string
+      items?: { itemName: string; qty: number }[]
+      locationLabel?: string
       createdBy?: string
     }
 
@@ -76,7 +79,28 @@ export async function POST(request: Request) {
       .single()
     if (error) throw error
 
-    return NextResponse.json({ success: true, data })
+    // IMS OUT — this stage never goes through Check Inventory
+    // (payment_mode = 'na' orders skip it), so the item list + location
+    // are captured manually here instead of scanned. Best-effort, no
+    // shortage/indent creation (unlike Check Inventory's flow) — never
+    // blocks the Debit Note submission itself.
+    let imsWarnings: { itemName: string; requestedQty: number }[] = []
+    try {
+      const locationCode = await resolveImsLocationCode(supabase, locationLabel)
+      const results = await consumeImsStock(
+        supabase,
+        (items || []).map((it) => ({ itemName: it.itemName, qty: Number(it.qty) || 0 })),
+        locationCode,
+        "debit_note",
+        data.id,
+        createdBy || null
+      )
+      imsWarnings = results.filter((r) => r.wentNegative).map((r) => ({ itemName: r.itemName, requestedQty: r.requestedQty }))
+    } catch (imsErr) {
+      console.error("IMS OUT exception for debit_note:", data.id, imsErr)
+    }
+
+    return NextResponse.json({ success: true, data, imsWarnings })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/debit-note exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

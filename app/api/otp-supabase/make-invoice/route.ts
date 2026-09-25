@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
+import { consumeImsStock, resolveImsLocationCode } from "@/lib/ims"
 
 // Stage — Make Invoice.
 //
@@ -148,7 +149,39 @@ export async function POST(request: Request) {
 
     if (error) throw error
 
-    return NextResponse.json({ success: true, data })
+    // IMS OUT — items (this wave's scan-confirmed list, otp_pre_invoice_
+    // queue.items) + accessories (otp_orders.items_accessories, scanned at
+    // Check Inventory) both decrement the same inventory. Location comes
+    // from this order's Check Inventory row (the only stage that captures
+    // it) — best-effort, never blocks the invoice itself.
+    let imsWarnings: { itemName: string; requestedQty: number }[] = []
+    try {
+      const [{ data: orderRow }, { data: inventoryRow }] = await Promise.all([
+        supabase.from("otp_orders").select("items_accessories").eq("id", queueRow.order_id).maybeSingle(),
+        supabase.from("otp_check_inventory").select("warehouse_location").eq("order_id", queueRow.order_id).maybeSingle(),
+      ])
+
+      const locationCode = await resolveImsLocationCode(supabase, inventoryRow?.warehouse_location)
+      const items = (queueRow.items || []).map((it: any) => ({ itemName: it.item_name, qty: Number(it.qty) || 0 }))
+      const accessories = (orderRow?.items_accessories || []).map((a: any) => ({
+        itemName: a.item_name,
+        qty: Number(a.quantity) || 0,
+      }))
+
+      const results = await consumeImsStock(
+        supabase,
+        [...items, ...accessories],
+        locationCode,
+        "make_invoice",
+        data.id,
+        createdBy || null
+      )
+      imsWarnings = results.filter((r) => r.wentNegative).map((r) => ({ itemName: r.itemName, requestedQty: r.requestedQty }))
+    } catch (imsErr) {
+      console.error("IMS OUT exception for make_invoice:", data.id, imsErr)
+    }
+
+    return NextResponse.json({ success: true, data, imsWarnings })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/make-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

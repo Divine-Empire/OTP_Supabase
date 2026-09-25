@@ -1090,7 +1090,7 @@ export default function PreInvoicePage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
@@ -1100,13 +1100,14 @@ export default function PreInvoicePage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Serial No.</TableHead>
                   <TableHead className="text-center">Installation</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -1116,6 +1117,9 @@ export default function PreInvoicePage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.qty}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {item.serial_no || (Array.isArray(item.serials) ? item.serials.join(", ") : "")}
+                      </TableCell>
                       <TableCell className="text-center">
                         <Badge variant={item.installation === "Yes" ? "default" : "secondary"}>
                           {item.installation === "Yes" ? "Yes" : "No"}

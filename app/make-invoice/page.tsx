@@ -100,6 +100,9 @@ export default function MakeInvoicePage() {
   const [gstNumber, setGstNumber] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
   const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null)
+  // IMS stock went negative for these items on the last submit -- a
+  // non-blocking warning (see lib/ims.ts), dismissible.
+  const [imsStockWarnings, setImsStockWarnings] = useState<{ itemName: string; requestedQty: number }[]>([])
   const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
   const [remarks, setRemarks] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -309,6 +312,9 @@ export default function MakeInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
+        if (Array.isArray(result.imsWarnings) && result.imsWarnings.length > 0) {
+          setImsStockWarnings(result.imsWarnings)
+        }
         alert(`Order ${selectedOrder.orderNo} — Invoice ${invoiceNumber.trim()} created.`)
       } else {
         throw new Error(result.error || "Update failed")
@@ -438,6 +444,16 @@ export default function MakeInvoicePage() {
   return (
     <MainLayout>
       <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
+        {imsStockWarnings.length > 0 && (
+          <div className="animate-pulse mb-3 flex items-center justify-between gap-3 rounded-md border-2 border-red-500 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 shrink-0">
+            <span>
+              ⚠️ IMS stock went negative for: {imsStockWarnings.map((w) => `${w.itemName} (${w.requestedQty})`).join(", ")}
+            </span>
+            <Button size="sm" variant="ghost" className="text-red-700 hover:bg-red-100" onClick={() => setImsStockWarnings([])}>
+              Dismiss
+            </Button>
+          </div>
+        )}
         <Tabs
           value={currentTab}
           onValueChange={(value) => setCurrentTab(value)}
@@ -897,7 +913,7 @@ export default function MakeInvoicePage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
@@ -907,13 +923,14 @@ export default function MakeInvoicePage() {
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead>Serial No.</TableHead>
                   <TableHead className="text-center">Installation</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -923,6 +940,9 @@ export default function MakeInvoicePage() {
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.qty}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {item.serial_no || (Array.isArray(item.serials) ? item.serials.join(", ") : "")}
+                      </TableCell>
                       <TableCell className="text-center">
                         <Badge variant={item.installation === "Yes" ? "default" : "secondary"}>
                           {item.installation === "Yes" ? "Yes" : "No"}
