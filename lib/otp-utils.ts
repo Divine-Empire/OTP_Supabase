@@ -442,6 +442,11 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     amount: order.amount_with_tax || 0,
     sourceStage: row.source_stage || "",
     debitNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
+    calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
+    calibrationType: row.calibration_type || "",
+    dispatchLocation: row.dispatch_location || "",
+    directDispatchDetails: row.direct_dispatch_details || "",
+    invoicedAt: formatDateTime(row.invoiced_at),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
   }
@@ -491,6 +496,11 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
     vehicleNumber: row.vehicle_number || "",
     paymentAttachmentUrl: row.payment_attachment_url || "",
     srnAttachmentUrl: row.srn_attachment_url || "",
+    calibrationRequired: queue.calibration_required === true ? "YES" : queue.calibration_required === false ? "NO" : "",
+    calibrationType: queue.calibration_type || "",
+    dispatchLocation: queue.dispatch_location || "",
+    directDispatchDetails: queue.direct_dispatch_details || "",
+    invoicedAt: formatDateTime(queue.invoiced_at),
     remarks: row.remarks || "",
     createdBy: row.created_by || "",
 

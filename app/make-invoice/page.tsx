@@ -68,8 +68,13 @@ const historyColumns = [
   { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
   { key: "paymentAttachment", label: "Payment Details (Attachment) - In case of Advance", searchable: false },
   { key: "srnAttachment", label: "SRN Attachment", searchable: false },
+  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
+  { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "dispatchLocation", label: "Dispatch Location", searchable: true },
+  { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "invoicedAt", label: "Invoiced At", searchable: true },
 ]
 
 // Offer Show / Conveyed For Registration Form have no backing DB column
