@@ -896,34 +896,36 @@ export default function OrderAcceptablePage() {
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12">#</TableHead>
-                  <TableHead>Item Name</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead>Description</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {itemListDialogItems.length === 0 ? (
+            <div className="max-h-[60vh] overflow-y-auto border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10 shadow-sm">
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
-                      No items
-                    </TableCell>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                    <TableHead>Description</TableHead>
                   </TableRow>
-                ) : (
-                  itemListDialogItems.map((item: any, idx: number) => (
-                    <TableRow key={idx}>
-                      <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
-                      <TableCell>{item.item_name}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground whitespace-pre-wrap">{item.description || ""}</TableCell>
+                </TableHeader>
+                <TableBody>
+                  {itemListDialogItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        No items
+                      </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : (
+                    itemListDialogItems.map((item: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                        <TableCell>{item.item_name}</TableCell>
+                        <TableCell className="text-right">{item.quantity}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground whitespace-pre-wrap">{item.description || ""}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
             <div className="flex justify-end">
               <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
             </div>

@@ -152,6 +152,37 @@ export default function CheckInventoryPage() {
   const [accessoryScanRows, setAccessoryScanRows] = useState<AccessoryScanRow[]>([])
   const [accessoryScannerError, setAccessoryScannerError] = useState<string | null>(null)
   const [compareItems, setCompareItems] = useState<CompareItem[]>([])
+
+  // Manual Entry States
+  const [manualEntryMode, setManualEntryMode] = useState<"item" | "accessory" | null>(null)
+  const [manualSearchQuery, setManualSearchQuery] = useState("")
+  const [manualSearchResults, setManualSearchResults] = useState<any[]>([])
+  const [manualSearchOpen, setManualSearchOpen] = useState(false)
+  const [manualSelectedName, setManualSelectedName] = useState("")
+  const [manualHasSerial, setManualHasSerial] = useState(false)
+  const [manualQty, setManualQty] = useState("1")
+  const [manualSerials, setManualSerials] = useState<string[]>([""])
+
+  useEffect(() => {
+    if (!manualSearchQuery) {
+      setManualSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/otp-supabase/lto-items?search=${encodeURIComponent(manualSearchQuery)}`)
+        const data = await res.json()
+        if (data.success) {
+          setManualSearchResults(data.data)
+          setManualSearchOpen(true)
+        }
+      } catch (err) {
+        console.error("Search error", err)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [manualSearchQuery])
+
   const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
   const [customerWantsMaterialAs, setCustomerWantsMaterialAs] = useState("")
   const [createdByPerson, setCreatedByPerson] = useState("")
@@ -352,7 +383,80 @@ export default function CheckInventoryPage() {
     setLeadTime("")
     setRemarks("")
     setInventoryPhotoAttachment(null)
+    setManualEntryMode(null)
+    setManualSearchQuery("")
+    setManualSelectedName("")
+    setManualHasSerial(false)
+    setManualQty("1")
+    setManualSerials([""])
     setIsDialogOpen(true)
+  }
+
+  const handleAddManualItem = () => {
+    if (!manualSelectedName.trim()) {
+      toast({ title: "Error", description: "Item name is required", variant: "destructive" })
+      return
+    }
+    const qtyNum = parseInt(manualQty) || 0
+    if (qtyNum <= 0) {
+      toast({ title: "Error", description: "Qty must be greater than 0", variant: "destructive" })
+      return
+    }
+  
+    if (manualEntryMode === "item") {
+      const orderItems: any[] = selectedOrder?.rawItems || []
+      const scannedKey = itemMatchKey(manualSelectedName)
+      const belongsToOrder = orderItems.some((it) => itemMatchKey(it.item_name) === scannedKey)
+      if (!belongsToOrder) {
+        toast({ title: "Item not in order", description: `"${manualSelectedName}" is not part of this order's item list.`, variant: "destructive" })
+        return
+      }
+  
+      setScanRows(prev => {
+        const key = itemMatchKey(manualSelectedName)
+        const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
+        const validSerials = manualHasSerial ? manualSerials.filter(s => s.trim() !== "") : []
+        
+        if (groupIndex === -1) {
+          return [...prev, {
+            itemName: manualSelectedName,
+            itemCode: "Manual",
+            qty: String(qtyNum),
+            serials: validSerials
+          }]
+        }
+        
+        const group = prev[groupIndex]
+        const mergedSerials = Array.from(new Set([...group.serials, ...validSerials]))
+        const next = [...prev]
+        next[groupIndex] = {
+          ...group,
+          serials: mergedSerials,
+          qty: String((parseInt(group.qty) || 0) + qtyNum)
+        }
+        return next
+      })
+    } else {
+      // Accessory
+      setAccessoryScanRows(prev => {
+        const key = itemMatchKey(manualSelectedName)
+        const index = prev.findIndex((r) => itemMatchKey(r.itemName) === key)
+        if (index === -1) {
+          return [...prev, { itemName: manualSelectedName, itemCode: "Manual", qty: qtyNum }]
+        }
+        const next = [...prev]
+        next[index] = { ...next[index], qty: next[index].qty + qtyNum }
+        return next
+      })
+    }
+  
+    // Reset
+    setManualEntryMode(null)
+    setManualSearchQuery("")
+    setManualSelectedName("")
+    setManualHasSerial(false)
+    setManualQty("1")
+    setManualSerials([""])
   }
 
   // Each QR scan appends one row (one physical unit's serial); the same
@@ -1071,8 +1175,119 @@ export default function CheckInventoryPage() {
                     </div>
                   </div>
 
-                  <QrScanner onScan={handleQrScan} onError={setScannerError} />
+                  <div className="flex items-center gap-2">
+                    <QrScanner onScan={handleQrScan} onError={setScannerError} />
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => {
+                        setManualEntryMode("item")
+                        setManualSearchQuery("")
+                        setManualSelectedName("")
+                        setManualHasSerial(false)
+                        setManualQty("1")
+                        setManualSerials([""])
+                      }}
+                    >
+                      Add Item Manually
+                    </Button>
+                  </div>
                   {scannerError && <p className="text-sm text-destructive">{scannerError}</p>}
+
+                  {manualEntryMode === "item" && (
+                    <div className="border p-4 rounded-md space-y-4 bg-muted/30">
+                      <div className="flex justify-between items-center">
+                        <Label className="text-base">Manual Item Entry</Label>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setManualEntryMode(null)}>Cancel</Button>
+                      </div>
+                      <div className="relative">
+                        <Input 
+                          placeholder="Search item name..." 
+                          value={manualSearchQuery}
+                          onChange={(e) => {
+                            setManualSearchQuery(e.target.value)
+                            setManualSelectedName(e.target.value)
+                          }}
+                          onFocus={() => { if (manualSearchResults.length > 0) setManualSearchOpen(true) }}
+                          onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
+                        />
+                        {manualSearchOpen && manualSearchResults.length > 0 && (
+                          <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                            {manualSearchResults.map((res, i) => (
+                              <div 
+                                key={i} 
+                                className="p-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                onMouseDown={() => {
+                                  setManualSearchQuery(res.item_name)
+                                  setManualSelectedName(res.item_name)
+                                  setManualSearchOpen(false)
+                                }}
+                              >
+                                {res.item_name}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-6">
+                        <div className="flex items-center gap-2">
+                          <Checkbox 
+                            id="hasSerialItem" 
+                            checked={manualHasSerial} 
+                            onCheckedChange={(c) => {
+                              setManualHasSerial(!!c)
+                              if (!!c) {
+                                const qtyNum = parseInt(manualQty) || 0;
+                                setManualSerials(Array.from({ length: Math.max(1, qtyNum) }).map(() => ""))
+                              }
+                            }} 
+                          />
+                          <Label htmlFor="hasSerialItem">Enter S-No</Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label>Qty:</Label>
+                          <Input 
+                            type="number" 
+                            min="1" 
+                            className="w-24" 
+                            value={manualQty} 
+                            onChange={(e) => {
+                              setManualQty(e.target.value)
+                              const qtyNum = parseInt(e.target.value) || 0
+                              if (qtyNum > 0 && manualHasSerial) {
+                                setManualSerials(prev => {
+                                  const newSerials = [...prev]
+                                  while (newSerials.length < qtyNum) newSerials.push("")
+                                  return newSerials.slice(0, qtyNum)
+                                })
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+                      
+                      {manualHasSerial && (
+                        <div className="space-y-2 pl-6 border-l-2">
+                          <Label className="text-xs text-muted-foreground">Enter S-No for each quantity:</Label>
+                          {Array.from({ length: parseInt(manualQty) || 0 }).map((_, i) => (
+                            <Input 
+                              key={i}
+                              placeholder={`S-No ${i + 1}`}
+                              value={manualSerials[i] || ""}
+                              onChange={(e) => {
+                                const newSerials = [...manualSerials]
+                                newSerials[i] = e.target.value
+                                setManualSerials(newSerials)
+                              }}
+                              className="h-8 max-w-sm"
+                            />
+                          ))}
+                        </div>
+                      )}
+                    
+                      <Button type="button" onClick={handleAddManualItem}>Add to Scanned List</Button>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label>Scanned Items ({scanRows.length})</Label>
@@ -1137,8 +1352,75 @@ export default function CheckInventoryPage() {
                       Scan each accessory's QR label -- these aren't part of the order's item list, just a
                       running count carried forward to later stages.
                     </p>
-                    <QrScanner onScan={handleAccessoryQrScan} onError={setAccessoryScannerError} label="Scan Accessory QR" />
+                    <div className="flex items-center gap-2">
+                      <QrScanner onScan={handleAccessoryQrScan} onError={setAccessoryScannerError} label="Scan Accessory QR" />
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        onClick={() => {
+                          setManualEntryMode("accessory")
+                          setManualSearchQuery("")
+                          setManualSelectedName("")
+                          setManualHasSerial(false)
+                          setManualQty("1")
+                          setManualSerials([""])
+                        }}
+                      >
+                        Add Accessory Manually
+                      </Button>
+                    </div>
                     {accessoryScannerError && <p className="text-sm text-destructive">{accessoryScannerError}</p>}
+
+                    {manualEntryMode === "accessory" && (
+                      <div className="border p-4 rounded-md space-y-4 bg-muted/30">
+                        <div className="flex justify-between items-center">
+                          <Label className="text-base">Manual Accessory Entry</Label>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setManualEntryMode(null)}>Cancel</Button>
+                        </div>
+                        <div className="relative">
+                          <Input 
+                            placeholder="Search accessory name..." 
+                            value={manualSearchQuery}
+                            onChange={(e) => {
+                              setManualSearchQuery(e.target.value)
+                              setManualSelectedName(e.target.value)
+                            }}
+                            onFocus={() => { if (manualSearchResults.length > 0) setManualSearchOpen(true) }}
+                            onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
+                          />
+                          {manualSearchOpen && manualSearchResults.length > 0 && (
+                            <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                              {manualSearchResults.map((res, i) => (
+                                <div 
+                                  key={i} 
+                                  className="p-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                  onMouseDown={() => {
+                                    setManualSearchQuery(res.item_name)
+                                    setManualSelectedName(res.item_name)
+                                    setManualSearchOpen(false)
+                                  }}
+                                >
+                                  {res.item_name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-2">
+                            <Label>Qty:</Label>
+                            <Input 
+                              type="number" 
+                              min="1" 
+                              className="w-24" 
+                              value={manualQty} 
+                              onChange={(e) => setManualQty(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                        <Button type="button" onClick={handleAddManualItem}>Add to Accessory List</Button>
+                      </div>
+                    )}
 
                     <div className="space-y-2">
                       <Label>Scanned Accessories ({accessoryScanRows.length})</Label>
