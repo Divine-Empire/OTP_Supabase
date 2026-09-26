@@ -38,38 +38,6 @@ export function parseItemQr(raw: string): ScannedQrItem | null {
   return { itemName, itemCode, serialNo }
 }
 
-// Reverses Purchase-FMS-Supabase's digit<->letter cipher (codeMap in
-// stage-pages/serial-generation/serial-generation.tsx: 0="0", 1-9="A"-"I")
-// to recover the real invoice date baked into a serial number's middle
-// segment: "SN-<vendorCode>/<encodedDate>/<seq>", where encodedDate is a
-// 6-character encoding of YYMMDD (see encodeDateYYMMDD there — this is the
-// item's actual INVOICE date, NOT the QR's separate/optional trailing
-// expiry-date segment, which is a different field entirely and only
-// captures month+year). No decoder existed anywhere before this — built
-// fresh for the IMS FIFO-by-invoice-date compare.
-const REVERSE_CIPHER: Record<string, string> = { "0": "0", A: "1", B: "2", C: "3", D: "4", E: "5", F: "6", G: "7", H: "8", I: "9" }
-
-export function decodeInvoiceDateFromSerial(serialNo: string): string | null {
-  if (!serialNo) return null
-  const parts = serialNo.split("/")
-  if (parts.length < 3) return null
-  const encoded = parts[1]
-  if (!encoded || encoded.length !== 6) return null
-
-  const digits: string[] = []
-  for (const ch of encoded.toUpperCase()) {
-    const d = REVERSE_CIPHER[ch]
-    if (d === undefined) return null
-    digits.push(d)
-  }
-
-  const year = 2000 + parseInt(digits[0] + digits[1], 10)
-  const month = digits[2] + digits[3]
-  const day = digits[4] + digits[5]
-  const iso = `${year}-${month}-${day}`
-  return isNaN(new Date(iso).getTime()) ? null : iso
-}
-
 // Camera-based, single-shot QR scanner (like a UPI scan-to-pay flow):
 // clicking "Scan Item QR" opens the camera, and the moment a QR decodes
 // successfully it calls onScan(raw) once and closes the camera itself —
