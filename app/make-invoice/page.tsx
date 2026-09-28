@@ -51,6 +51,16 @@ const pendingColumns = [
   { key: "amount", label: "Amount", searchable: true },
   { key: "sourceStage", label: "Source Stage", searchable: true },
   { key: "DeliveryNoteForInvoiceRequired", label: "Delivery Note", searchable: true },
+  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
+  { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "transportId", label: "Transport Id/Name", searchable: true },
+  { key: "gstNumber", label: "GST Number", searchable: true },
+  { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
+  { key: "dispatchLocation", label: "Dispatch Location", searchable: true },
+  { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
+  { key: "paymentAttachment", label: "Payment Details (Attachment) - In case of Advance", searchable: false },
+  { key: "srnAttachment", label: "SRN Attachment", searchable: false },
+  { key: "remarks", label: "Remarks", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
@@ -64,16 +74,6 @@ const historyColumns = [
   { key: "ewayBillNumber", label: "Eway Bill Number", searchable: true },
   { key: "ewayBillUpload", label: "Eway Bill Upload", searchable: false },
   { key: "totalBillAmount", label: "Total Bill Amount", searchable: false },
-  { key: "transportId", label: "Transport Id/Name", searchable: true },
-  { key: "gstNumber", label: "GST Number", searchable: true },
-  { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
-  { key: "paymentAttachment", label: "Payment Details (Attachment) - In case of Advance", searchable: false },
-  { key: "srnAttachment", label: "SRN Attachment", searchable: false },
-  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
-  { key: "calibrationType", label: "Calibration Type", searchable: true },
-  { key: "dispatchLocation", label: "Dispatch Location", searchable: true },
-  { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
-  { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
 ]
@@ -392,6 +392,7 @@ export default function MakeInvoicePage() {
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
       case "DeliveryNoteForInvoiceRequired":
+      case "calibrationRequired":
         return value ? (
           <span
             className={`inline-flex items-center justify-center rounded-md px-2.5 py-1 text-xs font-bold ${

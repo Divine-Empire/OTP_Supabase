@@ -48,6 +48,17 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
+  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
+  { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "DeliveryNoteForInvoiceRequired", label: "Delivery Note (Inv.) Required", searchable: true },
+  { key: "transportId", label: "Transport Id/Name", searchable: true },
+  { key: "gstNumber", label: "GST Number", searchable: true },
+  { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
+  { key: "dispatchLocation", label: "Dispatch Location", searchable: true },
+  { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
+  { key: "paymentAttachment", label: "Payment Attachment", searchable: false },
+  { key: "srnAttachment", label: "SRN Attachment", searchable: false },
+  { key: "remarks", label: "Remarks", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
@@ -266,6 +277,22 @@ export default function DeliveryNotePage() {
       case "dnAttachment":
         return order.dnAttachmentUrl ? (
           <a href={order.dnAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "paymentAttachment":
+        return order.paymentAttachmentUrl ? (
+          <a href={order.paymentAttachmentUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "srnAttachment":
+        return order.srnAttachmentUrl ? (
+          <a href={order.srnAttachmentUrl} target="_blank" rel="noopener noreferrer">
             <Badge variant="default">Link</Badge>
           </a>
         ) : (

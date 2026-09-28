@@ -201,6 +201,17 @@ export function mapDeliveryNotePendingRowToUI(row: any): any {
     acceptanceCopy: order.acceptance_file_upload || "",
     totalOrderQty: order.total_qty || 0,
     amount: order.amount_with_tax || 0,
+    calibrationRequired: order.calibration_required === true ? "YES" : order.calibration_required === false ? "NO" : "",
+    calibrationType: order.calibration_type || "",
+    DeliveryNoteForInvoiceRequired: order.debit_note_for_invoice_required === true ? "YES" : order.debit_note_for_invoice_required === false ? "NO" : "",
+    transportId: order.transport_id || "",
+    gstNumber: order.gst_number || "",
+    vehicleNumber: order.vehicle_number || "",
+    dispatchLocation: order.dispatch_location || "",
+    directDispatchDetails: order.direct_dispatch_details || "",
+    paymentAttachmentUrl: order.payment_attachment_url || "",
+    srnAttachmentUrl: order.srn_attachment_url || "",
+    remarks: order.remarks || "",
     rawItems: items,
   }
 }
@@ -236,6 +247,17 @@ export function mapDeliveryNoteHistoryRowToUI(row: any): any {
     acceptanceCopy: order.acceptance_file_upload || "",
     totalOrderQty: order.total_qty || 0,
     amount: order.amount_with_tax || 0,
+    calibrationRequired: order.calibration_required === true ? "YES" : order.calibration_required === false ? "NO" : "",
+    calibrationType: order.calibration_type || "",
+    DeliveryNoteForInvoiceRequired: order.debit_note_for_invoice_required === true ? "YES" : order.debit_note_for_invoice_required === false ? "NO" : "",
+    transportId: order.transport_id || "",
+    gstNumber: order.gst_number || "",
+    vehicleNumber: order.vehicle_number || "",
+    dispatchLocation: order.dispatch_location || "",
+    directDispatchDetails: order.direct_dispatch_details || "",
+    paymentAttachmentUrl: order.payment_attachment_url || "",
+    srnAttachmentUrl: order.srn_attachment_url || "",
+    remarks: order.remarks || "",
 
     dnNumber: row.dn_number || "",
     dnAttachmentUrl: row.dn_attachment_url || "",
@@ -329,7 +351,7 @@ export function mapPreInvoiceRowToUI(row: any): any {
 
   const order = row.order || {}
   
-  const shortages = row.shortages || []
+  const shortages = order.shortages || []
   let pendingQty = 0
   shortages.forEach((s: any) => {
     if (s.status !== "received") {
@@ -476,8 +498,14 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     DeliveryNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
     calibrationType: row.calibration_type || "",
+    transportId: row.transport_id || "",
+    gstNumber: row.gst_number || "",
+    vehicleNumber: row.vehicle_number || "",
     dispatchLocation: row.dispatch_location || "",
     directDispatchDetails: row.direct_dispatch_details || "",
+    paymentAttachmentUrl: row.payment_attachment_url || "",
+    srnAttachmentUrl: row.srn_attachment_url || "",
+    remarks: row.remarks || "",
     invoicedAt: formatDateTime(row.invoiced_at),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
@@ -564,6 +592,7 @@ export function mapCalibrationPendingRowToUI(row: any): any {
     invoiceNumber: row.invoice_number || "",
     invoiceDate: row.invoice_date || "",
     invoiceCopyUrl: row.invoice_upload_url || "",
+    calibrationType: row.queue?.calibration_type || "",
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: row.items || [],
   }
@@ -592,6 +621,7 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     invoiceNumber: makeInvoice.invoice_number || "",
     invoiceDate: makeInvoice.invoice_date || "",
     invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
+    calibrationType: makeInvoice.queue?.calibration_type || "",
 
     certificateNumber: row.certificate_number || "",
     certificateType: row.certificate_type || "",
@@ -750,6 +780,7 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
     transporterName: packagingTransport.transporter_name || "",
 
+    biltyTransporterName: row.transporter_name || "",
     transporterContact: row.transporter_contact || "",
     biltyNumber: row.bilty_number || "",
     biltyUploadUrls: row.bilty_upload_urls || [],

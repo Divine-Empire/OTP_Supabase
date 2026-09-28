@@ -902,7 +902,7 @@ export default function PreInvoicePage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="LAB">LAB</SelectItem>
-                        <SelectItem value="Surevey Instruments">Survey Instruments</SelectItem>
+                        <SelectItem value="Survey Instruments">Survey Instruments</SelectItem>
                         <SelectItem value="Both">Both</SelectItem>
                       </SelectContent>
                     </Select>

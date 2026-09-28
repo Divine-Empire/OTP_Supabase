@@ -58,6 +58,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const {
       packagingTransportId,
+      transporterName,
       transporterContact,
       biltyNumber,
       biltyUploadUrls,
@@ -68,6 +69,7 @@ export async function POST(request: Request) {
       createdBy,
     } = body as {
       packagingTransportId: string
+      transporterName?: string
       transporterContact?: string
       biltyNumber?: string
       biltyUploadUrls?: string[]
@@ -80,6 +82,9 @@ export async function POST(request: Request) {
 
     if (!packagingTransportId) {
       return NextResponse.json({ success: false, error: "Missing packagingTransportId" }, { status: 400 })
+    }
+    if (!transporterName || !transporterName.trim()) {
+      return NextResponse.json({ success: false, error: "Transporter Name is required" }, { status: 400 })
     }
 
     const supabase = getSupabaseAdmin()
@@ -107,6 +112,7 @@ export async function POST(request: Request) {
       .insert({
         packaging_transport_id: packagingTransportId,
         order_id: packagingTransportRow.order_id,
+        transporter_name: transporterName.trim(),
         transporter_contact: transporterContact || null,
         bilty_number: biltyNumber || null,
         bilty_upload_urls: biltyUploadUrls || [],

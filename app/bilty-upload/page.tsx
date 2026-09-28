@@ -47,13 +47,14 @@ const pendingColumns = [
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
+  { key: "biltyTransporterName", label: "Transporter Name", searchable: true },
   { key: "transporterContact", label: "Transporter Contact", searchable: true },
   { key: "biltyNumber", label: "Bilty/Docket No.", searchable: true },
   { key: "biltyUpload", label: "Bilty Upload", searchable: false },
   { key: "freightCharge", label: "Freight Charge", searchable: false },
   { key: "hamaliCharge", label: "Hamali Charge", searchable: false },
   { key: "parkingCharge", label: "Parking Charge", searchable: false },
-  { key: "transporterRemarks", label: "Transporter Assign", searchable: true },
+  { key: "transporterRemarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
 ]
 
@@ -64,6 +65,7 @@ const historyColumns = [
 const DEFAULT_HIDDEN_COLUMNS = new Set([
   "crmName",
   "itemList",
+  "biltyTransporterName",
   "transporterContact",
   "biltyNumber",
   "biltyUpload",
@@ -95,6 +97,7 @@ export default function BiltyUploadPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
 
+  const [transporterName, setTransporterName] = useState("")
   const [transporterContact, setTransporterContact] = useState("")
   const [biltyNumber, setBiltyNumber] = useState("")
   const [biltyUploadFiles, setBiltyUploadFiles] = useState<File[]>([])
@@ -211,6 +214,7 @@ export default function BiltyUploadPage() {
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
+    setTransporterName("")
     setTransporterContact("")
     setBiltyNumber("")
     setBiltyUploadFiles([])
@@ -232,6 +236,10 @@ export default function BiltyUploadPage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
+    if (!transporterName.trim()) {
+      alert("Please enter the Transporter Name.")
+      return
+    }
     if (!freightCharge.trim()) {
       alert("Please enter the Freight Charge.")
       return
@@ -250,6 +258,7 @@ export default function BiltyUploadPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           packagingTransportId: selectedOrder.packagingTransportId || selectedOrder.id,
+          transporterName,
           transporterContact,
           biltyNumber,
           biltyUploadUrls,
@@ -623,6 +632,17 @@ export default function BiltyUploadPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label htmlFor="transporterName">
+                    Transporter Name <span className="text-red-500 font-bold">*</span>
+                  </Label>
+                  <Input
+                    id="transporterName"
+                    value={transporterName}
+                    onChange={(e) => setTransporterName(e.target.value)}
+                    placeholder="Enter transporter name"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="transporterContact">Transporter Contact No.</Label>
                   <Input
                     id="transporterContact"
@@ -631,6 +651,9 @@ export default function BiltyUploadPage() {
                     placeholder="Enter contact number"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="biltyNumber">Bilty No. / Docket No.</Label>
                   <Input
@@ -676,7 +699,7 @@ export default function BiltyUploadPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="transporterRemarks">Transporter Assign</Label>
+                <Label htmlFor="transporterRemarks">Remarks</Label>
                 <Textarea
                   id="transporterRemarks"
                   value={transporterRemarks}

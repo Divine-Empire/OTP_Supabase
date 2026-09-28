@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 
     const { data, error } = await supabase
       .from("otp_pre_invoice_queue")
-      .select("*, order:otp_orders(*), shortages:otp_material_shortage(remaining_qty, status)")
+      .select("*, order:otp_orders(*, shortages:otp_material_shortage(remaining_qty, status))")
       .eq("status", status)
       .order("created_at", { ascending: false })
 

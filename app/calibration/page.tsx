@@ -38,6 +38,7 @@ const pendingColumns = [
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
+  { key: "calibrationType", label: "Type", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
@@ -58,7 +59,6 @@ const historyColumns = [
 // stage's own certificate/remarks/created-by fields) is still toggleable
 // via Column Visibility, just hidden by default.
 const DEFAULT_HIDDEN_COLUMNS = new Set([
-  "crmName",
   "itemList",
   "certificateNumber",
   "certificateType",
@@ -83,6 +83,7 @@ export default function CalibrationPage() {
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [crmNameFilter, setCrmNameFilter] = useState("all")
+  const [calibrationTypeFilter, setCalibrationTypeFilter] = useState("")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
@@ -144,6 +145,7 @@ export default function CalibrationPage() {
   const filteredOrders = useMemo(() => {
     let filtered = filterByCrmAccess(orders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (calibrationTypeFilter) filtered = filtered.filter((order) => order.calibrationType === calibrationTypeFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
         const searchableFields = pendingColumns
@@ -153,13 +155,22 @@ export default function CalibrationPage() {
       })
     }
     return filtered
-  }, [orders, searchTerm, crmNameFilter, currentUser])
+  }, [orders, searchTerm, crmNameFilter, calibrationTypeFilter, currentUser])
 
   const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
+
+  const calibrationTypeOptions = useMemo(() => {
+    const options = new Set<string>()
+    ;[...orders, ...processedOrders].forEach((order) => {
+      if (order.calibrationType) options.add(order.calibrationType)
+    })
+    return Array.from(options).sort()
+  }, [orders, processedOrders])
 
   const filteredProcessedOrders = useMemo(() => {
     let filtered = filterByCrmAccess(processedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (calibrationTypeFilter) filtered = filtered.filter((order) => order.calibrationType === calibrationTypeFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
         const searchableFields = historyColumns
@@ -169,7 +180,7 @@ export default function CalibrationPage() {
       })
     }
     return filtered
-  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
+  }, [processedOrders, searchTerm, crmNameFilter, calibrationTypeFilter, currentUser])
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -334,7 +345,7 @@ export default function CalibrationPage() {
                   </TabsTrigger>
                 </TabsList>
 
-                <div className="relative flex-1 min-w-[200px] max-w-md">
+                <div className="relative flex-1 min-w-[160px] max-w-[220px]">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
                     placeholder="Search..."
@@ -358,6 +369,18 @@ export default function CalibrationPage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <Select value={calibrationTypeFilter} onValueChange={setCalibrationTypeFilter}>
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue placeholder="All Types" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {calibrationTypeOptions.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -366,10 +389,10 @@ export default function CalibrationPage() {
                     <DropdownMenuTrigger asChild>
                       <Button variant="outline" size="sm">
                         <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
+                        Columns
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
+                    <DropdownMenuContent className="w-64 max-h-96 overflow-y-auto">
                       <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <div className="flex gap-2 p-2">
