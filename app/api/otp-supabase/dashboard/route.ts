@@ -71,7 +71,7 @@ export async function GET() {
       },
       {
         key: "check_inventory",
-        label: "Check Inventory",
+        label: "Packing List",
         pending: acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length,
       },
       {

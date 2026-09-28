@@ -14,7 +14,7 @@ const STAGE_LABELS: Record<string, string> = {
   order_acceptable: "Order Acceptable",
   proforma_invoice: "Pro-Forma Invoice",
   debit_note: "Delivery Note",
-  check_inventory: "Check Inventory",
+  check_inventory: "Packing List",
   material_received: "Material Received",
   pre_invoice: "Pre-Invoice",
   debit_note_for_invoice: "Delivery Note (Inv.)",

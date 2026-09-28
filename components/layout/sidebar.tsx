@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
@@ -46,7 +46,7 @@ const menuItems = [
   },
   {
     href: "/check-inventory",
-    label: "Check Inventory",
+    label: "Packing List",
     icon: Package,
     step: "check-inventory",
   },
@@ -117,6 +117,16 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    fetch("/api/otp-supabase/pending-counts")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && result.data) setPendingCounts(result.data);
+      })
+      .catch((err) => console.error("Error fetching sidebar pending counts:", err));
+  }, []);
 
   const filteredMenuItems = menuItems.filter((item) => {
     if (user?.role === "admin") return true;
@@ -148,6 +158,7 @@ export function Sidebar() {
           {filteredMenuItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
+            const pendingCount = pendingCounts[item.step];
             return (
               <Link
                 key={item.href}
@@ -160,7 +171,12 @@ export function Sidebar() {
                 }`}
               >
                 <Icon className="h-4 w-4" />
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {!!pendingCount && (
+                  <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-purple-600 text-white text-xs font-semibold">
+                    {pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}
