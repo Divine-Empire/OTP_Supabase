@@ -49,6 +49,7 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -59,6 +60,7 @@ const historyColumns = [
   { key: "piUpload", label: "PI Upload", searchable: false },
   { key: "remark", label: "Remark", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function ProformaInvoicePage() {

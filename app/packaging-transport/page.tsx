@@ -42,6 +42,7 @@ const pendingColumns = [
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -56,6 +57,7 @@ const historyColumns = [
   { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
   { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 // Only Timestamp, Order No., Quotation No., Company Name, Contact Person

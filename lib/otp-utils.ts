@@ -86,6 +86,8 @@ export function mapOrderAcceptableRowToUI(row: any): any {
     processedBy: acceptance?.processed_by || "",
     oaPlanned: order.order_acceptable_planned,
     ciPlanned: acceptance?.check_inventory_planned,
+    planned: formatDateTime(order.order_acceptable_planned),
+    actual: acceptance ? formatDateTime(row.created_at) : "",
 
     rawItems: items,
     ...itemFields,
@@ -124,6 +126,7 @@ export function mapProformaInvoicePendingRowToUI(row: any): any {
     acceptanceCopy: order.acceptance_file_upload || "",
     totalOrderQty: order.total_qty || 0,
     amount: order.amount_with_tax || 0,
+    planned: formatDateTime(row.proforma_invoice_planned),
     rawItems: items,
   }
 }
@@ -165,6 +168,8 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
     piUploadUrl: row.pi_upload_url || "",
     remark: row.remark || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(order.acceptable?.proforma_invoice_planned),
+    actual: formatDateTime(row.created_at),
 
     rawItems: items,
   }
@@ -212,6 +217,7 @@ export function mapDeliveryNotePendingRowToUI(row: any): any {
     paymentAttachmentUrl: order.payment_attachment_url || "",
     srnAttachmentUrl: order.srn_attachment_url || "",
     remarks: order.remarks || "",
+    planned: formatDateTime(row.debit_note_planned),
     rawItems: items,
   }
 }
@@ -262,6 +268,8 @@ export function mapDeliveryNoteHistoryRowToUI(row: any): any {
     dnNumber: row.dn_number || "",
     dnAttachmentUrl: row.dn_attachment_url || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(order.acceptable?.debit_note_planned),
+    actual: formatDateTime(row.created_at),
 
     rawItems: items,
   }
@@ -330,6 +338,8 @@ export function mapCheckInventoryRowToUI(row: any): any {
     materialReceivedLeadTime: inventory?.material_received_lead_time ?? "",
     createdBy: inventory?.created_by || "",
     processedDate: inventory?.actual_date,
+    planned: formatDateTime(acceptance?.check_inventory_planned),
+    actual: inventory ? formatDateTime(inventory.created_at) : "",
 
     // items in {name, qty} shape (not {item_name, quantity}) so the existing
     // "Items Not Available" prefill logic in check-inventory/page.tsx (which
@@ -398,6 +408,10 @@ export function mapPreInvoiceRowToUI(row: any): any {
     paymentAttachmentUrl: row.payment_attachment_url || "",
     srnAttachmentUrl: row.srn_attachment_url || "",
     remarks: row.remarks || "",
+    // No fixed planned date exists for Pre-Invoice (created immediately as
+    // pending by Check Inventory/Material Received — see Database/33_otp_stage_tat.sql).
+    planned: "",
+    actual: row.status === "invoiced" ? formatDateTime(row.updated_at) : "",
   }
 }
 
@@ -422,6 +436,7 @@ export function mapDeliveryNoteForInvoicePendingRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     sourceStage: row.source_stage || "",
+    planned: formatDateTime(row.debit_note_planned),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
   }
@@ -456,6 +471,8 @@ export function mapDeliveryNoteForInvoiceHistoryRowToUI(row: any): any {
     dnNumber: row.dn_number || "",
     dnAttachmentUrl: row.dn_attachment_url || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(queue.debit_note_planned),
+    actual: formatDateTime(row.created_at),
   }
 }
 
@@ -507,6 +524,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     srnAttachmentUrl: row.srn_attachment_url || "",
     remarks: row.remarks || "",
     invoicedAt: formatDateTime(row.invoiced_at),
+    planned: formatDateTime(row.make_invoice_planned),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
   }
@@ -563,6 +581,8 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
     invoicedAt: formatDateTime(queue.invoiced_at),
     remarks: row.remarks || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(queue.make_invoice_planned),
+    actual: formatDateTime(row.created_at),
 
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
@@ -593,6 +613,7 @@ export function mapCalibrationPendingRowToUI(row: any): any {
     invoiceDate: row.invoice_date || "",
     invoiceCopyUrl: row.invoice_upload_url || "",
     calibrationType: row.queue?.calibration_type || "",
+    planned: formatDateTime(row.calibration_planned),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: row.items || [],
   }
@@ -628,6 +649,8 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     certificateUploadUrl: row.certificate_upload_url || "",
     remarks: row.remarks || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(makeInvoice.calibration_planned),
+    actual: formatDateTime(row.created_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
@@ -675,6 +698,7 @@ export function mapPackagingTransportPendingRowToUI(row: any): any {
     isDraft,
     beforePhotoUrls: row.before_photo_urls || [],
     afterPhotoUrls: row.after_photo_urls || [],
+    planned: formatDateTime(makeInvoice.packaging_transport_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
   }
@@ -714,6 +738,11 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     dispatchStatus: row.dispatch_status || "okay",
     notOkReason: row.not_ok_reason || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(makeInvoice.packaging_transport_planned),
+    // updated_at (not created_at) — the same otp_packaging_transport row is
+    // reused across the draft -> final two-step save, so created_at is the
+    // draft's timestamp, not when the stage was actually completed.
+    actual: formatDateTime(row.updated_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
@@ -748,6 +777,7 @@ export function mapBiltyUploadPendingRowToUI(row: any): any {
     transporterName: row.transporter_name || "",
     transporterContact: row.transporter_contact || "",
     biltyNumber: row.bilty_number || "",
+    planned: formatDateTime(row.bilty_upload_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
   }
@@ -789,6 +819,8 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     parkingCharge: row.parking_charge ?? "",
     transporterRemarks: row.transporter_remarks || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(packagingTransport.bilty_upload_planned),
+    actual: formatDateTime(row.created_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
@@ -822,6 +854,7 @@ export function mapClientConfirmationPendingRowToUI(row: any): any {
     invoiceNumber: makeInvoice.invoice_number || "",
     transporterName: packagingTransport.transporter_name || "",
     biltyNumber: row.bilty_number || "",
+    planned: formatDateTime(row.client_confirmation_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
   }
@@ -857,6 +890,8 @@ export function mapClientConfirmationHistoryRowToUI(row: any): any {
     sitePersonName: row.site_person_name || "",
     clientContactNumber: row.contact_number || "",
     createdBy: row.created_by || "",
+    planned: formatDateTime(biltyUpload.client_confirmation_planned),
+    actual: formatDateTime(row.created_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
@@ -899,6 +934,10 @@ export function mapMaterialReceivedPendingRowToUI(row: any): any {
       quantity: it.indented_qty,
     })),
     shortageRows: shortageItems,
+    // No fixed planned date exists for Material Received (see
+    // Database/33_otp_stage_tat.sql) — created as soon as Check Inventory
+    // reports a shortage, no TAT offset.
+    planned: "",
   }
 }
 
@@ -934,6 +973,8 @@ export function mapMaterialReceivedHistoryRowToUI(row: any): any {
     remark: row.remark || "",
     status: row.status || "",
     updatedAt: formatDateTime(row.updated_at),
+    planned: "",
+    actual: formatDateTime(row.updated_at),
   }
 }
 

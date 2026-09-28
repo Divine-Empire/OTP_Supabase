@@ -69,6 +69,7 @@ const pendingColumns = [
   { key: "quotationCopy", label: "Quotation Copy", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: false },
 ]
 
 // Column definitions for History tab (item-level — one row per past attempt)
@@ -86,6 +87,8 @@ const historyColumns = [
   { key: "pfmsIndentNo", label: "PFMS Indent No.", searchable: true },
   { key: "warehouseLocation", label: "Warehouse Location", searchable: true },
   { key: "remark", label: "Remark", searchable: true },
+  { key: "planned", label: "Planned", searchable: false },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function MaterialReceivedPage() {

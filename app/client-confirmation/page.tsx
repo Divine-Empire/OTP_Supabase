@@ -39,6 +39,7 @@ const pendingColumns = [
   { key: "transporterName", label: "Assigned Driver for Dispatch", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -48,6 +49,7 @@ const historyColumns = [
   { key: "sitePersonName", label: "Site-Person Name", searchable: true },
   { key: "clientContactNumber", label: "Contact Number", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function ClientConfirmationPage() {

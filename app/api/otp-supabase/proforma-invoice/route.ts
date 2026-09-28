@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     if (status === "history") {
       const { data, error } = await supabase
         .from("otp_proforma_invoice")
-        .select("*, order:otp_orders(*)")
+        .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))")
         .order("created_at", { ascending: false })
       if (error) throw error
 

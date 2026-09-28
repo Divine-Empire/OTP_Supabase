@@ -51,6 +51,7 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab (includes 3 additional columns)
@@ -59,6 +60,7 @@ const historyColumns = [
   { key: "isOrderAcceptable", label: "Is Order Acceptable?", searchable: true },
   { key: "orderAcceptanceChecklist", label: "Order Acceptance Checklist", searchable: true },
   { key: "remarks", label: "Remark", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 const checklistItems = [

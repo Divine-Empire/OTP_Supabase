@@ -125,6 +125,7 @@ const pendingColumns = [
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
   { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab — base columns + this stage's own outcome
@@ -133,6 +134,7 @@ const historyColumns = [
   { key: "availabilityStatus", label: "Availability Status", searchable: true },
   { key: "inventoryRemarks", label: "Remarks", searchable: true },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function CheckInventoryPage() {

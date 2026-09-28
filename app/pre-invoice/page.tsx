@@ -40,11 +40,13 @@ const pendingColumns = [
   { key: "pendingQty", label: "Pending Qty", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: false },
 ]
 
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
+  { key: "actual", label: "Actual", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "calibrationRequired", label: "Calibration Required", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },

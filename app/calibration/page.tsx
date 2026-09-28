@@ -41,6 +41,7 @@ const pendingColumns = [
   { key: "calibrationType", label: "Type", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -51,6 +52,7 @@ const historyColumns = [
   { key: "certificateUpload", label: "Certificate Upload", searchable: false },
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 // Only Timestamp, Order No., Quotation No., Company Name, Contact Person

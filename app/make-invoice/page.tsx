@@ -63,6 +63,7 @@ const pendingColumns = [
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -76,6 +77,7 @@ const historyColumns = [
   { key: "totalBillAmount", label: "Total Bill Amount", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 // Offer Show / Conveyed For Registration Form have no backing DB column

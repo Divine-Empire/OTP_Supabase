@@ -38,6 +38,7 @@ const pendingColumns = [
   { key: "sourceStage", label: "Source Stage", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
+  { key: "planned", label: "Planned", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -47,6 +48,7 @@ const historyColumns = [
   { key: "dnNumber", label: "DN Number", searchable: true },
   { key: "dnAttachment", label: "DN Attachment", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function DeliveryNoteForInvoicePage() {
