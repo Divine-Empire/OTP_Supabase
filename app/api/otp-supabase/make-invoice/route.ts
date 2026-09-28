@@ -5,9 +5,9 @@ import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 // Stage — Make Invoice.
 //
 // Pending: otp_pre_invoice_queue.make_invoice_planned IS NOT NULL (set once
-//          Debit Note (Inv.) has been processed for this wave — see
+//          Delivery Note (Inv.) has been processed for this wave — see
 //          Database/32_otp_debit_note_for_invoice.sql and
-//          app/api/otp-supabase/debit-note-for-invoice/route.ts) AND no
+//          app/api/otp-supabase/delivery-note-for-invoice/route.ts) AND no
 //          matching otp_make_invoice row yet (one row per queue wave).
 // History: a matching otp_make_invoice row exists.
 export async function GET(request: Request) {
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("otp_pre_invoice_queue")
-      .select("*, order:otp_orders(*)")
+      .select("*, order:otp_orders(*, shortages:otp_material_shortage(remaining_qty, status))")
       .not("make_invoice_planned", "is", null)
       .order("make_invoice_planned", { ascending: false })
 

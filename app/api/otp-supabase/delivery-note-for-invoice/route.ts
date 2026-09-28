@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
-// Stage — Debit Note (Inv.), between Pre-Invoice and Make Invoice.
+// Stage — Delivery Note (Inv.), between Pre-Invoice and Make Invoice.
 //
 // Applies unconditionally to every otp_pre_invoice_queue row (unlike
 // otp_debit_note, which is only for payment_mode = 'na' orders and is
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, data: data || [] })
   } catch (err: any) {
-    console.error("GET /api/otp-supabase/debit-note-for-invoice exception:", err)
+    console.error("GET /api/otp-supabase/delivery-note-for-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     if (error) throw error
 
     // Only now does Make Invoice's planned date get set for this wave —
-    // Debit Note (Inv.) being processed is what unlocks it.
+    // Delivery Note (Inv.) being processed is what unlocks it.
     // Planned = this record's creation time (now) + Make Invoice's TAT.
     const makeInvoicePlanned = addTatMinutes(new Date(), await getStageTatMinutes("make_invoice"))
     const { error: updateError } = await supabase
@@ -107,7 +107,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, data })
   } catch (err: any) {
-    console.error("POST /api/otp-supabase/debit-note-for-invoice exception:", err)
+    console.error("POST /api/otp-supabase/delivery-note-for-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

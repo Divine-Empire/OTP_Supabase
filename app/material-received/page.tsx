@@ -66,6 +66,7 @@ const pendingColumns = [
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
+  { key: "quotationCopy", label: "Quotation Copy", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
@@ -76,6 +77,7 @@ const historyColumns = [
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "crmName", label: "CRM Name", searchable: true },
+  { key: "quotationCopy", label: "Quotation Copy", searchable: true },
   { key: "accessories", label: "Accessories", searchable: true },
   { key: "itemName", label: "Item Name", searchable: true },
   { key: "indentedQty", label: "Indented Qty", searchable: false },
@@ -409,6 +411,14 @@ export default function MaterialReceivedPage() {
             <Eye className="h-3.5 w-3.5" />
             View Items
           </Button>
+        )
+      case "quotationCopy":
+        return value && (value.startsWith("http") || value.startsWith("https")) ? (
+          <a href={value} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">{value || "N/A"}</Badge>
         )
       default:
         return value ?? ""

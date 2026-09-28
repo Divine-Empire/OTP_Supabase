@@ -14,11 +14,11 @@ export interface TatStageOption {
 export const TAT_STAGE_OPTIONS: TatStageOption[] = [
   { key: "order_acceptable", label: "Order Acceptable", plannedField: "otp_orders.order_acceptable_planned" },
   { key: "proforma_invoice", label: "Pro-Forma Invoice", plannedField: "otp_orders_acceptable.proforma_invoice_planned" },
-  { key: "debit_note", label: "Debit Note", plannedField: "otp_orders_acceptable.debit_note_planned" },
+  { key: "debit_note", label: "Delivery Note", plannedField: "otp_orders_acceptable.debit_note_planned" },
   { key: "check_inventory", label: "Check Inventory", plannedField: "otp_orders_acceptable.check_inventory_planned" },
   { key: "material_received", label: "Material Received", plannedField: "otp_material_shortage (pending rows)" },
   { key: "pre_invoice", label: "Pre-Invoice", plannedField: "otp_pre_invoice_queue (status=pending)" },
-  { key: "debit_note_for_invoice", label: "Debit Note (Inv.)", plannedField: "otp_pre_invoice_queue.debit_note_planned" },
+  { key: "debit_note_for_invoice", label: "Delivery Note (Inv.)", plannedField: "otp_pre_invoice_queue.debit_note_planned" },
   { key: "make_invoice", label: "Make Invoice", plannedField: "otp_pre_invoice_queue.make_invoice_planned" },
   { key: "calibration", label: "Calibration Certificate", plannedField: "otp_make_invoice.calibration_planned" },
   { key: "packaging_transport", label: "Packaging and Transport", plannedField: "otp_make_invoice.packaging_transport_planned" },

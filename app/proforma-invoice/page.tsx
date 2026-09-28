@@ -30,14 +30,25 @@ const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
-  { key: "crmName", label: "CRM Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
+  { key: "billingAddress", label: "Billing Address", searchable: true },
+  { key: "shippingAddress", label: "Shipping Address", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
-  { key: "amount", label: "Amount", searchable: true },
+  { key: "paymentTerms", label: "Payment Terms(In Days)", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
+  { key: "transportMode", label: "Transport Mode", searchable: true },
+  { key: "destination", label: "Destination", searchable: true },
+  { key: "poNumber", label: "Po Number", searchable: true },
+  { key: "quotationCopy", label: "Quotation Copy", searchable: true },
+  { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
+  { key: "offerShow", label: "Offer Show", searchable: true },
+  { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
+  { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
+  { key: "amount", label: "Amount", searchable: true },
 ]
 
 // Column definitions for History tab
@@ -68,11 +79,12 @@ export default function ProformaInvoicePage() {
   const [crmNameFilter, setCrmNameFilter] = useState("all")
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
 
@@ -263,11 +275,20 @@ export default function ProformaInvoicePage() {
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
+      case "quotationCopy":
+      case "acceptanceCopy":
+        return value && (value.startsWith("http") || value.startsWith("https")) ? (
+          <a href={value} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">{value || "N/A"}</Badge>
+        )
       case "amount":
       case "piAmount":
         return value ? `₹${Number(value).toLocaleString()}` : ""
       default:
-        return value || ""
+        return value ?? ""
     }
   }
 

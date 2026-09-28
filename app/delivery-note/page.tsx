@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapDebitNotePendingRowToUI, mapDebitNoteHistoryRowToUI } from "@/lib/otp-utils"
+import { mapDeliveryNotePendingRowToUI, mapDeliveryNoteHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
@@ -65,7 +65,7 @@ const historyColumns = [
 // always blank -- hidden by default, still toggleable.
 const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
 
-export default function DebitNotePage() {
+export default function DeliveryNotePage() {
   const [orders, setOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -93,15 +93,15 @@ export default function DebitNotePage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/otp-supabase/debit-note?status=pending")
+      const response = await fetch("/api/otp-supabase/delivery-note?status=pending")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setOrders(result.data.map(mapDebitNotePendingRowToUI))
+        setOrders(result.data.map(mapDeliveryNotePendingRowToUI))
       } else {
         setOrders([])
       }
     } catch (err: any) {
-      console.error("Error fetching debit-note pending queue:", err)
+      console.error("Error fetching delivery-note pending queue:", err)
       setError(err.message)
       setOrders([])
     } finally {
@@ -112,15 +112,15 @@ export default function DebitNotePage() {
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
-      const response = await fetch("/api/otp-supabase/debit-note?status=history")
+      const response = await fetch("/api/otp-supabase/delivery-note?status=history")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapDebitNoteHistoryRowToUI))
+        setProcessedOrders(result.data.map(mapDeliveryNoteHistoryRowToUI))
       } else {
         setProcessedOrders([])
       }
     } catch (err) {
-      console.error("Error fetching debit-note history:", err)
+      console.error("Error fetching delivery-note history:", err)
       setProcessedOrders([])
     } finally {
       setProcessedLoading(false)
@@ -192,7 +192,7 @@ export default function DebitNotePage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Debit Note — inserts a row into otp_debit_note, moving this
+  // Submits Delivery Note — inserts a row into otp_debit_note, moving this
   // order from Pending to History. Terminal stage: nothing downstream gets
   // scheduled from here.
   const handleSubmit = async () => {
@@ -208,13 +208,13 @@ export default function DebitNotePage() {
       if (dnAttachmentFile) {
         const formData = new FormData()
         formData.append("file", dnAttachmentFile)
-        formData.append("folder", "debit-note")
+        formData.append("folder", "delivery-note")
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
         if (uploadJson.success) dnAttachmentUrl = uploadJson.url
       }
 
-      const response = await fetch("/api/otp-supabase/debit-note", {
+      const response = await fetch("/api/otp-supabase/delivery-note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -230,12 +230,12 @@ export default function DebitNotePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} moved to Debit Note History`)
+        alert(`Order ${selectedOrder.orderNo} moved to Delivery Note History`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
-      console.error("Error submitting debit-note:", err)
+      console.error("Error submitting delivery-note:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -295,7 +295,7 @@ export default function DebitNotePage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading debit note queue...</span>
+          <span className="ml-2">Loading Delivery Note queue...</span>
         </div>
       </MainLayout>
     )
@@ -429,7 +429,7 @@ export default function DebitNotePage() {
                   ))}
                   {filteredOrders.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending debit notes"}
+                      {searchTerm ? "No orders match your search criteria" : "No pending Delivery Notes"}
                     </p>
                   )}
                 </div>
@@ -500,7 +500,7 @@ export default function DebitNotePage() {
                               colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
                               className="text-center text-muted-foreground h-32"
                             >
-                              {searchTerm ? "No orders match your search criteria" : "No pending debit notes"}
+                              {searchTerm ? "No orders match your search criteria" : "No pending Delivery Notes"}
                             </TableCell>
                           </TableRow>
                         )}
@@ -622,8 +622,8 @@ export default function DebitNotePage() {
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Process Debit Note</DialogTitle>
-              <DialogDescription>Enter the Debit Note details for this order</DialogDescription>
+              <DialogTitle>Process Delivery Note</DialogTitle>
+              <DialogDescription>Enter the Delivery Note details for this order</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">

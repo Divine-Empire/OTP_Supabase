@@ -36,6 +36,8 @@ const pendingColumns = [
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "sourceStage", label: "Source Stage", searchable: true },
+  { key: "totalQty", label: "Total Qty", searchable: true },
+  { key: "pendingQty", label: "Pending Qty", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
@@ -46,7 +48,7 @@ const historyColumns = [
   { key: "paymentMode", label: "Payment Mode", searchable: true },
   { key: "calibrationRequired", label: "Calibration Required", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },
-  { key: "debitNoteForInvoiceRequired", label: "Debit Note (Inv.) Required", searchable: true },
+  { key: "DeliveryNoteForInvoiceRequired", label: "Delivery Note (Inv.) Required", searchable: true },
   { key: "transportId", label: "Transport Id/Name", searchable: true },
   { key: "gstNumber", label: "GST Number", searchable: true },
   { key: "vehicleNumber", label: "Vehicle Number", searchable: true },
@@ -124,7 +126,7 @@ export default function PreInvoicePage() {
   const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
   const [calibrationRequired, setCalibrationRequired] = useState("")
   const [calibrationType, setCalibrationType] = useState("")
-  const [debitNoteForInvoiceRequired, setDebitNoteForInvoiceRequired] = useState("")
+  const [DeliveryNoteForInvoiceRequired, setDeliveryNoteForInvoiceRequired] = useState("")
   const [transportId, setTransportId] = useState("")
   const [gstNumber, setGstNumber] = useState("")
   const [vehicleNumber, setVehicleNumber] = useState("")
@@ -268,7 +270,7 @@ export default function PreInvoicePage() {
     setSelectedOrder(order)
     setCalibrationRequired("")
     setCalibrationType("")
-    setDebitNoteForInvoiceRequired("")
+    setDeliveryNoteForInvoiceRequired("")
     setTransportId("")
     setGstNumber("")
     setVehicleNumber("")
@@ -311,8 +313,8 @@ export default function PreInvoicePage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
-    if (!debitNoteForInvoiceRequired) {
-      alert("Please select whether Debit Note (Inv.) is required.")
+    if (!DeliveryNoteForInvoiceRequired) {
+      alert("Please select whether Delivery Note (Inv.) is required.")
       return
     }
 
@@ -362,7 +364,7 @@ export default function PreInvoicePage() {
           srnAttachmentUrl,
           remarks: preInvoiceRemarks,
           paymentMode,
-          debitNoteForInvoiceRequired,
+          DeliveryNoteForInvoiceRequired,
         }),
       })
       const result = await response.json()
@@ -456,12 +458,12 @@ export default function PreInvoicePage() {
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
       case "calibrationRequired":
-      case "debitNoteForInvoiceRequired":
+      case "DeliveryNoteForInvoiceRequired":
         return value ? <Badge variant={value === "YES" ? "default" : "secondary"}>{value}</Badge> : ""
       case "paymentMode":
         return formatPaymentModeLabel(value)
       default:
-        return value || ""
+        return value ?? ""
     }
   }
 
@@ -629,8 +631,10 @@ export default function PreInvoicePage() {
                                             column.key === 'contactPersonName' ? '180px' :
                                               column.key === 'contactNumber' ? '140px' :
                                                 column.key === 'sourceStage' ? '150px' :
-                                                  column.key === 'itemList' ? '130px' :
-                                                    '160px',
+                                                  column.key === 'totalQty' ? '100px' :
+                                                    column.key === 'pendingQty' ? '110px' :
+                                                      column.key === 'itemList' ? '130px' :
+                                                        '160px',
                                 }}
                               >
                                 {column.label}
@@ -656,8 +660,10 @@ export default function PreInvoicePage() {
                                               column.key === 'contactPersonName' ? '180px' :
                                                 column.key === 'contactNumber' ? '140px' :
                                                   column.key === 'sourceStage' ? '150px' :
-                                                    column.key === 'itemList' ? '130px' :
-                                                      '160px',
+                                                    column.key === 'totalQty' ? '100px' :
+                                                      column.key === 'pendingQty' ? '110px' :
+                                                        column.key === 'itemList' ? '130px' :
+                                                          '160px',
                                   }}
                                 >
                                   <div className="break-words whitespace-normal leading-relaxed">
@@ -843,7 +849,7 @@ export default function PreInvoicePage() {
                 </div>
               </div>
 
-              {/* Row 1: Calibration Required, Dispatch Location, Debit Note (Inv.) Required */}
+              {/* Row 1: Calibration Required, Dispatch Location, Delivery Note (Inv.) Required */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="calibration">Calibration Certificate Required</Label>
@@ -873,8 +879,8 @@ export default function PreInvoicePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="debitNoteForInvoiceRequired">Debit Note (Inv.) Required</Label>
-                  <Select value={debitNoteForInvoiceRequired} onValueChange={setDebitNoteForInvoiceRequired}>
+                  <Label htmlFor="DeliveryNoteForInvoiceRequired">Delivery Note (Inv.) Required</Label>
+                  <Select value={DeliveryNoteForInvoiceRequired} onValueChange={setDeliveryNoteForInvoiceRequired}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
@@ -884,7 +890,7 @@ export default function PreInvoicePage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    YES sends this order to Debit Note (Inv.) first; NO skips straight to Make Invoice.
+                    YES sends this order to Delivery Note (Inv.) first; NO skips straight to Make Invoice.
                   </p>
                 </div>
                 {calibrationRequired === "YES" && (

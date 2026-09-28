@@ -13,11 +13,11 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 const STAGE_LABELS: Record<string, string> = {
   order_acceptable: "Order Acceptable",
   proforma_invoice: "Pro-Forma Invoice",
-  debit_note: "Debit Note",
+  debit_note: "Delivery Note",
   check_inventory: "Check Inventory",
   material_received: "Material Received",
   pre_invoice: "Pre-Invoice",
-  debit_note_for_invoice: "Debit Note (Inv.)",
+  debit_note_for_invoice: "Delivery Note (Inv.)",
   make_invoice: "Make Invoice",
   calibration: "Calibration Certificate",
   packaging_transport: "Packaging and Transport",
@@ -87,7 +87,7 @@ export async function GET(request: Request) {
         const { data: row } = await supabase.from("otp_proforma_invoice").select("id").eq("order_id", order.id).maybeSingle()
         if (!row) pendingStages.push({ key: "proforma_invoice", label: STAGE_LABELS.proforma_invoice, items: orderItems })
       }
-      // 3. Debit Note
+      // 3. Delivery Note
       if (oaProcessedRow.debit_note_planned) {
         const { data: row } = await supabase.from("otp_debit_note").select("id").eq("order_id", order.id).maybeSingle()
         if (!row) pendingStages.push({ key: "debit_note", label: STAGE_LABELS.debit_note, items: orderItems })
@@ -140,7 +140,7 @@ export async function GET(request: Request) {
       const { data: dniRows } = await supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id").in("pre_invoice_queue_id", waveIds)
       const dniDoneIds = (dniRows || []).map((r: any) => r.pre_invoice_queue_id)
       const dniPendingWaves = invoicedWaves.filter((w: any) => w.debit_note_planned && !dniDoneIds.includes(w.id))
-      // 7. Debit Note (Inv.)
+      // 7. Delivery Note (Inv.)
       if (dniPendingWaves.length > 0) {
         pendingStages.push({
           key: "debit_note_for_invoice",

@@ -114,6 +114,15 @@ export function mapProformaInvoicePendingRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
+    billingAddress: order.billing_address || "",
+    shippingAddress: order.shipping_address || "",
+    paymentTerms: order.payment_terms_days || 0,
+    transportMode: order.transport_mode || "",
+    destination: order.destination || "",
+    poNumber: order.po_number || "",
+    quotationCopy: order.quotation_copy || "",
+    acceptanceCopy: order.acceptance_file_upload || "",
+    totalOrderQty: order.total_qty || 0,
     amount: order.amount_with_tax || 0,
     rawItems: items,
   }
@@ -140,6 +149,15 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     paymentMode: order.payment_mode || "",
+    billingAddress: order.billing_address || "",
+    shippingAddress: order.shipping_address || "",
+    paymentTerms: order.payment_terms_days || 0,
+    transportMode: order.transport_mode || "",
+    destination: order.destination || "",
+    poNumber: order.po_number || "",
+    quotationCopy: order.quotation_copy || "",
+    acceptanceCopy: order.acceptance_file_upload || "",
+    totalOrderQty: order.total_qty || 0,
     amount: order.amount_with_tax || 0,
 
     piNumber: row.pi_number || "",
@@ -152,10 +170,10 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
   }
 }
 
-// Maps a Pending row from /api/otp-supabase/debit-note (an
+// Maps a Pending row from /api/otp-supabase/delivery-note (an
 // otp_orders_acceptable row, joined to its parent otp_orders) into the UI
-// field names debit-note/page.tsx expects.
-export function mapDebitNotePendingRowToUI(row: any): any {
+// field names delivery-note/page.tsx expects.
+export function mapDeliveryNotePendingRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -187,10 +205,10 @@ export function mapDebitNotePendingRowToUI(row: any): any {
   }
 }
 
-// Maps a History row from /api/otp-supabase/debit-note (an
+// Maps a History row from /api/otp-supabase/delivery-note (an
 // otp_debit_note row, joined to its parent otp_orders) into the UI field
-// names debit-note/page.tsx expects.
-export function mapDebitNoteHistoryRowToUI(row: any): any {
+// names delivery-note/page.tsx expects.
+export function mapDeliveryNoteHistoryRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -310,6 +328,14 @@ export function mapPreInvoiceRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
+  
+  const shortages = row.shortages || []
+  let pendingQty = 0
+  shortages.forEach((s: any) => {
+    if (s.status !== "received") {
+      pendingQty += Number(s.remaining_qty) || 0
+    }
+  })
 
   return {
     id: row.id,
@@ -325,6 +351,8 @@ export function mapPreInvoiceRowToUI(row: any): any {
     contactNumber: order.phone_number || "",
     email: order.email || "",
     sourceStage: row.source_stage || "",
+    totalQty: order.total_qty || 0,
+    pendingQty,
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code, installation: it.installation })),
     rawItems: row.items || [],
     // Pending: falls back to the live otp_orders.payment_mode (pre-select
@@ -338,7 +366,7 @@ export function mapPreInvoiceRowToUI(row: any): any {
 
     calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
     calibrationType: row.calibration_type || "",
-    debitNoteForInvoiceRequired:
+    DeliveryNoteForInvoiceRequired:
       row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     transportId: row.transport_id || "",
     gstNumber: row.gst_number || "",
@@ -351,10 +379,10 @@ export function mapPreInvoiceRowToUI(row: any): any {
   }
 }
 
-// Maps a Pending row from /api/otp-supabase/debit-note-for-invoice (an
+// Maps a Pending row from /api/otp-supabase/delivery-note-for-invoice (an
 // otp_pre_invoice_queue row, joined to its parent otp_orders) into the UI
-// field names debit-note-for-invoice/page.tsx expects.
-export function mapDebitNoteForInvoicePendingRowToUI(row: any): any {
+// field names delivery-note-for-invoice/page.tsx expects.
+export function mapDeliveryNoteForInvoicePendingRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -377,11 +405,11 @@ export function mapDebitNoteForInvoicePendingRowToUI(row: any): any {
   }
 }
 
-// Maps a History row from /api/otp-supabase/debit-note-for-invoice (an
+// Maps a History row from /api/otp-supabase/delivery-note-for-invoice (an
 // otp_debit_note_for_invoice row, joined to its parent otp_orders +
 // otp_pre_invoice_queue) into the UI field names
-// debit-note-for-invoice/page.tsx expects.
-export function mapDebitNoteForInvoiceHistoryRowToUI(row: any): any {
+// delivery-note-for-invoice/page.tsx expects.
+export function mapDeliveryNoteForInvoiceHistoryRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -439,9 +467,13 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     quotationCopy: order.quotation_copy || "",
     acceptanceCopy: order.acceptance_file_upload || "",
     totalOrderQty: order.total_qty || 0,
+    totalQty: order.total_qty || 0,
+    pendingQty: (order.shortages || [])
+      .filter((s: any) => s.status === "pending")
+      .reduce((sum: number, s: any) => sum + (Number(s.remaining_qty) || 0), 0),
     amount: order.amount_with_tax || 0,
     sourceStage: row.source_stage || "",
-    debitNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
+    DeliveryNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
     calibrationType: row.calibration_type || "",
     dispatchLocation: row.dispatch_location || "",
@@ -826,6 +858,7 @@ export function mapMaterialReceivedPendingRowToUI(row: any): any {
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
+    quotationCopy: order.quotation_copy || "",
 
     // Reference table in the scan dialog + Item List dialog both read
     // this shape: {item_name, quantity} per outstanding shortage item.
@@ -858,6 +891,7 @@ export function mapMaterialReceivedHistoryRowToUI(row: any): any {
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
+    quotationCopy: order.quotation_copy || "",
 
     itemCode: row.item_code || "",
     itemName: row.item_name || "",

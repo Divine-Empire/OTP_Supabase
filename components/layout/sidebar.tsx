@@ -63,10 +63,10 @@ const menuItems = [
     step: "pre-invoice",
   },
   {
-    href: "/debit-note-for-invoice",
-    label: "Debit Note (Inv.)",
+    href: "/delivery-note-for-invoice",
+    label: "Delivery Note (Inv.)",
     icon: FileMinus,
-    step: "debit-note-for-invoice",
+    step: "delivery-note-for-invoice",
   },
   {
     href: "/make-invoice",
@@ -99,10 +99,10 @@ const menuItems = [
     step: "client-confirmation",
   },
     {
-      href: "/debit-note",
-      label: "Debit Note",
+      href: "/delivery-note",
+      label: "Delivery Note",
       icon: FileMinus,
-      step: "debit-note",
+      step: "delivery-note",
     },
   {
     href: "/order-cancel",

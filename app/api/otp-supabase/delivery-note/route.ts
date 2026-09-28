@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 
-// Stage — Debit Note (only reached when otp_orders.payment_mode = 'na' —
+// Stage — Delivery Note (only reached when otp_orders.payment_mode = 'na' —
 // see order-acceptable/route.ts). Terminal: processing here just moves the
 // order to History, nothing further gets scheduled.
 //
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ success: true, data: data || [] })
   } catch (err: any) {
-    console.error("GET /api/otp-supabase/debit-note exception:", err)
+    console.error("GET /api/otp-supabase/delivery-note exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, data })
   } catch (err: any) {
-    console.error("POST /api/otp-supabase/debit-note exception:", err)
+    console.error("POST /api/otp-supabase/delivery-note exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

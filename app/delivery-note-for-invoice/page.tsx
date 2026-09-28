@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapDebitNoteForInvoicePendingRowToUI, mapDebitNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
+import { mapDeliveryNoteForInvoicePendingRowToUI, mapDeliveryNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
@@ -49,7 +49,7 @@ const historyColumns = [
   { key: "createdBy", label: "Created By", searchable: true },
 ]
 
-export default function DebitNoteForInvoicePage() {
+export default function DeliveryNoteForInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -78,15 +78,15 @@ export default function DebitNoteForInvoicePage() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/otp-supabase/debit-note-for-invoice?status=pending")
+      const response = await fetch("/api/otp-supabase/delivery-note-for-invoice?status=pending")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setOrders(result.data.map(mapDebitNoteForInvoicePendingRowToUI))
+        setOrders(result.data.map(mapDeliveryNoteForInvoicePendingRowToUI))
       } else {
         setOrders([])
       }
     } catch (err: any) {
-      console.error("Error fetching debit-note-for-invoice pending queue:", err)
+      console.error("Error fetching delivery-note-for-invoice pending queue:", err)
       setError(err.message)
       setOrders([])
     } finally {
@@ -97,15 +97,15 @@ export default function DebitNoteForInvoicePage() {
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
-      const response = await fetch("/api/otp-supabase/debit-note-for-invoice?status=history")
+      const response = await fetch("/api/otp-supabase/delivery-note-for-invoice?status=history")
       const result = await response.json()
       if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapDebitNoteForInvoiceHistoryRowToUI))
+        setProcessedOrders(result.data.map(mapDeliveryNoteForInvoiceHistoryRowToUI))
       } else {
         setProcessedOrders([])
       }
     } catch (err) {
-      console.error("Error fetching debit-note-for-invoice history:", err)
+      console.error("Error fetching delivery-note-for-invoice history:", err)
       setProcessedOrders([])
     } finally {
       setProcessedLoading(false)
@@ -188,10 +188,10 @@ export default function DebitNoteForInvoicePage() {
     setItemListDialogOpen(true)
   }
 
-  // Submits Debit Note (Inv.) — inserts a row into
+  // Submits Delivery Note (Inv.) — inserts a row into
   // otp_debit_note_for_invoice, moving this wave from Pending to History,
   // AND is what unlocks Make Invoice's own planned date for this wave (see
-  // app/api/otp-supabase/debit-note-for-invoice/route.ts POST).
+  // app/api/otp-supabase/delivery-note-for-invoice/route.ts POST).
   const handleSubmit = async () => {
     if (!selectedOrder) return
     if (!amount || !dnNumber.trim() || !dnAttachmentFile) {
@@ -205,13 +205,13 @@ export default function DebitNoteForInvoicePage() {
       if (dnAttachmentFile) {
         const formData = new FormData()
         formData.append("file", dnAttachmentFile)
-        formData.append("folder", "debit-note-for-invoice")
+        formData.append("folder", "delivery-note-for-invoice")
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
         if (uploadJson.success) dnAttachmentUrl = uploadJson.url
       }
 
-      const response = await fetch("/api/otp-supabase/debit-note-for-invoice", {
+      const response = await fetch("/api/otp-supabase/delivery-note-for-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -228,12 +228,12 @@ export default function DebitNoteForInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — Debit Note (Inv.) recorded. Make Invoice is now scheduled.`)
+        alert(`Order ${selectedOrder.orderNo} — Delivery Note (Inv.) recorded. Make Invoice is now scheduled.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
-      console.error("Error submitting debit-note-for-invoice:", err)
+      console.error("Error submitting delivery-note-for-invoice:", err)
       alert(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
@@ -283,7 +283,7 @@ export default function DebitNoteForInvoicePage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading debit note (inv.) queue...</span>
+          <span className="ml-2">Loading Delivery Note (inv.) queue...</span>
         </div>
       </MainLayout>
     )
@@ -417,7 +417,7 @@ export default function DebitNoteForInvoicePage() {
                   ))}
                   {filteredOrders.length === 0 && (
                     <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending debit note (inv.) records"}
+                      {searchTerm ? "No orders match your search criteria" : "No pending Delivery Note (inv.) records"}
                     </p>
                   )}
                 </div>
@@ -460,7 +460,7 @@ export default function DebitNoteForInvoicePage() {
                                   colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
                                   className="text-center text-muted-foreground h-32"
                                 >
-                                  {searchTerm ? "No orders match your search criteria" : "No pending debit note (inv.) records"}
+                                  {searchTerm ? "No orders match your search criteria" : "No pending Delivery Note (inv.) records"}
                                 </TableCell>
                               </TableRow>
                             )}
@@ -556,8 +556,8 @@ export default function DebitNoteForInvoicePage() {
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
-              <DialogTitle>Process Debit Note (Inv.)</DialogTitle>
-              <DialogDescription>Enter the Debit Note details for this wave</DialogDescription>
+              <DialogTitle>Process Delivery Note (Inv.)</DialogTitle>
+              <DialogDescription>Enter the Delivery Note details for this wave</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">

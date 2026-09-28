@@ -14,11 +14,11 @@ export async function GET() {
       ordersRes,
       acceptableRes,
       proformaRes,
-      debitNoteRes,
+      DeliveryNoteRes,
       checkInvRes,
       shortageRes,
       queueRes,
-      debitNoteInvRes,
+      DeliveryNoteInvRes,
       makeInvoiceRes,
       calibrationRes,
     ] = await Promise.all([
@@ -34,18 +34,18 @@ export async function GET() {
       supabase.from("otp_calibration_certificate").select("make_invoice_id"),
     ])
 
-    for (const r of [ordersRes, acceptableRes, proformaRes, debitNoteRes, checkInvRes, shortageRes, queueRes, debitNoteInvRes, makeInvoiceRes, calibrationRes]) {
+    for (const r of [ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, shortageRes, queueRes, DeliveryNoteInvRes, makeInvoiceRes, calibrationRes]) {
       if (r.error) throw r.error
     }
 
     const orders = ordersRes.data || []
     const acceptableRows = acceptableRes.data || []
     const proformaDoneIds = new Set((proformaRes.data || []).map((r: any) => r.order_id))
-    const debitNoteDoneIds = new Set((debitNoteRes.data || []).map((r: any) => r.order_id))
+    const DeliveryNoteDoneIds = new Set((DeliveryNoteRes.data || []).map((r: any) => r.order_id))
     const checkInvDoneIds = new Set((checkInvRes.data || []).map((r: any) => r.order_id))
     const shortageRows = shortageRes.data || []
     const queueRows = queueRes.data || []
-    const debitNoteInvDoneIds = new Set((debitNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
+    const DeliveryNoteInvDoneIds = new Set((DeliveryNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
     const makeInvoiceRows = makeInvoiceRes.data || []
     const makeInvoiceDoneQueueIds = new Set(makeInvoiceRows.map((r: any) => r.pre_invoice_queue_id))
     const calibrationDoneIds = new Set((calibrationRes.data || []).map((r: any) => r.make_invoice_id))
@@ -66,8 +66,8 @@ export async function GET() {
       },
       {
         key: "debit_note",
-        label: "Debit Note",
-        pending: acceptableRows.filter((r: any) => r.debit_note_planned && !debitNoteDoneIds.has(r.order_id)).length,
+        label: "Delivery Note",
+        pending: acceptableRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteDoneIds.has(r.order_id)).length,
       },
       {
         key: "check_inventory",
@@ -86,8 +86,8 @@ export async function GET() {
       },
       {
         key: "debit_note_for_invoice",
-        label: "Debit Note (Inv.)",
-        pending: queueRows.filter((r: any) => r.debit_note_planned && !debitNoteInvDoneIds.has(r.id)).length,
+        label: "Delivery Note (Inv.)",
+        pending: queueRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteInvDoneIds.has(r.id)).length,
       },
       {
         key: "make_invoice",

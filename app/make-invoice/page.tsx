@@ -46,17 +46,18 @@ const pendingColumns = [
   { key: "acceptanceCopy", label: "Acceptance Copy", searchable: true },
   { key: "offerShow", label: "Offer Show", searchable: true },
   { key: "conveyedForRegistration", label: "Conveyed For Registration Form", searchable: true },
-  { key: "totalOrderQty", label: "Total Order Qty", searchable: true },
+  { key: "totalQty", label: "Total Qty", searchable: true },
+  { key: "pendingQty", label: "Pending Qty", searchable: true },
   { key: "amount", label: "Amount", searchable: true },
   { key: "sourceStage", label: "Source Stage", searchable: true },
-  { key: "debitNoteForInvoiceRequired", label: "Debit Note", searchable: true },
+  { key: "DeliveryNoteForInvoiceRequired", label: "Delivery Note", searchable: true },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
 ]
 
 // Column definitions for History tab
 const historyColumns = [
-  ...pendingColumns.filter((col) => col.key !== "actions"),
+  ...pendingColumns.filter((col) => col.key !== "actions" && col.key !== "totalQty" && col.key !== "pendingQty"),
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "invoiceUpload", label: "Invoice Upload", searchable: false },
@@ -79,9 +80,9 @@ const historyColumns = [
 
 // Offer Show / Conveyed For Registration Form have no backing DB column
 // (same as order-acceptable, which this page's columns mirror) so are
-// always blank; Source Stage / Debit Note are internal routing fields, not
+// always blank; Source Stage / Delivery Note are internal routing fields, not
 // requested for display. All hidden by default, still toggleable.
-const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration", "sourceStage", "debitNoteForInvoiceRequired"])
+const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration", "sourceStage", "DeliveryNoteForInvoiceRequired"])
 
 export default function MakeInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
@@ -390,7 +391,7 @@ export default function MakeInvoicePage() {
         return value ? `₹${Number(value).toLocaleString()}` : ""
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
-      case "debitNoteForInvoiceRequired":
+      case "DeliveryNoteForInvoiceRequired":
         return value ? (
           <span
             className={`inline-flex items-center justify-center rounded-md px-2.5 py-1 text-xs font-bold ${
@@ -403,7 +404,7 @@ export default function MakeInvoicePage() {
           ""
         )
       default:
-        return value || ""
+        return value ?? ""
     }
   }
 
@@ -571,9 +572,11 @@ export default function MakeInvoicePage() {
                                             column.key === 'contactPersonName' ? '180px' :
                                               column.key === 'contactNumber' ? '140px' :
                                                 column.key === 'sourceStage' ? '150px' :
-                                                  column.key === 'debitNoteForInvoiceRequired' ? '110px' :
-                                                    column.key === 'itemList' ? '130px' :
-                                                      '160px',
+                                                  column.key === 'totalQty' ? '100px' :
+                                                    column.key === 'pendingQty' ? '110px' :
+                                                      column.key === 'DeliveryNoteForInvoiceRequired' ? '110px' :
+                                                        column.key === 'itemList' ? '130px' :
+                                                          '160px',
                                 }}
                               >
                                 {column.label}
@@ -599,9 +602,11 @@ export default function MakeInvoicePage() {
                                               column.key === 'contactPersonName' ? '180px' :
                                                 column.key === 'contactNumber' ? '140px' :
                                                   column.key === 'sourceStage' ? '150px' :
-                                                    column.key === 'debitNoteForInvoiceRequired' ? '110px' :
-                                                      column.key === 'itemList' ? '130px' :
-                                                        '160px',
+                                                    column.key === 'totalQty' ? '100px' :
+                                                      column.key === 'pendingQty' ? '110px' :
+                                                        column.key === 'DeliveryNoteForInvoiceRequired' ? '110px' :
+                                                          column.key === 'itemList' ? '130px' :
+                                                            '160px',
                                   }}
                                 >
                                   <div className="break-words whitespace-normal leading-relaxed">
