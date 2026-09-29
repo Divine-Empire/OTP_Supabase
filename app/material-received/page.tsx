@@ -25,6 +25,7 @@ import { mapMaterialReceivedPendingRowToUI, mapMaterialReceivedHistoryRowToUI } 
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
+import { checkSerialWithIms } from "@/lib/ims"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Same shapes as check-inventory/page.tsx — this stage runs the identical
@@ -254,10 +255,16 @@ export default function MaterialReceivedPage() {
     const key = itemMatchKey(parsed.itemName)
     const numbered = isNumberedSerial(parsed.serialNo)
 
+    // Set from inside the updater (only on an actual new-serial addition,
+    // never on a duplicate-scan ignore) so the IMS check below only fires
+    // once per physical unit.
+    let isNewSerialScan = false
+
     setScanRows((prev) => {
       const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
 
       if (groupIndex === -1) {
+        isNewSerialScan = numbered
         return [
           ...prev,
           {
@@ -273,11 +280,30 @@ export default function MaterialReceivedPage() {
       if (!numbered) return prev
       if (group.serials.includes(parsed.serialNo)) return prev
 
+      isNewSerialScan = true
       const serials = [...group.serials, parsed.serialNo]
       const next = [...prev]
       next[groupIndex] = { ...group, serials, qty: String(serials.length) }
       return next
     })
+
+    // Best-effort, non-blocking: this is the shortage-reprocessing OUT path
+    // — same IMS check as Check Inventory, so a duplicate/older-stock alert
+    // still surfaces here too, and the OUT event is still recorded live.
+    if (isNewSerialScan) {
+      checkSerialWithIms({
+        serialNo: parsed.serialNo,
+        locationLabel: warehouseLocationValue || null,
+        itemCode: parsed.itemCode,
+        itemName: parsed.itemName,
+        source: "otp-check-inventory",
+        referenceNo: selectedOrder?.orderNo,
+      }).then((result) => {
+        if (result?.alert) {
+          toast({ title: "IMS Stock Alert", description: result.alert, variant: "destructive" })
+        }
+      })
+    }
   }
 
   const updateScanRowQty = (index: number, qty: string) => {

@@ -26,6 +26,7 @@ import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
+import { checkSerialWithIms } from "@/lib/ims"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
@@ -487,11 +488,17 @@ export default function CheckInventoryPage() {
     const key = itemMatchKey(parsed.itemName)
     const numbered = isNumberedSerial(parsed.serialNo)
 
+    // Set from inside the updater (only on an actual new-serial addition,
+    // never on a duplicate-scan ignore) so the IMS check below only fires
+    // once per physical unit.
+    let isNewSerialScan = false
+
     setScanRows((prev) => {
       const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
 
       if (groupIndex === -1) {
         // First scan of this item.
+        isNewSerialScan = numbered
         const newGroup: ScanRow = {
           itemName: parsed.itemName,
           itemCode: parsed.itemCode,
@@ -506,11 +513,30 @@ export default function CheckInventoryPage() {
 
       if (group.serials.includes(parsed.serialNo)) return prev // same physical unit scanned twice — ignore
 
+      isNewSerialScan = true
       const serials = [...group.serials, parsed.serialNo]
       const next = [...prev]
       next[groupIndex] = { ...group, serials, qty: String(serials.length) }
       return next
     })
+
+    // Best-effort, non-blocking: ask IMS whether older warranty/invoice-dated
+    // stock of this item is still available, and let it record the OUT
+    // event on its side. Never blocks or fails this scan either way.
+    if (isNewSerialScan) {
+      checkSerialWithIms({
+        serialNo: parsed.serialNo,
+        locationLabel: warehouseLocationValue || null,
+        itemCode: parsed.itemCode,
+        itemName: parsed.itemName,
+        source: "otp-check-inventory",
+        referenceNo: selectedOrder?.orderNo,
+      }).then((result) => {
+        if (result?.alert) {
+          toast({ title: "IMS Stock Alert", description: result.alert, variant: "destructive" })
+        }
+      })
+    }
   }
 
   // Accessories aren't checked against the order's item list (there's no
