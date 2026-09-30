@@ -16,7 +16,7 @@ export async function GET() {
       proformaRes,
       DeliveryNoteRes,
       checkInvRes,
-      shortageRes,
+      indentRes,
       queueRes,
       DeliveryNoteInvRes,
       makeInvoiceRes,
@@ -27,14 +27,14 @@ export async function GET() {
       supabase.from("otp_proforma_invoice").select("order_id"),
       supabase.from("otp_debit_note").select("order_id"),
       supabase.from("otp_check_inventory").select("order_id"),
-      supabase.from("otp_material_shortage").select("status"),
+      supabase.from("otp_indent_creation").select("material_received"),
       supabase.from("otp_pre_invoice_queue").select("id, status, debit_note_planned, make_invoice_planned"),
       supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
       supabase.from("otp_make_invoice").select("id, pre_invoice_queue_id, total_bill_amount, calibration_planned, created_at"),
       supabase.from("otp_calibration_certificate").select("make_invoice_id"),
     ])
 
-    for (const r of [ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, shortageRes, queueRes, DeliveryNoteInvRes, makeInvoiceRes, calibrationRes]) {
+    for (const r of [ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, queueRes, DeliveryNoteInvRes, makeInvoiceRes, calibrationRes]) {
       if (r.error) throw r.error
     }
 
@@ -43,7 +43,7 @@ export async function GET() {
     const proformaDoneIds = new Set((proformaRes.data || []).map((r: any) => r.order_id))
     const DeliveryNoteDoneIds = new Set((DeliveryNoteRes.data || []).map((r: any) => r.order_id))
     const checkInvDoneIds = new Set((checkInvRes.data || []).map((r: any) => r.order_id))
-    const shortageRows = shortageRes.data || []
+    const indentRows = indentRes.data || []
     const queueRows = queueRes.data || []
     const DeliveryNoteInvDoneIds = new Set((DeliveryNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
     const makeInvoiceRows = makeInvoiceRes.data || []
@@ -75,9 +75,9 @@ export async function GET() {
         pending: acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length,
       },
       {
-        key: "material_received",
-        label: "Material Received",
-        pending: shortageRows.filter((r: any) => r.status === "pending").length,
+        key: "indent_creation",
+        label: "Indent Creation",
+        pending: indentRows.filter((r: any) => !r.material_received).length,
       },
       {
         key: "pre_invoice",

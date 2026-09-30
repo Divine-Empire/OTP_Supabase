@@ -51,10 +51,10 @@ const menuItems = [
     step: "check-inventory",
   },
   {
-    href: "/material-received",
-    label: "Material Received",
+    href: "/indent-creation",
+    label: "Indent Creation",
     icon: Package,
-    step: "material-received",
+    step: "indent-creation",
   },
   {
     href: "/pre-invoice",

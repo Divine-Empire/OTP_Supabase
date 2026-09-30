@@ -15,7 +15,7 @@ const STAGE_LABELS: Record<string, string> = {
   proforma_invoice: "Pro-Forma Invoice",
   debit_note: "Delivery Note",
   check_inventory: "Packing List",
-  material_received: "Material Received",
+  indent_creation: "Indent Creation",
   pre_invoice: "Pre-Invoice",
   debit_note_for_invoice: "Delivery Note (Inv.)",
   make_invoice: "Make Invoice",
@@ -99,17 +99,28 @@ export async function GET(request: Request) {
       }
     }
 
-    // 5. Material Received — row-based, one per short item.
+    // 5. Indent Creation — an otp_indent_creation row still awaiting its
+    // Material Received answer, OR outstanding otp_check_inventory_shortage
+    // ledger rows (a repeat shortage looping back through Packing List).
+    const { data: indentRow } = await supabase
+      .from("otp_indent_creation")
+      .select("items")
+      .eq("order_id", order.id)
+      .is("material_received", null)
+      .maybeSingle()
     const { data: shortageRows } = await supabase
-      .from("otp_material_shortage")
-      .select("item_name, indented_qty, received_qty, remaining_qty")
+      .from("otp_check_inventory_shortage")
+      .select("item_name, shortage_qty")
       .eq("order_id", order.id)
       .eq("status", "pending")
-    if (shortageRows && shortageRows.length > 0) {
+
+    const indentItems = (indentRow?.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty }))
+    const shortageItems = (shortageRows || []).map((r: any) => ({ name: r.item_name, qty: r.shortage_qty }))
+    if (indentItems.length > 0 || shortageItems.length > 0) {
       pendingStages.push({
-        key: "material_received",
-        label: STAGE_LABELS.material_received,
-        items: shortageRows.map((r: any) => ({ name: r.item_name, qty: `${r.remaining_qty ?? r.indented_qty - r.received_qty} pending` })),
+        key: "indent_creation",
+        label: STAGE_LABELS.indent_creation,
+        items: [...indentItems, ...shortageItems],
       })
     }
 
@@ -286,8 +297,8 @@ export async function POST(request: Request) {
           await supabase.from("otp_orders_acceptable").update({ check_inventory_planned: null }).eq("order_id", order.id)
           break
         }
-        case "material_received": {
-          await supabase.from("otp_material_shortage").update({ status: "cancelled" }).eq("order_id", order.id).eq("status", "pending")
+        case "indent_creation": {
+          await supabase.from("otp_check_inventory_shortage").update({ status: "resolved" }).eq("order_id", order.id).eq("status", "pending")
           break
         }
         case "pre_invoice": {

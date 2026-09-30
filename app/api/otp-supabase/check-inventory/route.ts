@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { tryCreatePfmsIndent } from "@/lib/pfms"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -38,14 +37,30 @@ async function enrichOrderItemsWithCode(supabase: ReturnType<typeof getSupabaseA
   return rows
 }
 
-// Stage 2 — Check Inventory.
+// Stage 2 — Packing List (Check Inventory).
 //
-// Pending: otp_orders_acceptable.check_inventory_planned IS NOT NULL AND no
-//          matching otp_check_inventory row yet.
-// History: a matching otp_check_inventory row exists (FK: order_id -> otp_orders.id).
+// Can now be scanned more than once per order (otp_check_inventory's old
+// UNIQUE(order_id) was dropped — see Database/52_indent_creation_stage.sql).
+// Pending is a union of two kinds of rows, tagged `scanType` so the
+// frontend knows what to compare scans against and where shortage should
+// go on submit:
 //
-// Both branches return the same shape so the frontend mapper doesn't need to
-// branch on which endpoint it came from: { order, acceptance, inventory }.
+//   "new"    — order never scanned before (no otp_check_inventory row at
+//              all yet). Compare against the full order item list. Any
+//              shortage found creates the ONE-AND-ONLY otp_indent_creation
+//              row this order will ever get.
+//   "repeat" — order already has an otp_indent_creation row (indent
+//              already raised once) AND has otp_check_inventory_shortage
+//              rows still status='pending' (put there once that indent's
+//              Material Received flips to Yes/No — see
+//              indent-creation/route.ts). Compare ONLY against those
+//              outstanding ledger rows (everything else on the order was
+//              already resolved in an earlier wave). Any shortage found
+//              this time stays in this same ledger (successor rows) —
+//              it never goes back to Indent Creation.
+//
+// History: a matching otp_check_inventory row exists (FK: order_id ->
+//          otp_orders.id) — every scan attempt, new or repeat.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -80,33 +95,74 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: shaped })
     }
 
-    // Default / "pending": orders whose stage-2 planned date (on
-    // otp_orders_acceptable) is set but that don't have an
-    // otp_check_inventory row yet.
-    const { data: doneRows, error: doneError } = await supabase
+    // --- "new" rows: orders whose stage-2 planned date is set but that
+    // have NEVER had an otp_check_inventory row.
+    const { data: everScannedRows, error: everScannedError } = await supabase
       .from("otp_check_inventory")
       .select("order_id")
+    if (everScannedError) throw everScannedError
+    const everScannedIds = (everScannedRows || []).map((r: any) => r.order_id).filter(Boolean)
 
-    if (doneError) throw doneError
-    const doneIds = (doneRows || []).map((r: any) => r.order_id).filter(Boolean)
-
-    let query = supabase
+    let newQuery = supabase
       .from("otp_orders_acceptable")
       .select("*, order:otp_orders(*)")
       .not("check_inventory_planned", "is", null)
       .order("created_at", { ascending: false })
+    if (everScannedIds.length > 0) {
+      newQuery = newQuery.not("order_id", "in", `(${everScannedIds.join(",")})`)
+    }
+    const { data: newRows, error: newError } = await newQuery
+    if (newError) throw newError
 
-    if (doneIds.length > 0) {
-      query = query.not("order_id", "in", `(${doneIds.join(",")})`)
+    const newShaped = (newRows || []).map((r: any) => {
+      const { order, ...acceptance } = r
+      return { order, acceptance, inventory: null, scanType: "new", shortageItems: [] }
+    })
+
+    // --- "repeat" rows: orders with an outstanding otp_check_inventory_shortage
+    // ledger (created once Indent Creation's Material Received is answered).
+    const { data: ledgerRows, error: ledgerError } = await supabase
+      .from("otp_check_inventory_shortage")
+      .select("*, order:otp_orders(*)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+    if (ledgerError) throw ledgerError
+
+    const repeatOrderIds = Array.from(new Set((ledgerRows || []).map((r: any) => r.order_id)))
+    let acceptanceByOrder = new Map<string, any>()
+    if (repeatOrderIds.length > 0) {
+      const { data: acceptanceRows, error: acceptanceError } = await supabase
+        .from("otp_orders_acceptable")
+        .select("*")
+        .in("order_id", repeatOrderIds)
+      if (acceptanceError) throw acceptanceError
+      acceptanceByOrder = new Map((acceptanceRows || []).map((a: any) => [a.order_id, a]))
     }
 
-    const { data, error } = await query
-    if (error) throw error
+    const ledgerByOrder = new Map<string, any[]>()
+    for (const r of ledgerRows || []) {
+      if (!ledgerByOrder.has(r.order_id)) ledgerByOrder.set(r.order_id, [])
+      ledgerByOrder.get(r.order_id)!.push(r)
+    }
 
-    const shaped = (data || []).map((r: any) => {
-      const { order, ...acceptance } = r
-      return { order, acceptance, inventory: null }
+    const repeatShaped = repeatOrderIds.map((orderId) => {
+      const rows = ledgerByOrder.get(orderId)!
+      const order = rows[0].order
+      return {
+        order,
+        acceptance: acceptanceByOrder.get(orderId) || null,
+        inventory: null,
+        scanType: "repeat",
+        shortageItems: rows.map((r: any) => ({
+          shortageLedgerId: r.id,
+          item_code: r.item_code,
+          item_name: r.item_name,
+          shortage_qty: Number(r.shortage_qty) || 0,
+        })),
+      }
     })
+
+    const shaped = [...newShaped, ...repeatShaped]
     await enrichOrderItemsWithCode(supabase, shaped)
 
     return NextResponse.json({ success: true, data: shaped })
@@ -122,6 +178,7 @@ interface ScanItemPayload {
   ordered_qty: number
   scanned_qty: number
   serials?: string[]
+  shortageLedgerId?: string // present only for scanType "repeat" items
 }
 
 interface AccessoryPayload {
@@ -132,26 +189,11 @@ interface AccessoryPayload {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const {
-      orderId,
-      items, // ScanItemPayload[] — every item on the order, scanned or not
-      accessories, // AccessoryPayload[] — scanned separately, not part of the order's own item list
-      customerWantsMaterialAs,
-      createdBy,
-      warehouseLocation,
-      inventoryPhotoUrl,
-      leadTime,
-      remarks,
-    } = body as {
+    const { orderId, items, accessories, createdBy } = body as {
       orderId: string
       items: ScanItemPayload[]
       accessories?: AccessoryPayload[]
-      customerWantsMaterialAs?: string
       createdBy?: string
-      warehouseLocation?: string
-      inventoryPhotoUrl?: string
-      leadTime?: number | string
-      remarks?: string
     }
 
     if (!orderId || !Array.isArray(items) || items.length === 0) {
@@ -163,7 +205,6 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
-    // Normalize + compute shortage per item, and the overall status.
     // `serials` (the individually-numbered QR labels scanned for this item,
     // if any — see check-inventory/page.tsx) rides along into
     // otp_check_inventory.items purely for traceability; it isn't used by
@@ -179,6 +220,7 @@ export async function POST(request: Request) {
         scanned_qty: scanned,
         shortage_qty: shortage,
         serials: it.serials || [],
+        shortageLedgerId: it.shortageLedgerId || null,
       }
     })
 
@@ -211,51 +253,77 @@ export async function POST(request: Request) {
       if (accessoriesError) throw accessoriesError
     }
 
-    // 1. otp_check_inventory
-    const leadTimeNum = leadTime ? Number(leadTime) : null
+    // 1. otp_check_inventory — always a fresh row now (one per scan attempt,
+    // new or repeat), no more upsert-by-order_id.
     const { data: inventoryRow, error: inventoryError } = await supabase
       .from("otp_check_inventory")
-      .upsert(
-        {
-          order_id: orderId,
-          availability_status: availabilityStatus,
-          items: normalized,
-          customer_wants_material_as: availabilityStatus === "Available" ? null : customerWantsMaterialAs || null,
-          created_by: createdBy || null,
-          warehouse_location: warehouseLocation || null,
-          inventory_photo_url: inventoryPhotoUrl || null,
-          material_received_lead_time: leadTimeNum,
-          remark: remarks || "",
-          actual_date: new Date().toISOString(),
-        },
-        { onConflict: "order_id" }
-      )
+      .insert({
+        order_id: orderId,
+        availability_status: availabilityStatus,
+        items: normalized,
+        created_by: createdBy || null,
+        actual_date: new Date().toISOString(),
+      })
       .select()
       .single()
     if (inventoryError) throw inventoryError
 
-    // 2. Shortage items -> otp_material_shortage (+ best-effort PFMS indent)
-    const shortageItems = normalized.filter((it) => it.shortage_qty > 0)
-    if (shortageItems.length > 0) {
-      const generatedIndentNos = await tryCreatePfmsIndent({
-        orderNo: order.order_no,
-        warehouseLocation: warehouseLocation || null,
-        leadTime: leadTimeNum,
-        items: shortageItems.map((it) => ({ item_code: it.item_code, item_name: it.item_name, qty: it.shortage_qty })),
-      })
+    // 2. Shortage handling — split by whether each ITEM carries a
+    // shortageLedgerId, not by whether this order has an otp_indent_creation
+    // row. A "repeat" scan's items always carry one (even for orders whose
+    // ledger predates Indent Creation entirely — e.g. the 4 rows carried
+    // forward from the old otp_material_shortage table, see
+    // Database/52_indent_creation_stage.sql), and those must always resolve
+    // through the ledger, never through Indent Creation.
+    const ledgerTrackedItems = normalized.filter((it) => it.shortageLedgerId)
+    const freshShortageItems = normalized.filter((it) => !it.shortageLedgerId && it.shortage_qty > 0)
 
-      const shortageRows = shortageItems.map((it, idx) => ({
-        order_id: orderId,
-        check_inventory_id: inventoryRow.id,
-        item_code: it.item_code,
-        item_name: it.item_name,
-        indented_qty: it.shortage_qty,
-        pfms_indent_no: generatedIndentNos?.[idx] || null,
-        warehouse_location: warehouseLocation || null,
-      }))
+    if (ledgerTrackedItems.length > 0) {
+      // Every ledger row this scan addressed is done with, whatever the
+      // outcome — fully found (no successor) or still short (successor row
+      // below carries the remainder forward).
+      const ledgerIds = ledgerTrackedItems.map((it) => it.shortageLedgerId) as string[]
+      const { error: resolveError } = await supabase
+        .from("otp_check_inventory_shortage")
+        .update({ status: "resolved" })
+        .in("id", ledgerIds)
+      if (resolveError) throw resolveError
 
-      const { error: shortageError } = await supabase.from("otp_material_shortage").insert(shortageRows)
-      if (shortageError) throw shortageError
+      const successorRows = ledgerTrackedItems
+        .filter((it) => it.shortage_qty > 0)
+        .map((it) => ({
+          order_id: orderId,
+          check_inventory_id: inventoryRow.id,
+          item_code: it.item_code,
+          item_name: it.item_name,
+          shortage_qty: it.shortage_qty,
+          parent_id: it.shortageLedgerId,
+        }))
+      if (successorRows.length > 0) {
+        const { error: successorError } = await supabase.from("otp_check_inventory_shortage").insert(successorRows)
+        if (successorError) throw successorError
+      }
+    }
+
+    if (freshShortageItems.length > 0) {
+      // First time this order has ever come up short — the one-and-only
+      // Indent Creation row. (existingIndent check is defensive only; a
+      // "new"-scanType order should never already have one.)
+      const { data: existingIndent, error: indentCheckError } = await supabase
+        .from("otp_indent_creation")
+        .select("id")
+        .eq("order_id", orderId)
+        .maybeSingle()
+      if (indentCheckError) throw indentCheckError
+
+      if (!existingIndent) {
+        const { error: indentError } = await supabase.from("otp_indent_creation").insert({
+          order_id: orderId,
+          check_inventory_id: inventoryRow.id,
+          items: freshShortageItems.map((it) => ({ item_code: it.item_code, item_name: it.item_name, qty: it.shortage_qty })),
+        })
+        if (indentError) throw indentError
+      }
     }
 
     // 3. Available portion -> otp_pre_invoice_queue (one wave for this submission)

@@ -11,7 +11,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import {
   DropdownMenu,
@@ -72,6 +71,7 @@ interface CompareItem {
   scannedQty: number
   shortageQty: number
   serials: string[] // carried through from the matching ScanRow, for traceability in otp_check_inventory.items
+  shortageLedgerId?: string // present only on a "repeat" scan — which otp_check_inventory_shortage row this item addresses
 }
 
 // Shared key for matching a scanned item against an order's item list.
@@ -105,6 +105,7 @@ function itemMatchKey(name?: string | null) {
 // this stage's own outcome columns are added in historyColumns below).
 const pendingColumns = [
   { key: "actions", label: "Actions", searchable: false },
+  { key: "status", label: "Status", searchable: true },
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "crmName", label: "CRM Name", searchable: true },
@@ -145,7 +146,6 @@ export default function CheckInventoryPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
-  const [remarks, setRemarks] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
   // Scan -> Compare -> Preview flow
@@ -187,10 +187,6 @@ export default function CheckInventoryPage() {
   }, [manualSearchQuery])
 
   const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
-  const [customerWantsMaterialAs, setCustomerWantsMaterialAs] = useState("")
-  const [createdByPerson, setCreatedByPerson] = useState("")
-  const [warehouseLocationValue, setWarehouseLocationValue] = useState("")
-  const [leadTime, setLeadTime] = useState("")
   const [viewDialogOpen, setViewDialogOpen] = useState(false)
   const [viewOrder, setViewOrder] = useState<any>(null)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
@@ -210,9 +206,6 @@ export default function CheckInventoryPage() {
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
     historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
-
-  const [inventoryPhotoAttachment, setInventoryPhotoAttachment] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
 
   const { user: currentUser } = useAuth()
 
@@ -380,12 +373,6 @@ export default function CheckInventoryPage() {
     setAccessoryScannerError(null)
     setCompareItems([])
     setComputedStatus("")
-    setCustomerWantsMaterialAs("")
-    setCreatedByPerson(order.crmName || currentUser?.fullName || currentUser?.username || "")
-    setWarehouseLocationValue("")
-    setLeadTime("")
-    setRemarks("")
-    setInventoryPhotoAttachment(null)
     setManualEntryMode(null)
     setManualSearchQuery("")
     setManualSelectedName("")
@@ -526,7 +513,7 @@ export default function CheckInventoryPage() {
     if (isNewSerialScan) {
       checkSerialWithIms({
         serialNo: parsed.serialNo,
-        locationLabel: warehouseLocationValue || null,
+        locationLabel: null,
         itemCode: parsed.itemCode,
         itemName: parsed.itemName,
         source: "otp-check-inventory",
@@ -633,6 +620,7 @@ export default function CheckInventoryPage() {
         scannedQty: scanned,
         shortageQty: Math.max(ordered - scanned, 0),
         serials: matched?.serials || [],
+        shortageLedgerId: it.shortageLedgerId,
       }
     })
 
@@ -664,34 +652,18 @@ export default function CheckInventoryPage() {
   const handleSubmit = async () => {
     if (!selectedOrder || compareItems.length === 0) return
 
-    setUploading(true)
     setIsSubmitting(true)
     setError(null)
 
     try {
-      let inventoryPhotoUrl = ""
-      if (inventoryPhotoAttachment) {
-        try {
-          const uploadFormData = new FormData()
-          uploadFormData.append("file", inventoryPhotoAttachment)
-          uploadFormData.append("folder", "check-inventory")
-          const uploadRes = await fetch("/api/otp-supabase/attachments", {
-            method: "POST",
-            body: uploadFormData,
-          })
-          const uploadJson = await uploadRes.json()
-          if (uploadJson.success) inventoryPhotoUrl = uploadJson.url
-        } catch (uploadErr) {
-          console.error("Error uploading inventory photo:", uploadErr)
-        }
-      }
-
       const orderNo = selectedOrder.orderNo || selectedOrder.id
 
-      // Submits Stage 2 (Check Inventory) — inserts a row into
-      // otp_check_inventory (moving this order from Pending to History),
-      // splits shortage items into otp_material_shortage (+ best-effort PFMS
-      // indent), and queues whatever's available into otp_pre_invoice_queue.
+      // Submits Stage 2 (Packing List) — inserts a row into
+      // otp_check_inventory (one per scan attempt now, new or repeat),
+      // queues whatever's available into otp_pre_invoice_queue, and routes
+      // any shortage to either Indent Creation (first time for this order)
+      // or straight back into this same Pending tab as a "repeat" via
+      // otp_check_inventory_shortage — see check-inventory/route.ts.
       const response = await fetch("/api/otp-supabase/check-inventory", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -703,14 +675,10 @@ export default function CheckInventoryPage() {
             ordered_qty: it.orderedQty,
             scanned_qty: it.scannedQty,
             serials: it.serials,
+            shortageLedgerId: it.shortageLedgerId,
           })),
           accessories: accessoryScanRows.map((r) => ({ item_name: r.itemName, quantity: r.qty })),
-          customerWantsMaterialAs: computedStatus !== "Available" ? customerWantsMaterialAs || null : null,
-          createdBy: createdByPerson || currentUser?.fullName || currentUser?.username || "Admin",
-          warehouseLocation: warehouseLocationValue || null,
-          inventoryPhotoUrl,
-          leadTime: leadTime || null,
-          remarks: remarks || "",
+          createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
 
@@ -719,7 +687,6 @@ export default function CheckInventoryPage() {
 
       setIsDialogOpen(false)
       setSelectedOrder(null)
-      setInventoryPhotoAttachment(null)
 
       await fetchOrders()
 
@@ -728,7 +695,6 @@ export default function CheckInventoryPage() {
       console.error("Submission error:", err)
       alert(`Error: ${err.message}`)
     } finally {
-      setUploading(false)
       setIsSubmitting(false)
     }
   }
@@ -781,6 +747,8 @@ export default function CheckInventoryPage() {
             {value || "N/A"}
           </Badge>
         )
+      case "status":
+        return <Badge variant={value === "Repeat" ? "secondary" : "default"}>{value || "New"}</Badge>
       case "billingAddress":
       case "shippingAddress":
       case "inventoryRemarks":
@@ -1173,7 +1141,11 @@ export default function CheckInventoryPage() {
               {dialogStep === "scan" && (
                 <>
                   <div className="space-y-2">
-                    <Label>Order Items (reference — what to pull from the warehouse)</Label>
+                    <Label>
+                      {selectedOrder?.scanType === "repeat"
+                        ? "Outstanding Shortage Items (reference — what to recheck in the warehouse)"
+                        : "Order Items (reference — what to pull from the warehouse)"}
+                    </Label>
                     <div className="border rounded-md overflow-hidden">
                       <Table>
                         <TableHeader className="bg-muted/50">
@@ -1546,87 +1518,12 @@ export default function CheckInventoryPage() {
                   </div>
                   {compareItems.some((it) => it.shortageQty > 0) && (
                     <p className="text-xs text-muted-foreground">
-                      Shortage qty will go to Material Received pending, and an indent will be raised for it.
+                      {selectedOrder?.scanType === "repeat"
+                        ? "Shortage qty stays here in Packing List's own Pending (this order's indent was already raised once, it isn't raised again)."
+                        : "Shortage qty will go to Indent Creation's Pending tab, where its details get filled in and an indent gets raised."}{" "}
                       Available qty goes to Pre-Invoice pending under the same order number.
                     </p>
                   )}
-
-                  {computedStatus !== "Available" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="customerDecision">Customer wants material as</Label>
-                      <Select value={customerWantsMaterialAs} onValueChange={setCustomerWantsMaterialAs}>
-                        <SelectTrigger id="customerDecision">
-                          <SelectValue placeholder="Select option" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="When full material will available">When full material will available</SelectItem>
-                          <SelectItem value="Order cancel">Order cancel</SelectItem>
-                          <SelectItem value="Partial">Partial</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="createdBy">Created by</Label>
-                      <Input
-                        id="createdBy"
-                        value={createdByPerson}
-                        onChange={(e) => setCreatedByPerson(e.target.value)}
-                        placeholder="Enter name"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="warehouseLocation">Warehouse location</Label>
-                      <Select value={warehouseLocationValue} onValueChange={setWarehouseLocationValue}>
-                        <SelectTrigger id="warehouseLocation">
-                          <SelectValue placeholder="Select location" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="C.G Warehouse">C.G Warehouse</SelectItem>
-                          <SelectItem value="NE Warehouse">NE Warehouse</SelectItem>
-                          <SelectItem value="Maniquip Store">Maniquip Store</SelectItem>
-                          <SelectItem value="Head Office">Head Office</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {compareItems.some((it) => it.shortageQty > 0) && (
-                      <div className="space-y-2">
-                        <Label htmlFor="leadTime">Receiving lead time</Label>
-                        <Input
-                          type="number"
-                          id="leadTime"
-                          value={leadTime}
-                          onChange={(e) => setLeadTime(e.target.value)}
-                          placeholder="Enter no. of days"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="inventoryPhoto">Inventory Photo</Label>
-                    <Input
-                      id="inventoryPhoto"
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => setInventoryPhotoAttachment(e.target.files?.[0] || null)}
-                    />
-                    {inventoryPhotoAttachment && (
-                      <p className="text-sm text-muted-foreground">Selected: {inventoryPhotoAttachment.name}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="remarks">Remarks</Label>
-                    <Textarea
-                      id="remarks"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="Enter remarks..."
-                    />
-                  </div>
 
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => setDialogStep("scan")} className="gap-2">

@@ -337,8 +337,20 @@ export function mapCheckInventoryRowToUI(row: any): any {
   const order = row.order || {}
   const acceptance = row.acceptance || null // Stage 1 outcome, if it exists
   const inventory = row.inventory || null // Stage 2 outcome, only on history rows
+  const scanType: "new" | "repeat" = row.scanType || "new"
 
-  const rawItems = order.items || []
+  // "repeat" pending rows compare against the outstanding
+  // otp_check_inventory_shortage ledger, not the order's full item list —
+  // everything else on the order was already resolved in an earlier wave.
+  const rawItems =
+    scanType === "repeat"
+      ? (row.shortageItems || []).map((it: any) => ({
+          item_name: it.item_name,
+          item_code: it.item_code,
+          quantity: it.shortage_qty,
+          shortageLedgerId: it.shortageLedgerId,
+        }))
+      : order.items || []
   const itemFields: Record<string, any> = {}
   rawItems.forEach((it: any, idx: number) => {
     const n = idx + 1
@@ -391,10 +403,16 @@ export function mapCheckInventoryRowToUI(row: any): any {
     planned: formatDateTime(acceptance?.check_inventory_planned),
     actual: inventory ? formatDateTime(inventory.created_at) : "",
 
+    // Auto-derived, not user-selected — lets the person running Packing
+    // List tell at a glance which orders have never had a scan vs which
+    // are back for a re-check after Indent Creation's Material Received.
+    scanType,
+    status: scanType === "repeat" ? "Repeat" : "New",
+
     // items in {name, qty} shape (not {item_name, quantity}) so the existing
     // "Items Not Available" prefill logic in check-inventory/page.tsx (which
     // reads item.name/item.qty) keeps working unchanged.
-    items: rawItems.map((it: any) => ({ name: it.item_name, qty: it.quantity })),
+    items: rawItems.map((it: any) => ({ name: it.item_name, qty: it.quantity, shortageLedgerId: it.shortageLedgerId })),
     rawItems,
     ...itemFields,
   }
@@ -414,8 +432,8 @@ export function mapPreInvoiceRowToUI(row: any): any {
   const shortages = order.shortages || []
   let pendingQty = 0
   shortages.forEach((s: any) => {
-    if (s.status !== "received") {
-      pendingQty += Number(s.remaining_qty) || 0
+    if (s.status === "pending") {
+      pendingQty += Number(s.shortage_qty) || 0
     }
   })
 
@@ -559,7 +577,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     totalQty: order.total_qty || 0,
     pendingQty: (order.shortages || [])
       .filter((s: any) => s.status === "pending")
-      .reduce((sum: number, s: any) => sum + (Number(s.remaining_qty) || 0), 0),
+      .reduce((sum: number, s: any) => sum + (Number(s.shortage_qty) || 0), 0),
     amount: order.amount_with_tax || 0,
     sourceStage: row.source_stage || "",
     DeliveryNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
@@ -948,60 +966,21 @@ export function mapClientConfirmationHistoryRowToUI(row: any): any {
   }
 }
 
-// Maps a row from /api/otp-supabase/material-received (against
-// otp_material_shortage, joined to its parent otp_orders) into the UI field
-// names material-received/page.tsx expects. One row per short item — see
-// Database/17_check_inventory_scan_flow.sql.
-// Pending Material Received rows are grouped by order (see
-// app/api/otp-supabase/material-received/route.ts GET) — one card per
-// order, carrying every currently outstanding otp_material_shortage row
-// so they can all be scanned together, same as Check Inventory's own
-// order-level scan flow.
-export function mapMaterialReceivedPendingRowToUI(row: any): any {
+// Maps a row from /api/otp-supabase/indent-creation (an otp_indent_creation
+// row, joined to its parent otp_orders) into the UI field names
+// indent-creation/page.tsx expects. Same shape across all 3 tabs (Pending /
+// Material Received / History) — which tab a row belongs to is derived
+// purely from indent_created_at / material_received being null or not
+// (see indent-creation/route.ts GET), not stored as its own status field.
+export function mapIndentCreationRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
-  const shortageItems = row.shortageItems || []
-
-  return {
-    id: order.id,
-    orderId: order.id,
-    orderNo: order.order_no || "",
-    quotationNo: order.quotation_number || "",
-    timestamp: formatDateTime(order.created_at),
-    companyName: order.company_name || "",
-    crmName: order.crm_name || "",
-    accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
-    contactPersonName: order.contact_person || "",
-    contactNumber: order.phone_number || "",
-    quotationCopy: order.quotation_copy || "",
-
-    // Reference table in the scan dialog + Item List dialog both read
-    // this shape: {item_name, quantity} per outstanding shortage item.
-    rawItems: shortageItems.map((it: any) => ({
-      item_name: it.item_name,
-      item_code: it.item_code,
-      quantity: it.indented_qty,
-    })),
-    shortageRows: shortageItems,
-    // No fixed planned date exists for Material Received (see
-    // Database/33_otp_stage_tat.sql) — created as soon as Check Inventory
-    // reports a shortage, no TAT offset.
-    planned: "",
-  }
-}
-
-// History rows stay item-level — each otp_material_shortage row already
-// processed is its own record of one receiving attempt (found vs. still
-// short at that point), not rolled up per order.
-export function mapMaterialReceivedHistoryRowToUI(row: any): any {
-  if (!row) return {}
-
-  const order = row.order || {}
+  const items = row.items || []
 
   return {
     id: row.id,
-    shortageId: row.id,
+    indentId: row.id,
     orderId: order.id || row.order_id,
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
@@ -1013,18 +992,27 @@ export function mapMaterialReceivedHistoryRowToUI(row: any): any {
     contactNumber: order.phone_number || "",
     quotationCopy: order.quotation_copy || "",
 
-    itemCode: row.item_code || "",
-    itemName: row.item_name || "",
-    indentedQty: Number(row.indented_qty) || 0,
-    receivedQty: Number(row.received_qty) || 0,
-    remainingQty: Number(row.remaining_qty) || 0,
-    pfmsIndentNo: row.pfms_indent_no || "",
+    customerWantsMaterialAs: row.customer_wants_material_as || "",
+    createdBy: row.created_by || "",
     warehouseLocation: row.warehouse_location || "",
-    remark: row.remark || "",
-    status: row.status || "",
-    updatedAt: formatDateTime(row.updated_at),
+    receivingLeadTime: row.receiving_lead_time ?? "",
+    inventoryPhotoUrl: row.inventory_photo_url || "",
+    remarks: row.remarks || "",
+    indentCreatedAt: formatDateTime(row.indent_created_at),
+    pfmsIndentNo: row.pfms_indent_no || "",
+
+    materialReceived: row.material_received || "",
+    materialReceivedBy: row.material_received_by || "",
+    materialReceivedAt: formatDateTime(row.material_received_at),
+
+    // No fixed planned date exists for Indent Creation (see
+    // Database/33_otp_stage_tat.sql) — created as soon as Packing List
+    // reports a first-time shortage, no TAT offset.
     planned: "",
-    actual: formatDateTime(row.updated_at),
+    actual: row.material_received ? formatDateTime(row.material_received_at) : formatDateTime(row.indent_created_at),
+
+    items: items.map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: items,
   }
 }
 

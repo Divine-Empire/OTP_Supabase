@@ -18,7 +18,8 @@ export async function GET() {
       proformaRes,
       DeliveryNoteRes,
       checkInvRes,
-      shortageRes,
+      indentRes,
+      repeatShortageRes,
       queueRes,
       DeliveryNoteInvRes,
       makeInvoiceRes,
@@ -32,7 +33,8 @@ export async function GET() {
       supabase.from("otp_proforma_invoice").select("order_id"),
       supabase.from("otp_debit_note").select("order_id"),
       supabase.from("otp_check_inventory").select("order_id"),
-      supabase.from("otp_material_shortage").select("status"),
+      supabase.from("otp_indent_creation").select("order_id, indent_created_at"),
+      supabase.from("otp_check_inventory_shortage").select("order_id").eq("status", "pending"),
       supabase.from("otp_pre_invoice_queue").select("id, status, debit_note_planned, make_invoice_planned"),
       supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
       supabase.from("otp_make_invoice").select("id, pre_invoice_queue_id, calibration_planned, packaging_transport_planned"),
@@ -43,7 +45,7 @@ export async function GET() {
     ])
 
     for (const r of [
-      ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, shortageRes, queueRes,
+      ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, repeatShortageRes, queueRes,
       DeliveryNoteInvRes, makeInvoiceRes, calibrationRes, packagingTransportRes, biltyUploadRes, clientConfirmationRes,
     ]) {
       if (r.error) throw r.error
@@ -54,7 +56,8 @@ export async function GET() {
     const proformaDoneIds = new Set((proformaRes.data || []).map((r: any) => r.order_id))
     const DeliveryNoteDoneIds = new Set((DeliveryNoteRes.data || []).map((r: any) => r.order_id))
     const checkInvDoneIds = new Set((checkInvRes.data || []).map((r: any) => r.order_id))
-    const shortageRows = shortageRes.data || []
+    const indentRows = indentRes.data || []
+    const repeatShortageOrderIds = new Set((repeatShortageRes.data || []).map((r: any) => r.order_id))
     const queueRows = queueRes.data || []
     const DeliveryNoteInvDoneIds = new Set((DeliveryNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
     const makeInvoiceRows = makeInvoiceRes.data || []
@@ -76,8 +79,10 @@ export async function GET() {
       "order-acceptable": orders.length - acceptableDoneIds.size,
       "proforma-invoice": acceptableRows.filter((r: any) => r.proforma_invoice_planned && !proformaDoneIds.has(r.order_id)).length,
       "delivery-note": acceptableRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteDoneIds.has(r.order_id)).length,
-      "check-inventory": acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length,
-      "material-received": shortageRows.filter((r: any) => r.status === "pending").length,
+      "check-inventory":
+        acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length +
+        repeatShortageOrderIds.size,
+      "indent-creation": indentRows.filter((r: any) => !r.indent_created_at).length,
       "pre-invoice": queueRows.filter((r: any) => r.status === "pending").length,
       "delivery-note-for-invoice": queueRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteInvDoneIds.has(r.id)).length,
       "make-invoice": queueRows.filter((r: any) => r.make_invoice_planned && !makeInvoiceDoneQueueIds.has(r.id)).length,

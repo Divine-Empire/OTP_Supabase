@@ -1,17 +1,19 @@
 // Best-effort cross-system call into Purchase-FMS-Supabase's own
 // create-indent API to raise a real indent for a shortage qty. This is
-// intentionally fire-and-forget from otp_material_shortage's point of
-// view: that table's own `status` never depends on whether this call
-// succeeded, or on matching its returned indentNo back to anything later
-// (the same item_code can legitimately have other, unrelated indents
-// already in flight in PFMS — indentNo is stored purely as an audit
-// reference). If PFMS_CREATE_INDENT_URL isn't configured, or the call
-// fails for any reason (network, item not yet registered in PFMS's Item
-// Master, etc.), we just skip it and leave pfms_indent_no null.
+// intentionally fire-and-forget from otp_indent_creation's point of view:
+// that row's own lifecycle (Pending -> Material Received -> History) never
+// depends on whether this call succeeded, or on matching its returned
+// indentNo back to anything later (the same item_code can legitimately
+// have other, unrelated indents already in flight in PFMS — indentNo is
+// stored purely as an audit reference). If PFMS_CREATE_INDENT_URL isn't
+// configured, or the call fails for any reason (network, item not yet
+// registered in PFMS's Item Master, etc.), we just skip it and leave
+// pfms_indent_no null.
 //
-// Shared by check-inventory/route.ts (first-time shortage) and
-// material-received/route.ts (re-indenting whatever's still short after
-// a receiving attempt).
+// Called once per order, from indent-creation/route.ts's POST (the
+// process-form submit that moves a row from Pending to the Material
+// Received tab) — an order only ever gets ONE otp_indent_creation row, so
+// this only ever fires once per order.
 export async function tryCreatePfmsIndent(params: {
   orderNo: string
   warehouseLocation: string | null
