@@ -21,7 +21,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
-import { mapProformaInvoicePendingRowToUI, mapProformaInvoiceHistoryRowToUI } from "@/lib/otp-utils"
+import {
+  mapProformaInvoicePendingRowToUI,
+  mapProformaInvoicePaymentAgainstPiRowToUI,
+  mapProformaInvoiceHistoryRowToUI,
+} from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
@@ -52,6 +56,19 @@ const pendingColumns = [
   { key: "planned", label: "Planned", searchable: true },
 ]
 
+// Column definitions for the "Payment Against PI" tab — sits between
+// Pending and History: a row lands here once PI Number/Amount/Upload is
+// submitted, and stays until Payment Received (Yes/No) is confirmed.
+const paymentAgainstPiColumns = [
+  { key: "actionsPayment", label: "Actions", searchable: false },
+  ...pendingColumns.filter((col) => col.key !== "actions"),
+  { key: "piNumber", label: "PI Number", searchable: true },
+  { key: "piAmount", label: "PI Amount", searchable: false },
+  { key: "piUpload", label: "PI Upload", searchable: false },
+  { key: "remark", label: "Remark", searchable: true },
+  { key: "createdBy", label: "Created By", searchable: true },
+]
+
 // Column definitions for History tab
 const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
@@ -60,13 +77,17 @@ const historyColumns = [
   { key: "piUpload", label: "PI Upload", searchable: false },
   { key: "remark", label: "Remark", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "paymentReceived", label: "Payment Received", searchable: true },
+  { key: "paymentRemark", label: "Payment Remark", searchable: true },
   { key: "actual", label: "Actual", searchable: true },
 ]
 
 export default function ProformaInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
+  const [paymentAgainstPiOrders, setPaymentAgainstPiOrders] = useState<any[]>([])
   const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [paymentAgainstPiLoading, setPaymentAgainstPiLoading] = useState(false)
   const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
@@ -75,6 +96,10 @@ export default function ProformaInvoicePage() {
   const [piUploadFile, setPiUploadFile] = useState<File | null>(null)
   const [remark, setRemark] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [selectedPaymentOrder, setSelectedPaymentOrder] = useState<any>(null)
+  const [paymentReceived, setPaymentReceived] = useState("")
+  const [paymentRemark, setPaymentRemark] = useState("")
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
@@ -84,6 +109,9 @@ export default function ProformaInvoicePage() {
   const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
     pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
+  )
+  const [visiblePaymentAgainstPiColumns, setVisiblePaymentAgainstPiColumns] = useState<Record<string, boolean>>(
+    paymentAgainstPiColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
     historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
@@ -110,6 +138,24 @@ export default function ProformaInvoicePage() {
     }
   }
 
+  const fetchPaymentAgainstPiOrders = async () => {
+    setPaymentAgainstPiLoading(true)
+    try {
+      const response = await fetch("/api/otp-supabase/proforma-invoice?status=payment-against-pi")
+      const result = await response.json()
+      if (result.success && Array.isArray(result.data)) {
+        setPaymentAgainstPiOrders(result.data.map(mapProformaInvoicePaymentAgainstPiRowToUI))
+      } else {
+        setPaymentAgainstPiOrders([])
+      }
+    } catch (err) {
+      console.error("Error fetching payment-against-pi queue:", err)
+      setPaymentAgainstPiOrders([])
+    } finally {
+      setPaymentAgainstPiLoading(false)
+    }
+  }
+
   const fetchProcessedOrders = async () => {
     setProcessedLoading(true)
     try {
@@ -130,6 +176,7 @@ export default function ProformaInvoicePage() {
 
   useEffect(() => {
     fetchOrders()
+    fetchPaymentAgainstPiOrders()
   }, [])
 
   const handleProcessedTabClick = async () => {
@@ -154,6 +201,20 @@ export default function ProformaInvoicePage() {
 
   const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
 
+  const filteredPaymentAgainstPiOrders = useMemo(() => {
+    let filtered = filterByCrmAccess(paymentAgainstPiOrders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = paymentAgainstPiColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [paymentAgainstPiOrders, searchTerm, crmNameFilter, currentUser])
+
   const filteredProcessedOrders = useMemo(() => {
     let filtered = filterByCrmAccess(processedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
@@ -170,16 +231,67 @@ export default function ProformaInvoicePage() {
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
+  const togglePaymentAgainstPiColumn = (columnKey: string) =>
+    setVisiblePaymentAgainstPiColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
   const toggleHistoryColumn = (columnKey: string) =>
     setVisibleHistoryColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
   const showAllPendingColumns = () =>
     setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
   const hideAllPendingColumns = () =>
     setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actions" }), {}))
+  const showAllPaymentAgainstPiColumns = () =>
+    setVisiblePaymentAgainstPiColumns(paymentAgainstPiColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
+  const hideAllPaymentAgainstPiColumns = () =>
+    setVisiblePaymentAgainstPiColumns(
+      paymentAgainstPiColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actionsPayment" }), {})
+    )
   const showAllHistoryColumns = () =>
     setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
   const hideAllHistoryColumns = () =>
     setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: false }), {}))
+
+  const handleProcessPayment = (order: any) => {
+    setSelectedPaymentOrder(order)
+    setPaymentReceived("")
+    setPaymentRemark("")
+    setIsPaymentDialogOpen(true)
+  }
+
+  const handleSubmitPayment = async () => {
+    if (!selectedPaymentOrder || !paymentReceived) return
+    if (paymentReceived === "No" && !paymentRemark.trim()) {
+      alert("Please enter a remark since payment was not received.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const response = await fetch("/api/otp-supabase/proforma-invoice/payment-against-pi", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proformaInvoiceId: selectedPaymentOrder.proformaInvoiceId || selectedPaymentOrder.id,
+          paymentReceived,
+          remark: paymentRemark,
+        }),
+      })
+      const result = await response.json()
+
+      if (result.success) {
+        setIsPaymentDialogOpen(false)
+        setSelectedPaymentOrder(null)
+        await fetchPaymentAgainstPiOrders()
+        alert(`Order ${selectedPaymentOrder.orderNo} — Payment Against PI recorded. Packing List is now scheduled.`)
+      } else {
+        throw new Error(result.error || "Update failed")
+      }
+    } catch (err: any) {
+      console.error("Error submitting payment-against-pi:", err)
+      alert(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
@@ -196,9 +308,11 @@ export default function ProformaInvoicePage() {
   }
 
   // Submits Pro-Forma Invoice — inserts a row into otp_proforma_invoice,
-  // which moves this order from Pending to History here, AND is what
-  // unlocks Check Inventory's own planned date for this order (see
-  // app/api/otp-supabase/proforma-invoice/route.ts POST).
+  // which moves this order from Pending to the "Payment Against PI" tab
+  // (not History — that only happens once Payment Against PI is itself
+  // processed, see handleSubmitPayment above and
+  // app/api/otp-supabase/proforma-invoice/payment-against-pi/route.ts,
+  // which is also where Check Inventory's planned date now gets set).
   const handleSubmit = async () => {
     if (!selectedOrder) return
     if (!piNumber.trim() || !piAmount || !piUploadFile) {
@@ -236,7 +350,8 @@ export default function ProformaInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — Pro-Forma Invoice recorded. Check Inventory is now scheduled.`)
+        await fetchPaymentAgainstPiOrders()
+        alert(`Order ${selectedOrder.orderNo} — Pro-Forma Invoice recorded. Awaiting Payment Against PI confirmation.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
@@ -257,6 +372,14 @@ export default function ProformaInvoicePage() {
             {currentUser?.role === "user" ? "View Only" : "Process"}
           </Button>
         )
+      case "actionsPayment":
+        return (
+          <Button size="sm" onClick={() => handleProcessPayment(order)} disabled={currentUser?.role === "user"}>
+            {currentUser?.role === "user" ? "View Only" : "Process"}
+          </Button>
+        )
+      case "paymentReceived":
+        return value ? <Badge variant={value === "Yes" ? "default" : "secondary"}>{value}</Badge> : ""
       case "itemList":
         return (
           <Button
@@ -322,6 +445,19 @@ export default function ProformaInvoicePage() {
     )
   }
 
+  const columnPanel =
+    currentTab === "pending"
+      ? { columns: pendingColumns, visible: visiblePendingColumns, toggle: togglePendingColumn, showAll: showAllPendingColumns, hideAll: hideAllPendingColumns }
+      : currentTab === "payment-against-pi"
+        ? {
+            columns: paymentAgainstPiColumns,
+            visible: visiblePaymentAgainstPiColumns,
+            toggle: togglePaymentAgainstPiColumn,
+            showAll: showAllPaymentAgainstPiColumns,
+            hideAll: hideAllPaymentAgainstPiColumns,
+          }
+        : { columns: historyColumns, visible: visibleHistoryColumns, toggle: toggleHistoryColumn, showAll: showAllHistoryColumns, hideAll: hideAllHistoryColumns }
+
   return (
     <MainLayout>
       <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
@@ -335,6 +471,9 @@ export default function ProformaInvoicePage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <TabsList>
                   <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
+                  <TabsTrigger value="payment-against-pi">
+                    Payment Against PI ({filteredPaymentAgainstPiOrders.length})
+                  </TabsTrigger>
                   <TabsTrigger value="history" onClick={handleProcessedTabClick}>
                     History ({filteredProcessedOrders.length})
                   </TabsTrigger>
@@ -379,26 +518,18 @@ export default function ProformaInvoicePage() {
                       <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
                       <DropdownMenuSeparator />
                       <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
+                        <Button size="sm" variant="outline" onClick={columnPanel.showAll}>
                           Show All
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
+                        <Button size="sm" variant="outline" onClick={columnPanel.hideAll}>
                           Hide All
                         </Button>
                       </div>
                       <DropdownMenuSeparator />
                       <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
+                        {columnPanel.columns.map((column) => {
+                          const visibleCols = columnPanel.visible
+                          const toggleCol = columnPanel.toggle
                           return (
                             <div key={column.key} className="flex items-center space-x-2">
                               <Checkbox
@@ -512,6 +643,85 @@ export default function ProformaInvoicePage() {
                     </Table>
                   </div>
                 </div>
+              </TabsContent>
+
+              <TabsContent value="payment-against-pi" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
+                {paymentAgainstPiLoading ? (
+                  <div className="flex items-center justify-center h-32">
+                    <RefreshCw className="h-6 w-6 animate-spin" />
+                    <span className="ml-2">Loading payment against PI queue...</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
+                      {filteredPaymentAgainstPiOrders.map((order, idx) => (
+                        <MobileRecordCard
+                          key={order.id || idx}
+                          columns={paymentAgainstPiColumns}
+                          visibleColumns={visiblePaymentAgainstPiColumns}
+                          record={order}
+                          renderCellContent={renderCellContent}
+                        />
+                      ))}
+                      {filteredPaymentAgainstPiOrders.length === 0 && (
+                        <p className="text-center text-muted-foreground py-8">
+                          {searchTerm ? "No orders match your search criteria" : "No orders awaiting Payment Against PI"}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
+                      <div className="overflow-auto flex-1 min-h-0">
+                        <Table className="w-full relative">
+                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
+                            <TableRow>
+                              {paymentAgainstPiColumns
+                                .filter((col) => visiblePaymentAgainstPiColumns[col.key])
+                                .map((column) => (
+                                  <TableHead
+                                    key={column.key}
+                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
+                                    style={{ minWidth: column.key === "actionsPayment" ? "120px" : "160px" }}
+                                  >
+                                    {column.label}
+                                  </TableHead>
+                                ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredPaymentAgainstPiOrders.map((order, idx) => (
+                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
+                                {paymentAgainstPiColumns
+                                  .filter((col) => visiblePaymentAgainstPiColumns[col.key])
+                                  .map((column) => (
+                                    <TableCell
+                                      key={column.key}
+                                      className="border-b px-4 py-3 align-top"
+                                      style={{ minWidth: column.key === "actionsPayment" ? "120px" : "160px" }}
+                                    >
+                                      <div className="break-words whitespace-normal leading-relaxed">
+                                        {renderCellContent(order, column.key)}
+                                      </div>
+                                    </TableCell>
+                                  ))}
+                              </TableRow>
+                            ))}
+                            {filteredPaymentAgainstPiOrders.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={paymentAgainstPiColumns.filter((col) => visiblePaymentAgainstPiColumns[col.key]).length}
+                                  className="text-center text-muted-foreground h-32"
+                                >
+                                  {searchTerm ? "No orders match your search criteria" : "No orders awaiting Payment Against PI"}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </>
+                )}
               </TabsContent>
 
               <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
@@ -687,6 +897,72 @@ export default function ProformaInvoicePage() {
                 <Button
                   onClick={handleSubmit}
                   disabled={!piNumber.trim() || !piAmount || !piUploadFile || isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : (
+                    "Submit"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Payment Against PI Dialog */}
+        <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Process Payment Against PI</DialogTitle>
+              <DialogDescription>Confirm whether payment against this PI has been received</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="paymentOrderNo">Order No.</Label>
+                  <Input id="paymentOrderNo" value={selectedPaymentOrder?.orderNo || ""} disabled />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="paymentCompanyName">Company Name</Label>
+                  <Input id="paymentCompanyName" value={selectedPaymentOrder?.companyName || ""} disabled />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentReceived">Payment Received *</Label>
+                <Select value={paymentReceived} onValueChange={setPaymentReceived}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Yes">Yes</SelectItem>
+                    <SelectItem value="No">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {paymentReceived === "No" && (
+                <div className="space-y-2">
+                  <Label htmlFor="paymentRemark">Remarks *</Label>
+                  <Input
+                    id="paymentRemark"
+                    value={paymentRemark}
+                    onChange={(e) => setPaymentRemark(e.target.value)}
+                    placeholder="Enter reason payment was not received..."
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsPaymentDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleSubmitPayment}
+                  disabled={!paymentReceived || (paymentReceived === "No" && !paymentRemark.trim()) || isSubmitting}
                 >
                   {isSubmitting ? (
                     <>

@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 // Stage — Pro-Forma Invoice (only reached when otp_orders.payment_mode =
 // 'pi against advance' — see order-acceptable/route.ts).
 //
 // Pending: otp_orders_acceptable.proforma_invoice_planned IS NOT NULL AND
 //          no matching otp_proforma_invoice row yet.
-// History: a matching otp_proforma_invoice row exists.
+// Payment Against PI: a matching otp_proforma_invoice row exists AND
+//                      payment_against_pi IS NULL — see
+//                      Database/51_proforma_invoice_payment_against_pi.sql
+//                      and payment-against-pi/route.ts.
+// History: a matching otp_proforma_invoice row exists AND
+//          payment_against_pi IS NOT NULL.
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -18,6 +22,18 @@ export async function GET(request: Request) {
       const { data, error } = await supabase
         .from("otp_proforma_invoice")
         .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))")
+        .not("payment_against_pi", "is", null)
+        .order("updated_at", { ascending: false })
+      if (error) throw error
+
+      return NextResponse.json({ success: true, data: data || [] })
+    }
+
+    if (status === "payment-against-pi") {
+      const { data, error } = await supabase
+        .from("otp_proforma_invoice")
+        .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))")
+        .is("payment_against_pi", null)
         .order("created_at", { ascending: false })
       if (error) throw error
 
@@ -66,6 +82,10 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
+    // payment_against_pi is left null here by design — the row now lands
+    // in the "Payment Against PI" tab (see GET above), not History, and
+    // Check Inventory's planned date isn't set until that step is
+    // processed (see payment-against-pi/route.ts).
     const { data, error } = await supabase
       .from("otp_proforma_invoice")
       .insert({
@@ -79,16 +99,6 @@ export async function POST(request: Request) {
       .select()
       .single()
     if (error) throw error
-
-    // Only now does Check Inventory's planned date get set for this
-    // order — Pro-Forma Invoice being processed is what unlocks it.
-    // Planned = this record's creation time (now) + Check Inventory's TAT.
-    const checkInventoryPlanned = addTatMinutes(new Date(), await getStageTatMinutes("check_inventory"))
-    const { error: updateError } = await supabase
-      .from("otp_orders_acceptable")
-      .update({ check_inventory_planned: checkInventoryPlanned })
-      .eq("order_id", orderId)
-    if (updateError) throw updateError
 
     return NextResponse.json({ success: true, data })
   } catch (err: any) {

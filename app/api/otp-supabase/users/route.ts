@@ -128,6 +128,7 @@ export async function PUT(request: Request) {
 
     const supabase = getSupabaseAdmin()
     const updateData: any = {}
+    if (username !== undefined) updateData.username = username
     if (fullName !== undefined) updateData.full_name = fullName
     if (password !== undefined && password !== "") updateData.password_hash = password
     if (role !== undefined) updateData.role = role

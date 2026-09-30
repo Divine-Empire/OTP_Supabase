@@ -131,6 +131,51 @@ export function mapProformaInvoicePendingRowToUI(row: any): any {
   }
 }
 
+// Maps a row from /api/otp-supabase/proforma-invoice?status=payment-against-pi
+// (an otp_proforma_invoice row with payment_against_pi still null, joined
+// to its parent otp_orders) into the UI field names proforma-invoice/page.tsx
+// expects for that tab.
+export function mapProformaInvoicePaymentAgainstPiRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const items = order.items || []
+
+  return {
+    id: row.id,
+    proformaInvoiceId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    crmName: order.crm_name || "",
+    accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    paymentMode: order.payment_mode || "",
+    billingAddress: order.billing_address || "",
+    shippingAddress: order.shipping_address || "",
+    paymentTerms: order.payment_terms_days || 0,
+    transportMode: order.transport_mode || "",
+    destination: order.destination || "",
+    poNumber: order.po_number || "",
+    quotationCopy: order.quotation_copy || "",
+    acceptanceCopy: order.acceptance_file_upload || "",
+    totalOrderQty: order.total_qty || 0,
+    amount: order.amount_with_tax || 0,
+
+    piNumber: row.pi_number || "",
+    piAmount: row.pi_amount ?? "",
+    piUploadUrl: row.pi_upload_url || "",
+    remark: row.remark || "",
+    createdBy: row.created_by || "",
+    planned: formatDateTime(order.acceptable?.proforma_invoice_planned),
+
+    rawItems: items,
+  }
+}
+
 // Maps a History row from /api/otp-supabase/proforma-invoice (an
 // otp_proforma_invoice row, joined to its parent otp_orders) into the UI
 // field names proforma-invoice/page.tsx expects.
@@ -168,8 +213,13 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
     piUploadUrl: row.pi_upload_url || "",
     remark: row.remark || "",
     createdBy: row.created_by || "",
+    paymentReceived: row.payment_against_pi || "",
+    paymentRemark: row.payment_against_pi_remark || "",
     planned: formatDateTime(order.acceptable?.proforma_invoice_planned),
-    actual: formatDateTime(row.created_at),
+    // updated_at, not created_at — that's when Payment Against PI was
+    // actually confirmed (the row is inserted at PI-submit time but only
+    // updated, via payment-against-pi/route.ts, once this stage completes).
+    actual: formatDateTime(row.updated_at),
 
     rawItems: items,
   }
