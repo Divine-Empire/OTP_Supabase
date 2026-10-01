@@ -102,7 +102,18 @@ export async function POST(request: Request) {
       .eq("id", indentId)
     if (updateError) throw updateError
 
-    return NextResponse.json({ success: true })
+    // Lets the frontend show a toast distinguishing "PFMS not configured"
+    // from "PFMS call actually failed" — tryCreatePfmsIndent collapses both
+    // to null itself, so we check the env var separately here.
+    const pfmsConfigured = Boolean(process.env.PFMS_CREATE_INDENT_URL)
+    const pfmsSuccess = Array.isArray(generatedIndentNos) && generatedIndentNos.length > 0
+
+    return NextResponse.json({
+      success: true,
+      pfmsConfigured,
+      pfmsSuccess,
+      pfmsIndentNo: generatedIndentNos?.[0] || null,
+    })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/indent-creation exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

@@ -21,6 +21,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { toast } from "sonner"
 import { useAuth } from "@/components/auth-provider"
 import { mapIndentCreationRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
@@ -290,6 +291,23 @@ export default function IndentCreationPage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await Promise.all([fetchPendingOrders(), fetchMaterialReceivedOrders()])
+
+        // PFMS indent-generation outcome — separate from the save itself,
+        // which already succeeded by this point either way.
+        if (!result.pfmsConfigured) {
+          toast.message("Indent saved", {
+            description: "PFMS indent creation is not configured yet — recorded internally only.",
+          })
+        } else if (result.pfmsSuccess) {
+          toast.success("PFMS indent created", {
+            description: result.pfmsIndentNo ? `Indent No: ${result.pfmsIndentNo}` : undefined,
+          })
+        } else {
+          toast.error("PFMS indent creation failed", {
+            description: "Saved here, but the request to Purchase-FMS-Supabase didn't go through.",
+          })
+        }
+
         alert(`Order ${selectedOrder.orderNo} — indent created, moved to Material Received.`)
       } else {
         throw new Error(result.error || "Update failed")
