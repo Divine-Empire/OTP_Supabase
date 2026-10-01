@@ -297,8 +297,8 @@ export default function BiltyUploadPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Upload Bilty"}
+          <Button size="sm" onClick={() => handleProcess(order)}>
+            Upload Bilty
           </Button>
         )
       case "itemList":

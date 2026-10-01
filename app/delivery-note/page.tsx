@@ -260,8 +260,8 @@ export default function DeliveryNotePage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Process"}
+          <Button size="sm" onClick={() => handleProcess(order)}>
+            Process
           </Button>
         )
       case "itemList":

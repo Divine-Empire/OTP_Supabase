@@ -148,6 +148,10 @@ export function Sidebar() {
 
   const filteredMenuItems = menuItems.filter((item) => {
     if (user?.role === "admin") return true;
+    // Settings is admin-only regardless of assignedSteps — the page itself
+    // already enforces this (app/settings/page.tsx's Access Denied guard),
+    // this just keeps a non-admin from seeing a dead-end link to it.
+    if (item.step === "settings") return false;
     return (
       user?.assignedSteps.includes(item.step) ||
       user?.assignedSteps.includes("all")

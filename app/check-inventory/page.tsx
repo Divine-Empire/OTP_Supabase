@@ -1533,7 +1533,7 @@ export default function CheckInventoryPage() {
                     <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button onClick={handleSubmit} disabled={currentUser?.role === "user" || isSubmitting}>
+                    <Button onClick={handleSubmit} disabled={isSubmitting}>
                       {isSubmitting ? (
                         <>
                           <RefreshCw className="h-4 w-4 mr-2 animate-spin" />

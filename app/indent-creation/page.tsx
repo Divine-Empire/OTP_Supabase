@@ -360,14 +360,14 @@ export default function IndentCreationPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Process"}
+          <Button size="sm" onClick={() => handleProcess(order)}>
+            Process
           </Button>
         )
       case "actionsMR":
         return (
-          <Button size="sm" onClick={() => handleProcessMR(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : "Process"}
+          <Button size="sm" onClick={() => handleProcessMR(order)}>
+            Process
           </Button>
         )
       case "itemList":

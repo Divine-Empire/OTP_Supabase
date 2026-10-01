@@ -821,7 +821,7 @@ export default function OrderAcceptablePage() {
                 </Button>
                 <Button
                   onClick={handleSubmit}
-                  disabled={!isAcceptable || isSubmitting || (currentUser?.role === "user")}
+                  disabled={!isAcceptable || isSubmitting}
                 >
                   {isSubmitting ? (
                     <>

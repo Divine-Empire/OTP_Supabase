@@ -368,8 +368,8 @@ export default function PackagingTransportPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)} disabled={currentUser?.role === "user"}>
-            {currentUser?.role === "user" ? "View Only" : order.isDraft ? "Continue" : "Process"}
+          <Button size="sm" onClick={() => handleProcess(order)}>
+            {order.isDraft ? "Continue" : "Process"}
           </Button>
         )
       case "itemList":
