@@ -72,6 +72,7 @@ export async function GET(request: Request) {
         .from("otp_check_inventory")
         .select("*, order:otp_orders(*)")
         .order("created_at", { ascending: false })
+        .limit(200)
 
       if (error) throw error
 

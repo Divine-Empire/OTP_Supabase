@@ -322,25 +322,21 @@ export default function PreInvoicePage() {
 
     setIsSubmitting(true)
     try {
-      let paymentAttachmentUrl = ""
-      if (paymentAttachmentFile) {
+      // Independent uploads — run concurrently instead of one after the other.
+      const uploadOne = async (file: File | null, folder: string): Promise<string> => {
+        if (!file) return ""
         const formData = new FormData()
-        formData.append("file", paymentAttachmentFile)
-        formData.append("folder", "pre-invoice-payment")
+        formData.append("file", file)
+        formData.append("folder", folder)
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
-        if (uploadJson.success) paymentAttachmentUrl = uploadJson.url
+        return uploadJson.success ? uploadJson.url : ""
       }
 
-      let srnAttachmentUrl = ""
-      if (srnAttachmentFile) {
-        const formData = new FormData()
-        formData.append("file", srnAttachmentFile)
-        formData.append("folder", "pre-invoice-srn")
-        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
-        const uploadJson = await uploadRes.json()
-        if (uploadJson.success) srnAttachmentUrl = uploadJson.url
-      }
+      const [paymentAttachmentUrl, srnAttachmentUrl] = await Promise.all([
+        uploadOne(paymentAttachmentFile, "pre-invoice-payment"),
+        uploadOne(srnAttachmentFile, "pre-invoice-srn"),
+      ])
 
       const response = await fetch("/api/otp-supabase/pre-invoice", {
         method: "POST",

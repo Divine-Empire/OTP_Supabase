@@ -25,6 +25,17 @@ import {
   UserCheck,
 } from "lucide-react";
 
+// Module-scoped (not component state) so it survives Sidebar's own
+// unmount/remount on every page navigation (MainLayout is wrapped inside
+// each page.tsx, not a persistent layout.tsx segment, so Sidebar actually
+// remounts on every route change). Without this, every single navigation
+// re-ran pending-counts' own 14-query Supabase fan-out. A client just
+// reuses whatever's in cache for PENDING_COUNTS_TTL_MS, falling back to a
+// stale-while-revalidate fetch after that instead of a blocking one.
+let pendingCountsCache: Record<string, number> | null = null
+let pendingCountsCacheAt = 0
+const PENDING_COUNTS_TTL_MS = 25_000
+
 const menuItems = [
   {
     href: "/dashboard",
@@ -117,13 +128,20 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
-  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({});
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>(pendingCountsCache || {});
 
   useEffect(() => {
+    const isFresh = pendingCountsCache && Date.now() - pendingCountsCacheAt < PENDING_COUNTS_TTL_MS;
+    if (isFresh) return; // cache already applied as initial state above — nothing to do
+
     fetch("/api/otp-supabase/pending-counts")
       .then((res) => res.json())
       .then((result) => {
-        if (result.success && result.data) setPendingCounts(result.data);
+        if (result.success && result.data) {
+          pendingCountsCache = result.data;
+          pendingCountsCacheAt = Date.now();
+          setPendingCounts(result.data);
+        }
       })
       .catch((err) => console.error("Error fetching sidebar pending counts:", err));
   }, []);

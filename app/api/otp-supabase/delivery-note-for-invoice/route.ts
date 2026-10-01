@@ -20,8 +20,9 @@ export async function GET(request: Request) {
     if (status === "history") {
       const { data, error } = await supabase
         .from("otp_debit_note_for_invoice")
-        .select("*, order:otp_orders(*), queue:otp_pre_invoice_queue(*)")
+        .select("*, order:otp_orders(*), queue:otp_pre_invoice_queue(quotation_number, source_stage, items)")
         .order("created_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })

@@ -19,6 +19,7 @@ export async function GET(request: Request) {
         .from("otp_debit_note")
         .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(debit_note_planned))")
         .order("created_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })

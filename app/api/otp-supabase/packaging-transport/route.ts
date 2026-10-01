@@ -33,9 +33,10 @@ export async function GET(request: Request) {
     if (status === "history") {
       const { data, error } = await supabase
         .from("otp_packaging_transport")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(*)")
+        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)")
         .eq("status", "submitted")
         .order("created_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
     if (draftIds.length > 0) {
       const { data, error: draftError } = await supabase
         .from("otp_packaging_transport")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(*)")
+        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)")
         .eq("status", "draft")
         .order("created_at", { ascending: false })
       if (draftError) throw draftError

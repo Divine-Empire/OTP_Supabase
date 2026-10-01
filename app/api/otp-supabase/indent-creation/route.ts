@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     if (status === "material-received") {
       query = query.not("indent_created_at", "is", null).is("material_received", null)
     } else if (status === "history") {
-      query = query.not("material_received", "is", null)
+      query = query.not("material_received", "is", null).limit(200)
     } else {
       query = query.is("indent_created_at", null)
     }

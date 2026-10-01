@@ -47,6 +47,7 @@ export async function GET(request: Request) {
         .from("otp_order_cancel")
         .select("*")
         .order("cancelled_at", { ascending: false })
+        .limit(200)
       if (error) throw error
       return NextResponse.json({ success: true, data: data || [] })
     }

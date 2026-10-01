@@ -18,6 +18,7 @@ export async function GET(request: Request) {
         .from("otp_orders_acceptable")
         .select("*, order:otp_orders(*)")
         .order("created_at", { ascending: false })
+        .limit(200)
 
       if (error) throw error
       return NextResponse.json({ success: true, data: data || [] })

@@ -24,8 +24,9 @@ export async function GET(request: Request) {
     if (status === "history") {
       const { data, error } = await supabase
         .from("otp_calibration_certificate")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(*, queue:otp_pre_invoice_queue(calibration_type))")
+        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, queue:otp_pre_invoice_queue(calibration_type))")
         .order("created_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })

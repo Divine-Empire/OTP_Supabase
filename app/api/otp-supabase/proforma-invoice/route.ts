@@ -24,6 +24,7 @@ export async function GET(request: Request) {
         .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))")
         .not("payment_against_pi", "is", null)
         .order("updated_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })

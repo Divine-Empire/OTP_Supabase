@@ -289,8 +289,7 @@ export default function IndentCreationPage() {
       if (result.success) {
         setIsDialogOpen(false)
         setSelectedOrder(null)
-        await fetchPendingOrders()
-        await fetchMaterialReceivedOrders()
+        await Promise.all([fetchPendingOrders(), fetchMaterialReceivedOrders()])
         alert(`Order ${selectedOrder.orderNo} — indent created, moved to Material Received.`)
       } else {
         throw new Error(result.error || "Update failed")

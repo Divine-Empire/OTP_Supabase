@@ -79,15 +79,18 @@ const DEFAULT_HIDDEN_COLUMNS = new Set([
 ])
 
 async function uploadFiles(files: File[], folder: string): Promise<string[]> {
-  const urls: string[] = []
-  for (const file of files) {
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("folder", folder)
-    const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
-    const uploadJson = await uploadRes.json()
-    if (uploadJson.success) urls.push(uploadJson.url)
-  }
+  // Independent uploads — no reason to wait for one before starting the next.
+  const results = await Promise.all(
+    files.map(async (file) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("folder", folder)
+      const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+      const uploadJson = await uploadRes.json()
+      return uploadJson.success ? uploadJson.url : null
+    })
+  )
+  const urls = results.filter((url): url is string => Boolean(url))
   return urls
 }
 

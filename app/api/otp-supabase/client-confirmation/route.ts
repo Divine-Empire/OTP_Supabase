@@ -17,8 +17,9 @@ export async function GET(request: Request) {
     if (status === "history") {
       const { data, error } = await supabase
         .from("otp_client_confirmation")
-        .select("*, order:otp_orders(*), biltyUpload:otp_bilty_upload(*, packagingTransport:otp_packaging_transport(*, makeInvoice:otp_make_invoice(*)))")
+        .select("*, order:otp_orders(*), biltyUpload:otp_bilty_upload(client_confirmation_planned, packagingTransport:otp_packaging_transport(transporter_name, makeInvoice:otp_make_invoice(invoice_number, items)))")
         .order("created_at", { ascending: false })
+        .limit(200)
       if (error) throw error
 
       return NextResponse.json({ success: true, data: data || [] })
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("otp_bilty_upload")
-      .select("*, order:otp_orders(*), packagingTransport:otp_packaging_transport(*, makeInvoice:otp_make_invoice(*))")
+      .select("*, order:otp_orders(*), packagingTransport:otp_packaging_transport(transporter_name, makeInvoice:otp_make_invoice(invoice_number, items))")
       .not("client_confirmation_planned", "is", null)
       .order("created_at", { ascending: false })
 
