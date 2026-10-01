@@ -28,3 +28,8 @@ next-env.d.ts
 
 Flow.txt
 SESSION_CONTEXT.md
+
+# Agent and Context files
+.agents/
+.claude/
+skills-lock.json
