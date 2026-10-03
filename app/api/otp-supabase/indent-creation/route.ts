@@ -10,7 +10,7 @@ import { tryCreatePfmsIndent } from "@/lib/pfms"
 //   History            : material_received IS NOT NULL ('Yes' or 'No')
 //
 // An order only ever gets ONE otp_indent_creation row, ever — see
-// check-inventory/route.ts. Reaching History here (either answer) is what
+// packing-list/route.ts. Reaching History here (either answer) is what
 // queues the order back into Packing List's own Pending tab for
 // re-checking — see material-received/route.ts (the POST sub-route, not
 // the old retired page).

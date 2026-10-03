@@ -79,7 +79,7 @@ export async function GET() {
       "order-acceptable": orders.length - acceptableDoneIds.size,
       "proforma-invoice": acceptableRows.filter((r: any) => r.proforma_invoice_planned && !proformaDoneIds.has(r.order_id)).length,
       "delivery-note": acceptableRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteDoneIds.has(r.order_id)).length,
-      "check-inventory":
+      "packing-list":
         acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length +
         repeatShortageOrderIds.size,
       "indent-creation": indentRows.filter((r: any) => !r.indent_created_at).length,

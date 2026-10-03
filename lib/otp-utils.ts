@@ -325,9 +325,9 @@ export function mapDeliveryNoteHistoryRowToUI(row: any): any {
   }
 }
 
-// Maps a row from /api/otp-supabase/check-inventory (Stage 2, against
+// Maps a row from /api/otp-supabase/packing-list (Stage 2, against
 // otp_orders / otp_orders_acceptable / otp_check_inventory) into the same UI
-// field names check-inventory/page.tsx's pendingColumns/historyColumns
+// field names packing-list/page.tsx's pendingColumns/historyColumns
 // already expect. Both the pending and history branches of that API return
 // the same { order, acceptance, inventory } shape, so this mapper doesn't
 // need to guess which endpoint a row came from.
@@ -337,13 +337,16 @@ export function mapCheckInventoryRowToUI(row: any): any {
   const order = row.order || {}
   const acceptance = row.acceptance || null // Stage 1 outcome, if it exists
   const inventory = row.inventory || null // Stage 2 outcome, only on history rows
-  const scanType: "new" | "repeat" = row.scanType || "new"
+  const scanType: "new" | "repeat" | "updated" = row.scanType || "new"
 
-  // "repeat" pending rows compare against the outstanding
-  // otp_check_inventory_shortage ledger, not the order's full item list —
-  // everything else on the order was already resolved in an earlier wave.
+  // "repeat"/"updated" pending rows compare against a specific item subset
+  // (the outstanding shortage ledger, or just the quotation-drift delta),
+  // not the order's full item list — everything else on the order was
+  // already resolved in an earlier wave. Both shapes carry the same
+  // {item_name, item_code, shortage_qty, shortageLedgerId?} fields — see
+  // packing-list/route.ts's GET.
   const rawItems =
-    scanType === "repeat"
+    scanType === "repeat" || scanType === "updated"
       ? (row.shortageItems || []).map((it: any) => ({
           item_name: it.item_name,
           item_code: it.item_code,
@@ -404,13 +407,22 @@ export function mapCheckInventoryRowToUI(row: any): any {
     actual: inventory ? formatDateTime(inventory.created_at) : "",
 
     // Auto-derived, not user-selected — lets the person running Packing
-    // List tell at a glance which orders have never had a scan vs which
-    // are back for a re-check after Indent Creation's Material Received.
+    // List tell at a glance which orders have never had a scan, which are
+    // back for a re-check after Indent Creation's Material Received, and
+    // which need a recheck because the quotation itself changed after
+    // this order was already (fully) scanned before.
     scanType,
-    status: scanType === "repeat" ? "Repeat" : "New",
+    status: scanType === "repeat" ? "Repeat" : scanType === "updated" ? "Updated" : "New",
+
+    // History-only: item names whose live quotation now wants LESS than
+    // what's already been processed for this order — see
+    // packing-list/route.ts's computeReconciliation. Read-only flag, no
+    // edit action — the user is pointed back to Packing List's own
+    // Pending tab for anything that CAN still be auto-reconciled.
+    overResolvedItems: row.overResolvedItems || [],
 
     // items in {name, qty} shape (not {item_name, quantity}) so the existing
-    // "Items Not Available" prefill logic in check-inventory/page.tsx (which
+    // "Items Not Available" prefill logic in packing-list/page.tsx (which
     // reads item.name/item.qty) keeps working unchanged.
     items: rawItems.map((it: any) => ({ name: it.item_name, qty: it.quantity, shortageLedgerId: it.shortageLedgerId })),
     rawItems,

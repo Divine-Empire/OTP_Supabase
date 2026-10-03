@@ -56,10 +56,10 @@ const menuItems = [
     step: "proforma-invoice",
   },
   {
-    href: "/check-inventory",
+    href: "/packing-list",
     label: "Packing List",
     icon: Package,
-    step: "check-inventory",
+    step: "packing-list",
   },
   {
     href: "/indent-creation",

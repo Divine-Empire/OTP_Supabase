@@ -63,7 +63,7 @@ const historyColumns = [
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
 ]
 
-// One row per physical unit for serialized items (see check-inventory's
+// One row per physical unit for serialized items (see packing-list's
 // isNumberedSerial) — Qty is always 1 for those. Bulk items keep one row
 // with the full qty and an empty serial. `isPrefilled` rows came straight
 // from Check Inventory's own scan data, so their Item Name is locked

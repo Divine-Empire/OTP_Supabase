@@ -97,6 +97,55 @@ function itemMatchKey(name?: string | null) {
   return (name || "").trim().toLowerCase()
 }
 
+// Scan-in-progress draft persistence — so an accidental tab close/browser
+// crash mid-scan doesn't force starting over from zero. Keyed by order +
+// username (not just order) so a shared warehouse PC doesn't leak one
+// user's in-progress scan into another's session. Device/browser-local
+// only, by design — there's no server-side draft table, nothing to clean
+// up there, and switching devices simply starts fresh (acceptable: the
+// alternative, a synced server draft, is a much bigger feature for a
+// problem this already fully solves).
+const DRAFT_TTL_MS = 48 * 60 * 60 * 1000 // 48h — old enough to be stale, not so old it surprises someone
+function draftKey(orderId: string, username: string) {
+  return `packing-list-draft:${orderId}:${username}`
+}
+function saveDraft(orderId: string, username: string, scanRows: ScanRow[], accessoryScanRows: AccessoryScanRow[]) {
+  try {
+    if (scanRows.length === 0 && accessoryScanRows.length === 0) {
+      localStorage.removeItem(draftKey(orderId, username))
+      return
+    }
+    localStorage.setItem(
+      draftKey(orderId, username),
+      JSON.stringify({ savedAt: Date.now(), scanRows, accessoryScanRows })
+    )
+  } catch {
+    // Storage full/unavailable (private browsing etc.) — the scan itself
+    // still works, it just won't survive a crash. Not worth surfacing.
+  }
+}
+function loadDraft(orderId: string, username: string): { scanRows: ScanRow[]; accessoryScanRows: AccessoryScanRow[] } | null {
+  try {
+    const raw = localStorage.getItem(draftKey(orderId, username))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > DRAFT_TTL_MS) {
+      localStorage.removeItem(draftKey(orderId, username))
+      return null
+    }
+    return { scanRows: parsed.scanRows || [], accessoryScanRows: parsed.accessoryScanRows || [] }
+  } catch {
+    return null
+  }
+}
+function clearDraft(orderId: string, username: string) {
+  try {
+    localStorage.removeItem(draftKey(orderId, username))
+  } catch {
+    // ignore
+  }
+}
+
 
 
 // Column definitions for Pending tab — same base columns as Order Acceptable
@@ -137,6 +186,7 @@ const historyColumns = [
   { key: "inventoryRemarks", label: "Remarks", searchable: true },
   { key: "accessories", label: "Accessories", searchable: true },
   { key: "actual", label: "Actual", searchable: true },
+  { key: "overResolvedItems", label: "Quotation Mismatch", searchable: false },
 ]
 
 export default function CheckInventoryPage() {
@@ -162,6 +212,12 @@ export default function CheckInventoryPage() {
   const [manualSearchResults, setManualSearchResults] = useState<any[]>([])
   const [manualSearchOpen, setManualSearchOpen] = useState(false)
   const [manualSelectedName, setManualSelectedName] = useState("")
+  // Only ever populated by clicking a search-result row (not free typing) —
+  // used for accessories, which have no order-item record to look a code up
+  // from. Order items resolve their own code from the order's own item
+  // list instead (see handleAddManualItem), since that's already more
+  // reliable (resolved server-side via lto_items in enrichOrderItemsWithCode).
+  const [manualSelectedItemCode, setManualSelectedItemCode] = useState("")
   const [manualHasSerial, setManualHasSerial] = useState(false)
   const [manualQty, setManualQty] = useState("1")
   const [manualSerials, setManualSerials] = useState<string[]>([""])
@@ -215,7 +271,7 @@ export default function CheckInventoryPage() {
     setError(null)
 
     try {
-      const response = await fetch("/api/otp-supabase/check-inventory?status=pending")
+      const response = await fetch("/api/otp-supabase/packing-list?status=pending")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
@@ -236,7 +292,7 @@ export default function CheckInventoryPage() {
   // Fetch processed history orders from Supabase API
   const fetchProcessedOrders = async () => {
     try {
-      const response = await fetch("/api/otp-supabase/check-inventory?status=history")
+      const response = await fetch("/api/otp-supabase/packing-list?status=history")
       const result = await response.json()
 
       if (result.success && Array.isArray(result.data)) {
@@ -252,6 +308,17 @@ export default function CheckInventoryPage() {
   useEffect(() => {
     fetchOrders()
   }, [])
+
+  // Autosave the in-progress scan to localStorage — see saveDraft's comment
+  // above itemMatchKey. Only while the dialog is actually open (so closing
+  // via Cancel, with nothing scanned, doesn't write an empty draft over a
+  // previously-restored one before the user's had a chance to act).
+  useEffect(() => {
+    if (!isDialogOpen || !selectedOrder) return
+    const orderId = selectedOrder.orderId || selectedOrder.id
+    if (!orderId) return
+    saveDraft(orderId, currentUser?.username || "shared", scanRows, accessoryScanRows)
+  }, [isDialogOpen, selectedOrder, scanRows, accessoryScanRows, currentUser?.username])
 
   // Role-based access: 'user' role only sees rows whose crmName is in their
   // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
@@ -367,15 +434,27 @@ export default function CheckInventoryPage() {
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
     setDialogStep("scan")
-    setScanRows([])
+
+    const orderId = order.orderId || order.id
+    const username = currentUser?.username || "shared"
+    const draft = orderId ? loadDraft(orderId, username) : null
+    setScanRows(draft?.scanRows || [])
+    setAccessoryScanRows(draft?.accessoryScanRows || [])
+    if (draft) {
+      toast({
+        title: "Draft restored",
+        description: `${draft.scanRows.length} item(s) and ${draft.accessoryScanRows.length} accessor${draft.accessoryScanRows.length === 1 ? "y" : "ies"} from your last unsaved scan were restored.`,
+      })
+    }
+
     setScannerError(null)
-    setAccessoryScanRows([])
     setAccessoryScannerError(null)
     setCompareItems([])
     setComputedStatus("")
     setManualEntryMode(null)
     setManualSearchQuery("")
     setManualSelectedName("")
+    setManualSelectedItemCode("")
     setManualHasSerial(false)
     setManualQty("1")
     setManualSerials([""])
@@ -396,21 +475,21 @@ export default function CheckInventoryPage() {
     if (manualEntryMode === "item") {
       const orderItems: any[] = selectedOrder?.rawItems || []
       const scannedKey = itemMatchKey(manualSelectedName)
-      const belongsToOrder = orderItems.some((it) => itemMatchKey(it.item_name) === scannedKey)
-      if (!belongsToOrder) {
+      const matchedOrderItem = orderItems.find((it) => itemMatchKey(it.item_name) === scannedKey)
+      if (!matchedOrderItem) {
         toast({ title: "Item not in order", description: `"${manualSelectedName}" is not part of this order's item list.`, variant: "destructive" })
         return
       }
-  
+
       setScanRows(prev => {
         const key = itemMatchKey(manualSelectedName)
         const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
         const validSerials = manualHasSerial ? manualSerials.filter(s => s.trim() !== "") : []
-        
+
         if (groupIndex === -1) {
           return [...prev, {
             itemName: manualSelectedName,
-            itemCode: "Manual",
+            itemCode: matchedOrderItem.item_code || "Manual",
             qty: String(qtyNum),
             serials: validSerials
           }]
@@ -432,7 +511,7 @@ export default function CheckInventoryPage() {
         const key = itemMatchKey(manualSelectedName)
         const index = prev.findIndex((r) => itemMatchKey(r.itemName) === key)
         if (index === -1) {
-          return [...prev, { itemName: manualSelectedName, itemCode: "Manual", qty: qtyNum }]
+          return [...prev, { itemName: manualSelectedName, itemCode: manualSelectedItemCode || "Manual", qty: qtyNum }]
         }
         const next = [...prev]
         next[index] = { ...next[index], qty: next[index].qty + qtyNum }
@@ -444,6 +523,7 @@ export default function CheckInventoryPage() {
     setManualEntryMode(null)
     setManualSearchQuery("")
     setManualSelectedName("")
+    setManualSelectedItemCode("")
     setManualHasSerial(false)
     setManualQty("1")
     setManualSerials([""])
@@ -663,8 +743,8 @@ export default function CheckInventoryPage() {
       // queues whatever's available into otp_pre_invoice_queue, and routes
       // any shortage to either Indent Creation (first time for this order)
       // or straight back into this same Pending tab as a "repeat" via
-      // otp_check_inventory_shortage — see check-inventory/route.ts.
-      const response = await fetch("/api/otp-supabase/check-inventory", {
+      // otp_check_inventory_shortage — see packing-list/route.ts.
+      const response = await fetch("/api/otp-supabase/packing-list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -685,6 +765,7 @@ export default function CheckInventoryPage() {
       const result = await response.json()
       if (!result.success) throw new Error(result.error || "Update failed")
 
+      clearDraft(selectedOrder.orderId || selectedOrder.id, currentUser?.username || "shared")
       setIsDialogOpen(false)
       setSelectedOrder(null)
 
@@ -748,11 +829,30 @@ export default function CheckInventoryPage() {
           </Badge>
         )
       case "status":
-        return <Badge variant={value === "Repeat" ? "secondary" : "default"}>{value || "New"}</Badge>
+        return (
+          <Badge variant={value === "Updated" ? "destructive" : value === "Repeat" ? "secondary" : "default"}>
+            {value || "New"}
+          </Badge>
+        )
       case "billingAddress":
       case "shippingAddress":
       case "inventoryRemarks":
         return <div className="max-w-[200px] whitespace-normal break-words">{value}</div>
+      case "overResolvedItems": {
+        const items: string[] = Array.isArray(value) ? value : []
+        if (items.length === 0) return ""
+        return (
+          <div className="max-w-[220px]">
+            <Badge variant="destructive" className="mb-1">
+              ⚠ Quotation changed
+            </Badge>
+            <p className="text-xs text-muted-foreground whitespace-normal break-words">
+              {items.join(", ")} — now wants less than what's already been processed. Can't auto-reconcile; manual
+              review needed.
+            </p>
+          </div>
+        )
+      }
       default:
         return value || ""
     }
@@ -1144,7 +1244,9 @@ export default function CheckInventoryPage() {
                     <Label>
                       {selectedOrder?.scanType === "repeat"
                         ? "Outstanding Shortage Items (reference — what to recheck in the warehouse)"
-                        : "Order Items (reference — what to pull from the warehouse)"}
+                        : selectedOrder?.scanType === "updated"
+                          ? "Quotation Changed — New/Increased Items (reference — recheck just these)"
+                          : "Order Items (reference — what to pull from the warehouse)"}
                     </Label>
                     <div className="border rounded-md overflow-hidden">
                       <Table>
@@ -1184,6 +1286,7 @@ export default function CheckInventoryPage() {
                         setManualEntryMode("item")
                         setManualSearchQuery("")
                         setManualSelectedName("")
+                        setManualSelectedItemCode("")
                         setManualHasSerial(false)
                         setManualQty("1")
                         setManualSerials([""])
@@ -1201,12 +1304,13 @@ export default function CheckInventoryPage() {
                         <Button type="button" variant="ghost" size="sm" onClick={() => setManualEntryMode(null)}>Cancel</Button>
                       </div>
                       <div className="relative">
-                        <Input 
-                          placeholder="Search item name..." 
+                        <Input
+                          placeholder="Search item name or code..."
                           value={manualSearchQuery}
                           onChange={(e) => {
                             setManualSearchQuery(e.target.value)
                             setManualSelectedName(e.target.value)
+                            setManualSelectedItemCode("")
                           }}
                           onFocus={() => { if (manualSearchResults.length > 0) setManualSearchOpen(true) }}
                           onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
@@ -1214,16 +1318,18 @@ export default function CheckInventoryPage() {
                         {manualSearchOpen && manualSearchResults.length > 0 && (
                           <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
                             {manualSearchResults.map((res, i) => (
-                              <div 
-                                key={i} 
-                                className="p-2 hover:bg-gray-100 cursor-pointer text-sm"
+                              <div
+                                key={i}
+                                className="p-2 hover:bg-gray-100 cursor-pointer text-sm flex justify-between gap-2"
                                 onMouseDown={() => {
                                   setManualSearchQuery(res.item_name)
                                   setManualSelectedName(res.item_name)
+                                  setManualSelectedItemCode(res.item_code || "")
                                   setManualSearchOpen(false)
                                 }}
                               >
-                                {res.item_name}
+                                <span>{res.item_name}</span>
+                                {res.item_code && <span className="text-muted-foreground shrink-0">{res.item_code}</span>}
                               </div>
                             ))}
                           </div>
@@ -1361,6 +1467,7 @@ export default function CheckInventoryPage() {
                           setManualEntryMode("accessory")
                           setManualSearchQuery("")
                           setManualSelectedName("")
+                          setManualSelectedItemCode("")
                           setManualHasSerial(false)
                           setManualQty("1")
                           setManualSerials([""])
@@ -1378,12 +1485,13 @@ export default function CheckInventoryPage() {
                           <Button type="button" variant="ghost" size="sm" onClick={() => setManualEntryMode(null)}>Cancel</Button>
                         </div>
                         <div className="relative">
-                          <Input 
-                            placeholder="Search accessory name..." 
+                          <Input
+                            placeholder="Search accessory name or code..."
                             value={manualSearchQuery}
                             onChange={(e) => {
                               setManualSearchQuery(e.target.value)
                               setManualSelectedName(e.target.value)
+                              setManualSelectedItemCode("")
                             }}
                             onFocus={() => { if (manualSearchResults.length > 0) setManualSearchOpen(true) }}
                             onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
@@ -1391,16 +1499,18 @@ export default function CheckInventoryPage() {
                           {manualSearchOpen && manualSearchResults.length > 0 && (
                             <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
                               {manualSearchResults.map((res, i) => (
-                                <div 
-                                  key={i} 
-                                  className="p-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                <div
+                                  key={i}
+                                  className="p-2 hover:bg-gray-100 cursor-pointer text-sm flex justify-between gap-2"
                                   onMouseDown={() => {
                                     setManualSearchQuery(res.item_name)
                                     setManualSelectedName(res.item_name)
+                                    setManualSelectedItemCode(res.item_code || "")
                                     setManualSearchOpen(false)
                                   }}
                                 >
-                                  {res.item_name}
+                                  <span>{res.item_name}</span>
+                                  {res.item_code && <span className="text-muted-foreground shrink-0">{res.item_code}</span>}
                                 </div>
                               ))}
                             </div>
@@ -1520,7 +1630,9 @@ export default function CheckInventoryPage() {
                     <p className="text-xs text-muted-foreground">
                       {selectedOrder?.scanType === "repeat"
                         ? "Shortage qty stays here in Packing List's own Pending (this order's indent was already raised once, it isn't raised again)."
-                        : "Shortage qty will go to Indent Creation's Pending tab, where its details get filled in and an indent gets raised."}{" "}
+                        : selectedOrder?.scanType === "updated"
+                          ? "Shortage qty for a brand-new item goes to Indent Creation's Pending tab; shortage on an item that already had an indent before goes straight back into Packing List's own Pending instead."
+                          : "Shortage qty will go to Indent Creation's Pending tab, where its details get filled in and an indent gets raised."}{" "}
                       Available qty goes to Pre-Invoice pending under the same order number.
                     </p>
                   )}

@@ -49,7 +49,7 @@ const allSteps = [
   { id: "dashboard", label: "Dashboard" },
   { id: "order-acceptable", label: "Order Acceptable" },
   { id: "proforma-invoice", label: "Pro-Forma Invoice" },
-  { id: "check-inventory", label: "Packing List" },
+  { id: "packing-list", label: "Packing List" },
   { id: "indent-creation", label: "Indent Creation" },
   { id: "pre-invoice", label: "Pre Invoice Details" },
   { id: "delivery-note-for-invoice", label: "Delivery Note (Inv.)" },

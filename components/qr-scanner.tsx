@@ -42,7 +42,7 @@ export function parseItemQr(raw: string): ScannedQrItem | null {
 // clicking "Scan Item QR" opens the camera, and the moment a QR decodes
 // successfully it calls onScan(raw) once and closes the camera itself —
 // no separate manual "Stop" step needed to register a scan. The caller
-// (check-inventory page) re-renders its own "Scan Item QR" button for the
+// (packing-list page) re-renders its own "Scan Item QR" button for the
 // next item once this returns to the idle state.
 export function QrScanner({
   onScan,
