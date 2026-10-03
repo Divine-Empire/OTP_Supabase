@@ -107,11 +107,17 @@ async function computeReconciliation(
 //   "repeat"  — order already has an otp_check_inventory_shortage ledger
 //               row still status='pending' (put there once an Indent
 //               Creation's Material Received flips to Yes/No — see
-//               indent-creation/route.ts). Compare ONLY against those
-//               outstanding ledger rows (everything else on the order was
-//               already resolved in an earlier wave). Any shortage found
-//               this time stays in this same ledger (successor rows) —
-//               it never goes back to Indent Creation.
+//               indent-creation/route.ts). Compare against those
+//               outstanding ledger rows PLUS any live quotation-drift delta
+//               on top (see computeReconciliation) — a quotation edit can
+//               land while this order is mid-repeat-cycle, and it must not
+//               get stuck behind it until the cycle finishes. Delta items
+//               already present in the ledger have their qty bumped up by
+//               the delta amount; brand-new items (not in the ledger) are
+//               appended with no shortageLedgerId, so they flow through
+//               submit as fresh items (see POST). Any shortage found this
+//               time for an existing ledger item stays in this same ledger
+//               (successor rows) — it never goes back to Indent Creation.
 //   "updated" — order was scanned before and has no outstanding "repeat"
 //               ledger right now, but its LIVE order.items no longer
 //               matches what was last accounted for — see
@@ -232,30 +238,54 @@ export async function GET(request: Request) {
       ledgerByOrder.get(r.order_id)!.push(r)
     }
 
-    const repeatShaped = repeatOrderIds.map((orderId) => {
-      const rows = ledgerByOrder.get(orderId)!
-      const order = rows[0].order
-      return {
-        order,
-        acceptance: acceptanceByOrder.get(orderId) || null,
-        inventory: null,
-        scanType: "repeat",
-        shortageItems: rows.map((r: any) => ({
-          shortageLedgerId: r.id,
+    const repeatShaped = await Promise.all(
+      repeatOrderIds.map(async (orderId) => {
+        const rows = ledgerByOrder.get(orderId)!
+        const order = rows[0].order
+
+        const shortageItems = rows.map((r: any) => ({
+          shortageLedgerId: r.id as string | null,
           item_code: r.item_code,
           item_name: r.item_name,
           shortage_qty: Number(r.shortage_qty) || 0,
-        })),
-      }
-    })
+        }))
+
+        // Merge in any live quotation-drift on top of the ledger's own
+        // frozen items — accountedFor already sums this order's own pending
+        // ledger rows, so delta here is purely what's missing beyond them,
+        // safe to add without double-counting.
+        const diffs = await computeReconciliation(supabase, orderId, order?.items || [])
+        for (const inc of diffs.filter((d) => d.delta > 0)) {
+          const key = nameKey(inc.name)
+          const existing = shortageItems.find((si) => nameKey(si.item_name) === key)
+          if (existing) {
+            existing.shortage_qty += inc.delta
+          } else {
+            shortageItems.push({
+              shortageLedgerId: null,
+              item_code: null, // backfilled below once enrichOrderItemsWithCode resolves order.items codes
+              item_name: inc.name,
+              shortage_qty: inc.delta,
+            })
+          }
+        }
+
+        return {
+          order,
+          acceptance: acceptanceByOrder.get(orderId) || null,
+          inventory: null,
+          scanType: "repeat",
+          shortageItems,
+        }
+      })
+    )
 
     // --- "updated" rows: orders that have been scanned before (not "new")
-    // and have no outstanding repeat-ledger right now (not already surfaced
-    // as "repeat" above), but whose LIVE order.items no longer matches what
-    // Packing List last accounted for — see computeReconciliation's comment.
-    // Scoped to orders whose last scan was fully settled (no bucket overlap
-    // with "repeat"); a quotation drift on an order still mid-repeat-cycle
-    // surfaces here once that cycle finishes, not before.
+    // and have no outstanding repeat-ledger right now, but whose LIVE
+    // order.items no longer matches what Packing List last accounted for —
+    // see computeReconciliation's comment. Orders still mid-repeat-cycle are
+    // excluded here because their drift is already merged into "repeat"
+    // above (see repeatShaped) — never double-surfaced in both buckets.
     const alreadyRepeatIds = new Set(repeatOrderIds)
     const settledScannedIds = everScannedIds.filter((id: string) => !alreadyRepeatIds.has(id))
 
@@ -298,12 +328,13 @@ export async function GET(request: Request) {
     const shaped = [...newShaped, ...repeatShaped, ...updatedShaped]
     await enrichOrderItemsWithCode(supabase, shaped)
 
-    // Backfill "updated" rows' item codes now that order.items[].item_code
-    // has been resolved above.
-    for (const row of updatedShaped) {
+    // Backfill item codes for any shortageItems entry still missing one
+    // (new "updated" rows, and drift-merged entries appended to "repeat"
+    // rows above) now that order.items[].item_code has been resolved.
+    for (const row of [...repeatShaped, ...updatedShaped]) {
       const codeByName = new Map((row.order.items || []).map((it: any) => [nameKey(it.item_name), it.item_code]))
       for (const si of row.shortageItems) {
-        si.item_code = codeByName.get(nameKey(si.item_name)) || null
+        if (!si.item_code) si.item_code = codeByName.get(nameKey(si.item_name)) || null
       }
     }
 

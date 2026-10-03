@@ -10,10 +10,40 @@
 // registered in PFMS's Item Master, etc.), we just skip it and leave
 // pfms_indent_no null.
 //
-// Called once per order, from indent-creation/route.ts's POST (the
-// process-form submit that moves a row from Pending to the Material
-// Received tab) — an order only ever gets ONE otp_indent_creation row, so
-// this only ever fires once per order.
+// Called from indent-creation/route.ts's POST (the process-form submit
+// that moves a row from Pending to the Material Received tab) — once per
+// otp_indent_creation row's submit. An order can now have more than one
+// such row over its lifetime (Database/53_indent_creation_repeatable.sql),
+// so this can fire more than once per order, just never twice for the
+// same indent row.
+//
+// PFMS's create-indent API rejects the WHOLE batch unless every item's
+// itemName+category combo matches an pfms_item_master row exactly (see
+// findUnregisteredItems in Purchase-FMS-Supabase/app/api/create-indent/route.ts)
+// — sending a blank category here used to make every real item look
+// "unregistered" even when it has a real, non-empty category in PFMS's
+// catalog, so every call failed. PFMS's own /api/dropdowns endpoint already
+// returns that catalog (item name -> category), so look the real category
+// up there first. An item genuinely missing from PFMS's catalog (never
+// added there at all) still has no category to find and the call will
+// correctly fail just for that item's batch — that's a real data gap on
+// PFMS's side, not something this lookup can paper over.
+async function resolveItemCategories(baseUrl: string, itemNames: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  try {
+    const res = await fetch(`${baseUrl}/api/dropdowns`, { signal: AbortSignal.timeout(8000) })
+    const json = await res.json()
+    const items: { itemName?: string; category?: string }[] = json?.data?.items || []
+    for (const it of items) {
+      const name = (it.itemName || "").trim().toLowerCase()
+      if (name && it.category) map.set(name, it.category)
+    }
+  } catch (err) {
+    console.warn("PFMS dropdowns lookup failed (category resolution skipped):", err)
+  }
+  return map
+}
+
 export async function tryCreatePfmsIndent(params: {
   orderNo: string
   warehouseLocation: string | null
@@ -22,9 +52,15 @@ export async function tryCreatePfmsIndent(params: {
 }): Promise<string[] | null> {
   const baseUrl = process.env.PFMS_CREATE_INDENT_URL
   if (!baseUrl || params.items.length === 0) return null
+  const cleanBaseUrl = baseUrl.replace(/\/$/, "")
 
   try {
-    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/create-indent`, {
+    const categoryByName = await resolveItemCategories(
+      cleanBaseUrl,
+      params.items.map((it) => it.item_name)
+    )
+
+    const res = await fetch(`${cleanBaseUrl}/api/create-indent`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -34,9 +70,9 @@ export async function tryCreatePfmsIndent(params: {
         leadTime: params.leadTime,
         attachment: null,
         items: params.items.map((it) => ({
-          category: "", // PFMS validates category+itemName against its own Item Master;
-          itemName: it.item_name, // items unknown there will make the whole call fail —
-          quantity: it.qty, // acceptable, since this is best-effort only.
+          category: categoryByName.get(it.item_name.trim().toLowerCase()) || "",
+          itemName: it.item_name,
+          quantity: it.qty,
           uom: "NOS",
           itemCode: it.item_code,
         })),
