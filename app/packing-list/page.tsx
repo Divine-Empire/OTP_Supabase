@@ -264,6 +264,19 @@ export default function CheckInventoryPage() {
   )
 
   const { user: currentUser } = useAuth()
+  const [subGodown, setSubGodown] = useState("")
+  const [subGodownOptions, setSubGodownOptions] = useState<string[]>([])
+
+  useEffect(() => {
+    fetch("/api/otp-supabase/dropdowns?category=sub_godown")
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data)) {
+          setSubGodownOptions(json.data.map((d: { value: string }) => d.value))
+        }
+      })
+      .catch((err) => console.error("Failed to load sub-godown options:", err))
+  }, [])
 
   // Fetch pending orders from Supabase API
   const fetchOrders = async () => {
@@ -458,6 +471,7 @@ export default function CheckInventoryPage() {
     setManualHasSerial(false)
     setManualQty("1")
     setManualSerials([""])
+    setSubGodown(currentUser?.defaultGodown || "")
     setIsDialogOpen(true)
   }
 
@@ -759,6 +773,7 @@ export default function CheckInventoryPage() {
           })),
           accessories: accessoryScanRows.map((r) => ({ item_name: r.itemName, quantity: r.qty })),
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
+          subGodown: subGodown || null,
         }),
       })
 
@@ -914,9 +929,9 @@ export default function CheckInventoryPage() {
                   />
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                   <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
+                    <SelectTrigger className="w-full sm:w-[180px]">
                       <SelectValue placeholder="All CRM Names" />
                     </SelectTrigger>
                     <SelectContent>
@@ -933,7 +948,7 @@ export default function CheckInventoryPage() {
                       value={availabilityFilter}
                       onValueChange={setAvailabilityFilter}
                     >
-                      <SelectTrigger className="w-[180px]">
+                      <SelectTrigger className="w-full sm:w-[180px]">
                         <SelectValue placeholder="Filter by status" />
                       </SelectTrigger>
                       <SelectContent>
@@ -944,13 +959,13 @@ export default function CheckInventoryPage() {
                       </SelectContent>
                     </Select>
                   )}
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
+                  <Button onClick={fetchOrders} variant="outline" size="sm" className="flex-1 sm:flex-initial">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
                   </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" className="flex-1 sm:flex-initial">
                         <Settings className="h-4 w-4 mr-2" />
                         Column Visibility
                       </Button>
@@ -1009,6 +1024,7 @@ export default function CheckInventoryPage() {
                       visibleColumns={visiblePendingColumns}
                       record={order}
                       renderCellContent={renderCellContent}
+                      previewCount={6}
                     />
                   ))}
                   {pendingOrders.length === 0 && (
@@ -1118,6 +1134,7 @@ export default function CheckInventoryPage() {
                           visibleColumns={visibleHistoryColumns}
                           record={order}
                           renderCellContent={renderCellContent}
+                          previewCount={6}
                         />
                       ))}
                       {filteredProcessedOrders.length === 0 && (
@@ -1635,6 +1652,23 @@ export default function CheckInventoryPage() {
                           : "Shortage qty will go to Indent Creation's Pending tab, where its details get filled in and an indent gets raised."}{" "}
                       Available qty goes to Pre-Invoice pending under the same order number.
                     </p>
+                  )}
+
+                  {subGodownOptions.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-muted-foreground whitespace-nowrap">Godown (CG only):</span>
+                      <Select value={subGodown || "NONE"} onValueChange={(v) => setSubGodown(v === "NONE" ? "" : v)}>
+                        <SelectTrigger className="w-48">
+                          <SelectValue placeholder="Not applicable" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="NONE">Not applicable</SelectItem>
+                          {subGodownOptions.map((g) => (
+                            <SelectItem key={g} value={g}>{g}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   )}
 
                   <div className="flex justify-end gap-2">

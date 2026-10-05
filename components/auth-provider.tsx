@@ -13,6 +13,7 @@ interface User {
   assignedCrmNames?: string[]
   warehousePageAccess?: string
   location?: string
+  defaultGodown?: string | null
 }
 
 interface AuthContextType {

@@ -6,7 +6,7 @@ export async function GET() {
     const supabase = getSupabaseAdmin()
     const { data, error } = await supabase
       .from("otp_users")
-      .select("id, username, full_name, password_hash, role, assigned_steps, assigned_crm_names, warehouse_page_access, location, is_active, created_at, updated_at")
+      .select("id, username, full_name, password_hash, role, assigned_steps, assigned_crm_names, warehouse_page_access, location, default_godown, is_active, created_at, updated_at")
       .order("created_at", { ascending: true })
 
     if (error) {
@@ -76,13 +76,14 @@ export async function POST(request: Request) {
         assignedCrmNames: user.assigned_crm_names || [],
         warehousePageAccess: user.warehouse_page_access || "",
         location: user.location || "",
+        defaultGodown: user.default_godown || null,
       }
 
       return NextResponse.json({ success: true, user: safeUser })
     }
 
     // Create User Action (Settings page)
-    const { username, fullName, password, role, assignedSteps, assignedCrmNames, deployLink, warehousePageAccess, location } = body
+    const { username, fullName, password, role, assignedSteps, assignedCrmNames, deployLink, warehousePageAccess, location, defaultGodown } = body
     if (!username || !fullName) {
       return NextResponse.json(
         { success: false, error: "Username and Full Name are required" },
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
         assigned_crm_names: assignedCrmNames || [],
         warehouse_page_access: warehousePageAccess || null,
         location: location || null,
+        default_godown: defaultGodown || null,
       }])
       .select()
       .single()
@@ -120,7 +122,7 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = await request.json()
-    const { id, username, fullName, password, role, assignedSteps, assignedCrmNames, warehousePageAccess, location, isActive } = body
+    const { id, username, fullName, password, role, assignedSteps, assignedCrmNames, warehousePageAccess, location, defaultGodown, isActive } = body
 
     if (!id && !username) {
       return NextResponse.json({ success: false, error: "User ID or username required" }, { status: 400 })
@@ -136,6 +138,7 @@ export async function PUT(request: Request) {
     if (assignedCrmNames !== undefined) updateData.assigned_crm_names = assignedCrmNames
     if (warehousePageAccess !== undefined) updateData.warehouse_page_access = warehousePageAccess
     if (location !== undefined) updateData.location = location
+    if (defaultGodown !== undefined) updateData.default_godown = defaultGodown
     if (isActive !== undefined) updateData.is_active = isActive
 
     let query = supabase.from("otp_users").update(updateData)

@@ -26,6 +26,7 @@ interface User {
   role: "admin" | "user"
   assignedSteps: string[]
   assignedCrmNames: string[]
+  defaultGodown: string | null
 }
 
 interface StageTat {
@@ -83,6 +84,7 @@ export default function SettingsPage() {
     role: "user" as "admin" | "user",
     assignedSteps: [] as string[],
     assignedCrmNames: [] as string[],
+    defaultGodown: "" as string,
   })
   const [crmNameOptions, setCrmNameOptions] = useState<string[]>([])
 
@@ -128,6 +130,7 @@ export default function SettingsPage() {
           role: u.role || "user",
           assignedSteps: Array.isArray(u.assigned_steps) ? u.assigned_steps : [],
           assignedCrmNames: Array.isArray(u.assigned_crm_names) ? u.assigned_crm_names : [],
+          defaultGodown: u.default_godown || null,
         }))
         setUsers(usersData)
       }
@@ -228,6 +231,7 @@ export default function SettingsPage() {
       role: "user",
       assignedSteps: [],
       assignedCrmNames: [],
+      defaultGodown: "",
     })
     setShowPassword(false)
     setIsUserDialogOpen(true)
@@ -245,6 +249,7 @@ export default function SettingsPage() {
       // opens, same as a fresh admin selection would.
       assignedSteps: user.role === "admin" ? allSteps.map((s) => s.id) : user.assignedSteps,
       assignedCrmNames: user.role === "admin" ? crmNameOptions : user.assignedCrmNames || [],
+      defaultGodown: user.defaultGodown || "",
     })
     setShowPassword(true)
     setIsUserDialogOpen(true)
@@ -321,6 +326,7 @@ export default function SettingsPage() {
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
             assignedCrmNames: finalAssignedCrmNames,
+            defaultGodown: userFormData.defaultGodown || null,
           }),
         })
       } else {
@@ -334,6 +340,7 @@ export default function SettingsPage() {
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
             assignedCrmNames: finalAssignedCrmNames,
+            defaultGodown: userFormData.defaultGodown || null,
           }),
         })
       }
@@ -462,6 +469,7 @@ export default function SettingsPage() {
   // (whatever otp_dropdown already has rows for), enforced both here (the
   // Select only lists existing categories) and server-side in the POST
   // handler.
+  const subGodownOptions = dropdownOptions.filter((o) => o.category === "sub_godown").map((o) => o.value)
   const dropdownCategories = Array.from(new Set(dropdownOptions.map((o) => o.category))).sort()
   const dropdownGroups = dropdownCategories.map((category) => ({
     category,
@@ -1035,6 +1043,27 @@ export default function SettingsPage() {
                     ))
                   )}
                 </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Default Godown (Optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  If this user is in-charge of a specific CG godown, it auto-fills at Packing List.
+                  Leave blank if not applicable.
+                </p>
+                <Select
+                  value={userFormData.defaultGodown || "NONE"}
+                  onValueChange={(value) => setUserFormData((prev) => ({ ...prev, defaultGodown: value === "NONE" ? "" : value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="None" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">None</SelectItem>
+                    {subGodownOptions.map((g) => (
+                      <SelectItem key={g} value={g}>{g}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="outline" onClick={() => setIsUserDialogOpen(false)}>

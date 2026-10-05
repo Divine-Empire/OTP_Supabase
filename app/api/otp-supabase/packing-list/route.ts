@@ -362,11 +362,12 @@ interface AccessoryPayload {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { orderId, items, accessories, createdBy } = body as {
+    const { orderId, items, accessories, createdBy, subGodown } = body as {
       orderId: string
       items: ScanItemPayload[]
       accessories?: AccessoryPayload[]
       createdBy?: string
+      subGodown?: string | null
     }
 
     if (!orderId || !Array.isArray(items) || items.length === 0) {
@@ -546,6 +547,7 @@ export async function POST(request: Request) {
         source_stage: "check_inventory",
         source_id: inventoryRow.id,
         items: availableItems,
+        sub_godown: subGodown || null,
       })
       if (queueError) throw queueError
     }
