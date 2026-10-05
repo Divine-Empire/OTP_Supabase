@@ -39,6 +39,47 @@ async function enrichOrderItemsWithCode(supabase: ReturnType<typeof getSupabaseA
 
 const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
 
+// Cross-order "Released Stock" (see Database/55_otp_released_stock.sql) — qty
+// freed up when a DIFFERENT order's Pre-Invoice step reduced its queued qty
+// below what it originally had (e.g. "ship less now, give the rest to
+// another order"). Purely informational here: a read-only hint attached to
+// matching pending items by item_name, never auto-added to scanned_qty or
+// subtracted from shortage_qty. Consumption (decrementing qty_remaining)
+// happens in POST below, only once a scan actually reports finding the item.
+async function fetchOpenReleasedStockByName(
+  supabase: ReturnType<typeof getSupabaseAdmin>
+): Promise<Map<string, { qty: number; fromOrderNo: string }[]>> {
+  const byName = new Map<string, { qty: number; fromOrderNo: string }[]>()
+
+  const { data, error } = await supabase
+    .from("otp_released_stock")
+    .select("item_name, qty_remaining, source:otp_orders(order_no)")
+    .gt("qty_remaining", 0)
+    .order("created_at", { ascending: true })
+  if (error) {
+    // 42P01 (direct Postgres) or PGRST205 (PostgREST's schema-cache lookup,
+    // what Supabase's JS client actually surfaces for a missing table) —
+    // Database/55_otp_released_stock.sql not applied yet. Degrade to "no
+    // hints" instead of breaking Packing List's whole Pending tab while
+    // that migration is pending.
+    const code = (error as any).code
+    const isMissingTable = code === "42P01" || code === "PGRST205" || /schema cache/i.test(error.message || "")
+    if (isMissingTable) {
+      console.warn("otp_released_stock table not found yet — skipping released-stock hints:", error.message)
+      return byName
+    }
+    throw error
+  }
+
+  for (const row of (data || []) as any[]) {
+    const key = nameKey(row.item_name)
+    if (!key) continue
+    if (!byName.has(key)) byName.set(key, [])
+    byName.get(key)!.push({ qty: Number(row.qty_remaining) || 0, fromOrderNo: row.source?.order_no || "" })
+  }
+  return byName
+}
+
 // Per-item reconciliation: how much of each of this order's items has
 // Packing List EVER accounted for so far (queued to Pre-Invoice across
 // every past wave, sitting as outstanding shortage in the ledger, or
@@ -188,6 +229,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: shaped })
     }
 
+    // Cross-order released-stock hints — one query, reused across all three
+    // buckets below (see fetchOpenReleasedStockByName's own comment).
+    const releasedStockByName = await fetchOpenReleasedStockByName(supabase)
+
     // --- "new" rows: orders whose stage-2 planned date is set but that
     // have NEVER had an otp_check_inventory row.
     const { data: everScannedRows, error: everScannedError } = await supabase
@@ -209,6 +254,12 @@ export async function GET(request: Request) {
 
     const newShaped = (newRows || []).map((r: any) => {
       const { order, ...acceptance } = r
+      if (order?.items) {
+        order.items = order.items.map((it: any) => ({
+          ...it,
+          releasedStockAvailable: releasedStockByName.get(nameKey(it.item_name)) || [],
+        }))
+      }
       return { order, acceptance, inventory: null, scanType: "new", shortageItems: [] }
     })
 
@@ -248,6 +299,7 @@ export async function GET(request: Request) {
           item_code: r.item_code,
           item_name: r.item_name,
           shortage_qty: Number(r.shortage_qty) || 0,
+          releasedStockAvailable: releasedStockByName.get(nameKey(r.item_name)) || [],
         }))
 
         // Merge in any live quotation-drift on top of the ledger's own
@@ -266,6 +318,7 @@ export async function GET(request: Request) {
               item_code: null, // backfilled below once enrichOrderItemsWithCode resolves order.items codes
               item_name: inc.name,
               shortage_qty: inc.delta,
+              releasedStockAvailable: releasedStockByName.get(nameKey(inc.name)) || [],
             })
           }
         }
@@ -318,6 +371,7 @@ export async function GET(request: Request) {
               item_code: null, // backfilled below once enrichOrderItemsWithCode resolves order.items codes
               item_name: d.name,
               shortage_qty: d.delta, // "qty to check" — not an existing outstanding shortage
+              releasedStockAvailable: releasedStockByName.get(nameKey(d.name)) || [],
             })),
           }
         })
@@ -401,6 +455,54 @@ export async function POST(request: Request) {
     const totalShortage = normalized.reduce((sum, it) => sum + it.shortage_qty, 0)
     const totalScanned = normalized.reduce((sum, it) => sum + it.scanned_qty, 0)
     const availabilityStatus = totalShortage === 0 ? "Available" : totalScanned === 0 ? "Not Available" : "Partial"
+
+    // Consume any open cross-order released-stock (see
+    // Database/55_otp_released_stock.sql / the GET branch's
+    // releasedStockAvailable hint) for whatever this scan reports finding —
+    // FIFO by created_at, capped at qty_remaining, floor at 0. Best-effort
+    // and independent of the rest of this submit: a release-pool hiccup
+    // here must never block a normal scan from going through.
+    try {
+      const consumableNames = normalized.filter((it) => it.scanned_qty > 0).map((it) => nameKey(it.item_name))
+      if (consumableNames.length > 0) {
+        const { data: openReleases, error: openReleasesError } = await supabase
+          .from("otp_released_stock")
+          .select("id, item_name, qty_remaining")
+          .gt("qty_remaining", 0)
+          .order("created_at", { ascending: true })
+        if (openReleasesError) throw openReleasesError
+
+        const releasesByName = new Map<string, { id: string; qty_remaining: number }[]>()
+        for (const row of (openReleases || []) as any[]) {
+          const key = nameKey(row.item_name)
+          if (!releasesByName.has(key)) releasesByName.set(key, [])
+          releasesByName.get(key)!.push(row)
+        }
+
+        const updates: { id: string; qty_remaining: number }[] = []
+        for (const it of normalized) {
+          if (it.scanned_qty <= 0) continue
+          const rows = releasesByName.get(nameKey(it.item_name))
+          if (!rows || rows.length === 0) continue
+          let toConsume = it.scanned_qty
+          for (const row of rows) {
+            if (toConsume <= 0) break
+            const available = Number(row.qty_remaining) || 0
+            const consume = Math.min(toConsume, available)
+            if (consume <= 0) continue
+            updates.push({ id: row.id, qty_remaining: available - consume })
+            toConsume -= consume
+          }
+        }
+        if (updates.length > 0) {
+          await Promise.all(
+            updates.map((u) => supabase.from("otp_released_stock").update({ qty_remaining: u.qty_remaining }).eq("id", u.id))
+          )
+        }
+      }
+    } catch (releaseConsumeErr) {
+      console.warn("Released-stock consumption failed (non-blocking):", releaseConsumeErr)
+    }
 
     const { data: order, error: orderError } = await supabase
       .from("otp_orders")

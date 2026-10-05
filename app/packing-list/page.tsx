@@ -72,6 +72,10 @@ interface CompareItem {
   shortageQty: number
   serials: string[] // carried through from the matching ScanRow, for traceability in otp_check_inventory.items
   shortageLedgerId?: string // present only on a "repeat" scan — which otp_check_inventory_shortage row this item addresses
+  // Cross-order qty another order's Pre-Invoice step freed up for this same
+  // item name (see Database/55_otp_released_stock.sql) — informational only,
+  // never auto-added to scannedQty or subtracted from shortageQty.
+  releasedStockAvailable?: { qty: number; fromOrderNo: string }[]
 }
 
 // Shared key for matching a scanned item against an order's item list.
@@ -715,6 +719,7 @@ export default function CheckInventoryPage() {
         shortageQty: Math.max(ordered - scanned, 0),
         serials: matched?.serials || [],
         shortageLedgerId: it.shortageLedgerId,
+        releasedStockAvailable: it.releasedStockAvailable || [],
       }
     })
 
@@ -1621,6 +1626,12 @@ export default function CheckInventoryPage() {
                             <TableCell>
                               <p className="font-medium">{it.itemName}</p>
                               <p className="text-xs text-muted-foreground">{it.itemCode || "no code"}</p>
+                              {it.releasedStockAvailable && it.releasedStockAvailable.length > 0 && (
+                                <p className="text-xs text-blue-700 mt-1">
+                                  {it.releasedStockAvailable.reduce((s, r) => s + r.qty, 0)} unit(s) released from
+                                  order(s) {it.releasedStockAvailable.map((r) => r.fromOrderNo).filter(Boolean).join(", ")} — may be usable for this order.
+                                </p>
+                              )}
                             </TableCell>
                             <TableCell className="text-right">{it.orderedQty}</TableCell>
                             <TableCell className="text-right">
@@ -1764,12 +1775,13 @@ export default function CheckInventoryPage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
@@ -1796,6 +1808,7 @@ export default function CheckInventoryPage() {
                 )}
               </TableBody>
             </Table>
+            </div>
             <div className="flex justify-end">
               <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
             </div>

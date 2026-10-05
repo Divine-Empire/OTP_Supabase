@@ -352,6 +352,7 @@ export function mapCheckInventoryRowToUI(row: any): any {
           item_code: it.item_code,
           quantity: it.shortage_qty,
           shortageLedgerId: it.shortageLedgerId,
+          releasedStockAvailable: it.releasedStockAvailable || [],
         }))
       : order.items || []
   const itemFields: Record<string, any> = {}
@@ -424,7 +425,12 @@ export function mapCheckInventoryRowToUI(row: any): any {
     // items in {name, qty} shape (not {item_name, quantity}) so the existing
     // "Items Not Available" prefill logic in packing-list/page.tsx (which
     // reads item.name/item.qty) keeps working unchanged.
-    items: rawItems.map((it: any) => ({ name: it.item_name, qty: it.quantity, shortageLedgerId: it.shortageLedgerId })),
+    items: rawItems.map((it: any) => ({
+      name: it.item_name,
+      qty: it.quantity,
+      shortageLedgerId: it.shortageLedgerId,
+      releasedStockAvailable: it.releasedStockAvailable || [],
+    })),
     rawItems,
     ...itemFields,
   }
@@ -492,6 +498,11 @@ export function mapPreInvoiceRowToUI(row: any): any {
     // pending by Check Inventory/Material Received — see Database/33_otp_stage_tat.sql).
     planned: "",
     actual: row.status === "invoiced" ? formatDateTime(row.updated_at) : "",
+
+    // History-only: this wave's qty reductions (see Database/55_otp_released_stock.sql)
+    // — a durable trail of why this queue row shipped less than Check
+    // Inventory originally queued for it, and where the freed qty went.
+    releasedStockReasons: row.released || [],
   }
 }
 

@@ -58,6 +58,7 @@ const historyColumns = [
   { key: "directDispatchDetails", label: "Direct Dispatch Details", searchable: true },
   { key: "paymentAttachment", label: "Payment Attachment", searchable: false },
   { key: "srnAttachment", label: "SRN Attachment", searchable: false },
+  { key: "releasedStockReasons", label: "Qty Released / Reason", searchable: true },
   { key: "remarks", label: "Remarks", searchable: true },
   { key: "createdBy", label: "Created By", searchable: true },
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
@@ -137,6 +138,10 @@ export default function PreInvoicePage() {
   const [paymentAttachmentFile, setPaymentAttachmentFile] = useState<File | null>(null)
   const [preInvoiceRemarks, setPreInvoiceRemarks] = useState("")
   const [items, setItems] = useState<PreInvoiceItemRow[]>([])
+  // Reason text per item_name (lowercase-trim key), required whenever that
+  // item's edited total drops below what Check Inventory originally queued
+  // — see Database/55_otp_released_stock.sql.
+  const [reductionReasons, setReductionReasons] = useState<Record<string, string>>({})
   const [dispatchLocationOptions, setDispatchLocationOptions] = useState<string[]>([])
   const [paymentModeOptions, setPaymentModeOptions] = useState<string[]>([])
   const [paymentMode, setPaymentMode] = useState("")
@@ -283,8 +288,35 @@ export default function PreInvoicePage() {
     setPreInvoiceRemarks("")
     setPaymentMode(order.paymentMode || "")
     setItems(expandQueueItemsToRows(order.rawItems || []))
+    setReductionReasons({})
     setIsDialogOpen(true)
   }
+
+  // Sums item rows by item_name (lowercase-trim) — PreInvoiceItemRow explodes
+  // one queued {item_name, qty} into several per-serial rows, so the
+  // per-name total has to be summed across however many rows share a name.
+  const sumQtyByName = (rows: { name: string; qty: number }[]) => {
+    const totals = new Map<string, number>()
+    for (const r of rows) {
+      const key = (r.name || "").trim().toLowerCase()
+      if (!key) continue
+      totals.set(key, (totals.get(key) || 0) + (Number(r.qty) || 0))
+    }
+    return totals
+  }
+
+  const originalQtyByName = useMemo(
+    () => sumQtyByName(expandQueueItemsToRows(selectedOrder?.rawItems || [])),
+    [selectedOrder]
+  )
+  const currentQtyByName = useMemo(() => sumQtyByName(items), [items])
+  const reducedNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const [key, originalQty] of originalQtyByName.entries()) {
+      if ((currentQtyByName.get(key) || 0) < originalQty) names.add(key)
+    }
+    return names
+  }, [originalQtyByName, currentQtyByName])
 
   const handleViewItemList = (order: any) => {
     setItemListDialogItems(order.rawItems || [])
@@ -317,6 +349,12 @@ export default function PreInvoicePage() {
 
     if (!DeliveryNoteForInvoiceRequired) {
       alert("Please select whether Delivery Note (Inv.) is required.")
+      return
+    }
+
+    const missingReasons = Array.from(reducedNames).filter((key) => !reductionReasons[key]?.trim())
+    if (missingReasons.length > 0) {
+      alert("Please enter a reason for every item whose qty was reduced below what was queued.")
       return
     }
 
@@ -363,6 +401,7 @@ export default function PreInvoicePage() {
           remarks: preInvoiceRemarks,
           paymentMode,
           DeliveryNoteForInvoiceRequired,
+          reductionReasons,
         }),
       })
       const result = await response.json()
@@ -455,6 +494,19 @@ export default function PreInvoicePage() {
         )
       case "sourceStage":
         return <Badge variant="outline">{value || "N/A"}</Badge>
+      case "releasedStockReasons": {
+        const released = order.releasedStockReasons || []
+        if (released.length === 0) return <span className="text-muted-foreground">-</span>
+        return (
+          <div className="space-y-0.5">
+            {released.map((r: any, idx: number) => (
+              <p key={idx} className="text-xs text-amber-800">
+                {r.item_name}: -{r.qty_released} ({r.reason})
+              </p>
+            ))}
+          </div>
+        )
+      }
       case "calibrationRequired":
       case "DeliveryNoteForInvoiceRequired":
         return value ? <Badge variant={value === "YES" ? "default" : "secondary"}>{value}</Badge> : ""
@@ -1048,6 +1100,29 @@ export default function PreInvoicePage() {
                 )}
               </div>
 
+              {reducedNames.size > 0 && (
+                <div className="space-y-2 border border-amber-200 bg-amber-50 rounded-md p-3">
+                  <p className="text-sm font-medium text-amber-900">
+                    Qty reduced below what was queued — a reason is required (the freed qty becomes visible to
+                    other pending orders needing the same item):
+                  </p>
+                  {Array.from(reducedNames).map((key) => {
+                    const label = items.find((it) => it.name.trim().toLowerCase() === key)?.name || key
+                    return (
+                      <div key={key} className="space-y-1">
+                        <Label className="text-xs">{label}</Label>
+                        <Input
+                          value={reductionReasons[key] || ""}
+                          onChange={(e) => setReductionReasons((prev) => ({ ...prev, [key]: e.target.value }))}
+                          placeholder="Reason for reducing qty (required)"
+                          className="h-9"
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="paymentDetails">Payment Details (Attachment) - In case of Advance</Label>
@@ -1094,12 +1169,13 @@ export default function PreInvoicePage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-md">
+          <DialogContent className="max-w-md max-h-[85vh] flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
@@ -1130,6 +1206,7 @@ export default function PreInvoicePage() {
                 )}
               </TableBody>
             </Table>
+            </div>
             <div className="flex justify-end">
               <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
             </div>

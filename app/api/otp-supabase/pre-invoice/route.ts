@@ -2,6 +2,21 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
+const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
+
+// Sums {item_name, qty} rows by nameKey() — used to diff "what was queued"
+// against "what's being submitted now" so a qty reduction (see POST) can be
+// detected per item name, not per exploded row.
+function sumQtyByName(rows: { item_name?: string; qty?: number }[]): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const r of rows || []) {
+    const key = nameKey(r.item_name)
+    if (!key) continue
+    totals.set(key, (totals.get(key) || 0) + (Number(r.qty) || 0))
+  }
+  return totals
+}
+
 // Stage — Pre-Invoice.
 //
 // Pending: otp_pre_invoice_queue.status = 'pending' (a queue row per wave —
@@ -30,11 +45,26 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") === "history" ? "invoiced" : "pending"
     const supabase = getSupabaseAdmin()
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("otp_pre_invoice_queue")
-      .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status))")
+      .select(
+        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)"
+      )
       .eq("status", status)
       .order("created_at", { ascending: false })
+
+    // Database/55_otp_released_stock.sql not applied yet — PostgREST can't
+    // resolve the embedded `released` relation and fails the WHOLE query.
+    // Degrade to the same select without it rather than breaking this
+    // entire stage's Pending/History while that migration is pending.
+    if (error && (error.code === "PGRST205" || /schema cache|could not find/i.test(error.message || ""))) {
+      console.warn("otp_released_stock table not found yet — fetching pre-invoice without it:", error.message)
+      ;({ data, error } = await supabase
+        .from("otp_pre_invoice_queue")
+        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status))")
+        .eq("status", status)
+        .order("created_at", { ascending: false }))
+    }
 
     if (error) throw error
 
@@ -64,6 +94,7 @@ export async function POST(request: Request) {
       remarks,
       paymentMode,
       DeliveryNoteForInvoiceRequired,
+      reductionReasons,
     } = body as {
       id: string
       createdBy?: string
@@ -80,6 +111,7 @@ export async function POST(request: Request) {
       remarks?: string
       paymentMode?: string
       DeliveryNoteForInvoiceRequired?: "YES" | "NO" | ""
+      reductionReasons?: Record<string, string> // nameKey -> reason, required for any item_name reduced below its queued qty
     }
 
     if (!id) {
@@ -87,6 +119,70 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseAdmin()
+
+    // Qty can be freely reduced below what Check Inventory originally queued
+    // (e.g. ship less now, after a client call) — see
+    // Database/55_otp_released_stock.sql. Diff against the row's own
+    // pre-edit items (not the live order) so this only ever reacts to a
+    // reduction made in THIS submit, and require a reason per reduced item
+    // name so the freed qty is never silently lost before it's logged.
+    if (items) {
+      const { data: currentRow, error: currentRowError } = await supabase
+        .from("otp_pre_invoice_queue")
+        .select("items, order_id")
+        .eq("id", id)
+        .eq("status", "pending")
+        .maybeSingle()
+      if (currentRowError) throw currentRowError
+      if (!currentRow) {
+        return NextResponse.json(
+          { success: false, error: "Queue row not found or already invoiced" },
+          { status: 404 }
+        )
+      }
+
+      const originalTotals = sumQtyByName((currentRow.items || []) as any[])
+      const submittedTotals = sumQtyByName(items)
+      const missingReasons: string[] = []
+      const releaseRows: any[] = []
+
+      for (const [key, originalQty] of originalTotals.entries()) {
+        const delta = originalQty - (submittedTotals.get(key) || 0)
+        if (delta <= 0) continue
+
+        const reason = reductionReasons?.[key]
+        if (!reason || !reason.trim()) {
+          missingReasons.push(key)
+          continue
+        }
+
+        const srcItem =
+          ((currentRow.items || []) as any[]).find((it) => nameKey(it.item_name) === key) ||
+          items.find((it) => nameKey(it.item_name) === key)
+        releaseRows.push({
+          item_name: srcItem?.item_name || key,
+          item_code: srcItem?.item_code || null,
+          qty_released: delta,
+          qty_remaining: delta,
+          source_order_id: currentRow.order_id,
+          source_queue_id: id,
+          reason: reason.trim(),
+          released_by: createdBy || null,
+        })
+      }
+
+      if (missingReasons.length > 0) {
+        return NextResponse.json(
+          { success: false, error: `Reason required for reduced qty on: ${missingReasons.join(", ")}` },
+          { status: 400 }
+        )
+      }
+
+      if (releaseRows.length > 0) {
+        const { error: releaseError } = await supabase.from("otp_released_stock").insert(releaseRows)
+        if (releaseError) throw releaseError
+      }
+    }
 
     // Delivery Note (Inv.) is now a user choice made right here in the Process
     // dialog — YES routes the wave through Delivery Note (Inv.) first (its

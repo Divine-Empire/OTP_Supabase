@@ -980,12 +980,13 @@ export default function ProformaInvoicePage() {
 
         {/* Item List Dialog */}
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Item List</DialogTitle>
             </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
             <Table>
-              <TableHeader>
+              <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
                   <TableHead className="w-12">#</TableHead>
                   <TableHead>Item Name</TableHead>
@@ -1012,6 +1013,7 @@ export default function ProformaInvoicePage() {
                 )}
               </TableBody>
             </Table>
+            </div>
             <div className="flex justify-end">
               <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
             </div>
