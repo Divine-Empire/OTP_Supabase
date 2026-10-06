@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("otp_pre_invoice_queue")
-      .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status))")
+      .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))")
       .not("make_invoice_planned", "is", null)
       .order("make_invoice_planned", { ascending: false })
 
@@ -91,6 +91,37 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseAdmin()
+
+    // Multi-wave billing: fold the other selected waves of the same order into
+    // queueId first, so one invoice (and one downstream row per stage) covers
+    // them all. otp_merge_queue_waves validates same order / all still
+    // pending here / at most one Delivery Note (Inv.).
+    const mergeIds: string[] = (body.mergeIds || []).filter((m: string) => m && m !== queueId)
+    if (mergeIds.length > 0) {
+      const { data: waves, error: wavesError } = await supabase
+        .from("otp_pre_invoice_queue")
+        .select("id, calibration_required, calibration_type")
+        .in("id", [queueId, ...mergeIds])
+      if (wavesError) throw wavesError
+
+      const { error: mergeError } = await supabase.rpc("otp_merge_queue_waves", {
+        p_primary: queueId,
+        p_others: mergeIds,
+        p_stage: "make_invoice",
+      })
+      if (mergeError) throw mergeError
+
+      // Combined wave needs calibration if any of its parts did.
+      const calibrating = (waves || []).find((w: any) => w.calibration_required)
+      const primary = (waves || []).find((w: any) => w.id === queueId)
+      if (calibrating && !primary?.calibration_required) {
+        const { error: calError } = await supabase
+          .from("otp_pre_invoice_queue")
+          .update({ calibration_required: true, calibration_type: calibrating.calibration_type })
+          .eq("id", queueId)
+        if (calError) throw calError
+      }
+    }
 
     const { data: queueRow, error: queueError } = await supabase
       .from("otp_pre_invoice_queue")

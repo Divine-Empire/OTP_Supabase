@@ -92,6 +92,10 @@ export default function IndentCreationPage() {
   const [isMRDialogOpen, setIsMRDialogOpen] = useState(false)
   const [materialReceivedValue, setMaterialReceivedValue] = useState("")
 
+  // Pending tab — Edit Qty dialog
+  const [editQtyOrder, setEditQtyOrder] = useState<any>(null)
+  const [editQtyValues, setEditQtyValues] = useState<Record<string, string>>({})
+
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
@@ -355,15 +359,87 @@ export default function IndentCreationPage() {
     }
   }
 
+  const openEditQty = (order: any) => {
+    setEditQtyOrder(order)
+    setEditQtyValues(
+      Object.fromEntries((order.rawItems || []).map((it: any) => [it.item_name, String(it.qty ?? 0)]))
+    )
+  }
+
+  const patchIndent = async (payload: Record<string, any>) => {
+    setIsSubmitting(true)
+    try {
+      const response = await fetch("/api/otp-supabase/indent-creation", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      const result = await response.json()
+      if (!result.success) throw new Error(result.error || "Update failed")
+      return true
+    } catch (err: any) {
+      alert(`Error: ${err.message}`)
+      return false
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleSaveEditQty = async () => {
+    if (!editQtyOrder) return
+    const ok = await patchIndent({
+      indentId: editQtyOrder.indentId || editQtyOrder.id,
+      action: "editQty",
+      items: Object.entries(editQtyValues).map(([item_name, qty]) => ({ item_name, qty: Number(qty) })),
+    })
+    if (ok) {
+      setEditQtyOrder(null)
+      await fetchPendingOrders()
+    }
+  }
+
+  const handleReject = async (order: any) => {
+    if (!confirm(`Reject indent for ${order.orderNo}? It moves to History and will not go back to Packing List.`)) return
+    const ok = await patchIndent({
+      indentId: order.indentId || order.id,
+      action: "reject",
+      by: currentUser?.fullName || currentUser?.username || "Admin",
+    })
+    if (ok) await fetchPendingOrders()
+  }
+
   const renderCellContent = (order: any, columnKey: string) => {
     const value = order[columnKey]
     switch (columnKey) {
-      case "actions":
+      case "actions": {
+        const items = order.rawItems || []
+        const zeroCount = items.filter((it: any) => !(Number(it.qty) > 0)).length
+        const allZero = items.length > 0 && zeroCount === items.length
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
-            Process
-          </Button>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex gap-1.5">
+              {!allZero && (
+                <Button size="sm" onClick={() => handleProcess(order)}>
+                  Process
+                </Button>
+              )}
+              <Button size="sm" variant="outline" onClick={() => openEditQty(order)}>
+                Edit Qty
+              </Button>
+              {allZero && (
+                <Button size="sm" variant="destructive" onClick={() => handleReject(order)} disabled={isSubmitting}>
+                  Reject
+                </Button>
+              )}
+            </div>
+            {zeroCount > 0 && (
+              <Badge variant="destructive" className="w-fit">
+                {allZero ? "All items 0 qty" : `${zeroCount} item(s) 0 qty — skipped on Process`}
+              </Badge>
+            )}
+          </div>
         )
+      }
       case "actionsMR":
         return (
           <Button size="sm" onClick={() => handleProcessMR(order)}>
@@ -391,7 +467,11 @@ export default function IndentCreationPage() {
           <Badge variant="secondary">N/A</Badge>
         )
       case "materialReceived":
-        return value ? <Badge variant={value === "Yes" ? "default" : "secondary"}>{value}</Badge> : ""
+        return value ? (
+          <Badge variant={value === "Yes" ? "default" : value === "Rejected" ? "destructive" : "secondary"}>{value}</Badge>
+        ) : (
+          ""
+        )
       default:
         return value ?? ""
     }
@@ -762,6 +842,41 @@ export default function IndentCreationPage() {
                   )}
                 </Button>
               </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Qty Dialog (Pending tab) */}
+        <Dialog open={!!editQtyOrder} onOpenChange={(open) => !open && setEditQtyOrder(null)}>
+          <DialogContent className="max-w-md max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Edit Qty — {editQtyOrder?.orderNo}</DialogTitle>
+              <DialogDescription>
+                Set 0 for an item that's no longer needed. 0-qty items are skipped on Process; if every item is 0 you can
+                Reject the indent instead.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto space-y-3">
+              {Object.entries(editQtyValues).map(([itemName, qty]) => (
+                <div key={itemName} className="flex items-center justify-between gap-3">
+                  <Label className="text-sm font-normal">{itemName}</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    className="w-24 text-right"
+                    value={qty}
+                    onChange={(e) => setEditQtyValues((prev) => ({ ...prev, [itemName]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditQtyOrder(null)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveEditQty} disabled={isSubmitting}>
+                Save
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

@@ -142,6 +142,10 @@ export default function PreInvoicePage() {
   // item's edited total drops below what Check Inventory originally queued
   // — see Database/55_otp_released_stock.sql.
   const [reductionReasons, setReductionReasons] = useState<Record<string, string>>({})
+  const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([])
+  const [editItemsOrder, setEditItemsOrder] = useState<any>(null)
+  const [editItemsQty, setEditItemsQty] = useState<Record<string, string>>({})
+  const [editItemsReasons, setEditItemsReasons] = useState<Record<string, string>>({})
   const [dispatchLocationOptions, setDispatchLocationOptions] = useState<string[]>([])
   const [paymentModeOptions, setPaymentModeOptions] = useState<string[]>([])
   const [paymentMode, setPaymentMode] = useState("")
@@ -402,6 +406,7 @@ export default function PreInvoicePage() {
           paymentMode,
           DeliveryNoteForInvoiceRequired,
           reductionReasons,
+          mergeIds: selectedOrder.mergeIds || [],
         }),
       })
       const result = await response.json()
@@ -442,6 +447,7 @@ export default function PreInvoicePage() {
 
         setIsDialogOpen(false)
         setSelectedOrder(null)
+        setSelectedQueueIds([])
         await fetchOrders()
         alert(`Order ${selectedOrder.orderNo} moved to Pre-Invoice History${installationMessage}`)
       } else {
@@ -455,14 +461,84 @@ export default function PreInvoicePage() {
     }
   }
 
+  // Multi-wave billing: several pending waves of ONE order processed as one
+  // (merged server-side — see otp_merge_queue_waves).
+  const selectedWaveRows = filteredOrders.filter((o) => selectedQueueIds.includes(o.queueId))
+  const selectedOrderId = selectedWaveRows[0]?.orderId
+  const toggleWave = (order: any) =>
+    setSelectedQueueIds((prev) =>
+      prev.includes(order.queueId) ? prev.filter((x) => x !== order.queueId) : [...prev, order.queueId]
+    )
+  const handleProcessSelected = () => {
+    if (selectedWaveRows.length < 2) return
+    handleProcess({
+      ...selectedWaveRows[0],
+      rawItems: selectedWaveRows.flatMap((r) => r.rawItems || []),
+      mergeIds: selectedWaveRows.slice(1).map((r) => r.queueId),
+    })
+  }
+
+  // Edit Items (pending only, reduce-only) — totals per item name
+  const openEditItems = (order: any) => {
+    const totals: Record<string, number> = {}
+    for (const it of order.rawItems || []) totals[it.item_name] = (totals[it.item_name] || 0) + (Number(it.qty) || 0)
+    setEditItemsOrder({ ...order, originalTotals: totals })
+    setEditItemsQty(Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, String(v)])))
+    setEditItemsReasons({})
+  }
+  const editItemsReduced = editItemsOrder
+    ? Object.entries(editItemsOrder.originalTotals as Record<string, number>).filter(
+        ([name, orig]) => (Number(editItemsQty[name]) || 0) < orig
+      )
+    : []
+  const handleSaveEditItems = async () => {
+    if (!editItemsOrder) return
+    if (editItemsReduced.some(([name]) => !editItemsReasons[name.trim().toLowerCase()]?.trim())) {
+      alert("Please enter a reason for every item whose qty was reduced.")
+      return
+    }
+    setIsSubmitting(true)
+    try {
+      const res = await fetch("/api/otp-supabase/pre-invoice", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editItemsOrder.queueId,
+          items: Object.entries(editItemsQty).map(([item_name, qty]) => ({ item_name, qty: Number(qty) })),
+          reductionReasons: editItemsReasons,
+          editedBy: currentUser?.fullName || currentUser?.username || "Unknown",
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || "Update failed")
+      setEditItemsOrder(null)
+      await fetchOrders()
+    } catch (err: any) {
+      alert(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const renderCellContent = (order: any, columnKey: string) => {
     const value = order[columnKey]
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
-            Process
-          </Button>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              aria-label="Select wave for combined billing"
+              checked={selectedQueueIds.includes(order.queueId)}
+              disabled={!!selectedOrderId && selectedOrderId !== order.orderId}
+              onCheckedChange={() => toggleWave(order)}
+            />
+            <Button size="sm" onClick={() => handleProcess(order)}>
+              Process
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => openEditItems(order)}>
+              Edit Items
+            </Button>
+          </div>
         )
       case "itemList":
         return (
@@ -587,6 +663,16 @@ export default function PreInvoicePage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {currentTab === "pending" && selectedWaveRows.length >= 2 && (
+                    <Button onClick={handleProcessSelected} size="sm">
+                      Process {selectedWaveRows.length} waves together ({selectedWaveRows[0].orderNo})
+                    </Button>
+                  )}
+                  {currentTab === "pending" && selectedQueueIds.length > 0 && (
+                    <Button onClick={() => setSelectedQueueIds([])} variant="ghost" size="sm">
+                      Clear selection
+                    </Button>
+                  )}
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -864,6 +950,59 @@ export default function PreInvoicePage() {
             </CardContent>
           </Card>
         </Tabs>
+
+        {/* Edit Items Dialog (pending only, reduce-only) */}
+        <Dialog open={!!editItemsOrder} onOpenChange={(open) => !open && setEditItemsOrder(null)}>
+          <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Edit Items — {editItemsOrder?.orderNo}</DialogTitle>
+              <DialogDescription>
+                Qty can only be reduced (not above what Packing List found). A reduced qty needs a reason and becomes
+                released stock other orders can use.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto space-y-3">
+              {editItemsOrder &&
+                Object.entries(editItemsOrder.originalTotals as Record<string, number>).map(([name, orig]) => {
+                  const reduced = (Number(editItemsQty[name]) || 0) < orig
+                  const key = name.trim().toLowerCase()
+                  return (
+                    <div key={name} className="space-y-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <Label className="text-sm font-normal">{name}</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={orig}
+                            className="w-20 text-right"
+                            value={editItemsQty[name] ?? ""}
+                            onChange={(e) => setEditItemsQty((prev) => ({ ...prev, [name]: e.target.value }))}
+                          />
+                          <span className="text-xs text-muted-foreground w-10">/ {orig}</span>
+                        </div>
+                      </div>
+                      {reduced && (
+                        <Input
+                          placeholder="Reason for reducing qty (required)"
+                          value={editItemsReasons[key] || ""}
+                          onChange={(e) => setEditItemsReasons((prev) => ({ ...prev, [key]: e.target.value }))}
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditItemsOrder(null)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveEditItems} disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

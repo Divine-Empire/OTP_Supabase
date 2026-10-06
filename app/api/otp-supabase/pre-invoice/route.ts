@@ -17,6 +17,45 @@ function sumQtyByName(rows: { item_name?: string; qty?: number }[]): Map<string,
   return totals
 }
 
+// Qty can be reduced below what Packing List queued (e.g. ship less now,
+// after a client call) — see Database/55_otp_released_stock.sql. Diffs the
+// row's own pre-edit items (not the live order) per item name; every
+// reduced name needs a reason, and becomes an otp_released_stock row so the
+// freed qty is never silently lost. Shared by POST (Process) and PATCH
+// (Edit Items) so both enforce the same rule.
+function computeReleases(
+  originalItems: { item_name?: string; item_code?: string; qty?: number }[],
+  submittedItems: { item_name?: string; qty?: number }[],
+  reductionReasons: Record<string, string> | undefined,
+  ctx: { orderId: string; queueId: string; createdBy?: string }
+): { missingReasons: string[]; releaseRows: any[] } {
+  const originalTotals = sumQtyByName(originalItems)
+  const submittedTotals = sumQtyByName(submittedItems)
+  const missingReasons: string[] = []
+  const releaseRows: any[] = []
+  for (const [key, originalQty] of originalTotals.entries()) {
+    const delta = originalQty - (submittedTotals.get(key) || 0)
+    if (delta <= 0) continue
+    const reason = reductionReasons?.[key]
+    if (!reason || !reason.trim()) {
+      missingReasons.push(key)
+      continue
+    }
+    const src = originalItems.find((it) => nameKey(it.item_name) === key)
+    releaseRows.push({
+      item_name: src?.item_name || key,
+      item_code: src?.item_code || null,
+      qty_released: delta,
+      qty_remaining: delta,
+      source_order_id: ctx.orderId,
+      source_queue_id: ctx.queueId,
+      reason: reason.trim(),
+      released_by: ctx.createdBy || null,
+    })
+  }
+  return { missingReasons, releaseRows }
+}
+
 // Stage — Pre-Invoice.
 //
 // Pending: otp_pre_invoice_queue.status = 'pending' (a queue row per wave —
@@ -48,7 +87,7 @@ export async function GET(request: Request) {
     let { data, error } = await supabase
       .from("otp_pre_invoice_queue")
       .select(
-        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)"
+        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)"
       )
       .eq("status", status)
       .order("created_at", { ascending: false })
@@ -61,7 +100,7 @@ export async function GET(request: Request) {
       console.warn("otp_released_stock table not found yet — fetching pre-invoice without it:", error.message)
       ;({ data, error } = await supabase
         .from("otp_pre_invoice_queue")
-        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status))")
+        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))")
         .eq("status", status)
         .order("created_at", { ascending: false }))
     }
@@ -112,7 +151,9 @@ export async function POST(request: Request) {
       paymentMode?: string
       DeliveryNoteForInvoiceRequired?: "YES" | "NO" | ""
       reductionReasons?: Record<string, string> // nameKey -> reason, required for any item_name reduced below its queued qty
+      mergeIds?: string[] // other pending waves of the same order, billed together with `id` (see otp_merge_queue_waves)
     }
+    const mergeIds = (body.mergeIds || []).filter((m: string) => m && m !== id)
 
     if (!id) {
       return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 })
@@ -120,68 +161,55 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
-    // Qty can be freely reduced below what Check Inventory originally queued
-    // (e.g. ship less now, after a client call) — see
-    // Database/55_otp_released_stock.sql. Diff against the row's own
-    // pre-edit items (not the live order) so this only ever reacts to a
-    // reduction made in THIS submit, and require a reason per reduced item
-    // name so the freed qty is never silently lost before it's logged.
+    // Validate everything before merging — the merge itself can't be undone.
+    const { data: waveRows, error: waveError } = await supabase
+      .from("otp_pre_invoice_queue")
+      .select("id, items, order_id, status")
+      .in("id", [id, ...mergeIds])
+    if (waveError) throw waveError
+    const primaryRow = (waveRows || []).find((r: any) => r.id === id)
+    if (!primaryRow || primaryRow.status !== "pending") {
+      return NextResponse.json({ success: false, error: "Queue row not found or already invoiced" }, { status: 404 })
+    }
+    if (
+      (waveRows || []).length !== mergeIds.length + 1 ||
+      (waveRows || []).some((r: any) => r.status !== "pending" || r.order_id !== primaryRow.order_id)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Selected waves must all be pending and belong to the same order" },
+        { status: 400 }
+      )
+    }
+
+    let releaseRows: any[] = []
     if (items) {
-      const { data: currentRow, error: currentRowError } = await supabase
-        .from("otp_pre_invoice_queue")
-        .select("items, order_id")
-        .eq("id", id)
-        .eq("status", "pending")
-        .maybeSingle()
-      if (currentRowError) throw currentRowError
-      if (!currentRow) {
+      const originalItems = (waveRows || []).flatMap((r: any) => r.items || [])
+      const result = computeReleases(originalItems, items, reductionReasons, {
+        orderId: primaryRow.order_id,
+        queueId: id,
+        createdBy,
+      })
+      if (result.missingReasons.length > 0) {
         return NextResponse.json(
-          { success: false, error: "Queue row not found or already invoiced" },
-          { status: 404 }
-        )
-      }
-
-      const originalTotals = sumQtyByName((currentRow.items || []) as any[])
-      const submittedTotals = sumQtyByName(items)
-      const missingReasons: string[] = []
-      const releaseRows: any[] = []
-
-      for (const [key, originalQty] of originalTotals.entries()) {
-        const delta = originalQty - (submittedTotals.get(key) || 0)
-        if (delta <= 0) continue
-
-        const reason = reductionReasons?.[key]
-        if (!reason || !reason.trim()) {
-          missingReasons.push(key)
-          continue
-        }
-
-        const srcItem =
-          ((currentRow.items || []) as any[]).find((it) => nameKey(it.item_name) === key) ||
-          items.find((it) => nameKey(it.item_name) === key)
-        releaseRows.push({
-          item_name: srcItem?.item_name || key,
-          item_code: srcItem?.item_code || null,
-          qty_released: delta,
-          qty_remaining: delta,
-          source_order_id: currentRow.order_id,
-          source_queue_id: id,
-          reason: reason.trim(),
-          released_by: createdBy || null,
-        })
-      }
-
-      if (missingReasons.length > 0) {
-        return NextResponse.json(
-          { success: false, error: `Reason required for reduced qty on: ${missingReasons.join(", ")}` },
+          { success: false, error: `Reason required for reduced qty on: ${result.missingReasons.join(", ")}` },
           { status: 400 }
         )
       }
+      releaseRows = result.releaseRows
+    }
 
-      if (releaseRows.length > 0) {
-        const { error: releaseError } = await supabase.from("otp_released_stock").insert(releaseRows)
-        if (releaseError) throw releaseError
-      }
+    if (mergeIds.length > 0) {
+      const { error: mergeError } = await supabase.rpc("otp_merge_queue_waves", {
+        p_primary: id,
+        p_others: mergeIds,
+        p_stage: "pre_invoice",
+      })
+      if (mergeError) throw mergeError
+    }
+
+    if (releaseRows.length > 0) {
+      const { error: releaseError } = await supabase.from("otp_released_stock").insert(releaseRows)
+      if (releaseError) throw releaseError
     }
 
     // Delivery Note (Inv.) is now a user choice made right here in the Process
@@ -238,6 +266,92 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/pre-invoice exception:", err)
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
+
+// Edit Items on a still-pending wave (e.g. by CRM), without processing it.
+// Reduce-only: can't bill more than Packing List actually found. Same
+// reason + released-stock rule as Process (computeReleases). Once the wave
+// is processed it leaves Pending, so this naturally stops applying.
+export async function PATCH(request: Request) {
+  try {
+    const { id, items, reductionReasons, editedBy } = (await request.json()) as {
+      id: string
+      items: { item_name: string; qty: number }[]
+      reductionReasons?: Record<string, string>
+      editedBy?: string
+    }
+    if (!id || !Array.isArray(items)) {
+      return NextResponse.json({ success: false, error: "Missing id or items" }, { status: 400 })
+    }
+
+    const supabase = getSupabaseAdmin()
+    const { data: row, error: rowError } = await supabase
+      .from("otp_pre_invoice_queue")
+      .select("items, order_id")
+      .eq("id", id)
+      .eq("status", "pending")
+      .maybeSingle()
+    if (rowError) throw rowError
+    if (!row) return NextResponse.json({ success: false, error: "Queue row not found or already processed" }, { status: 404 })
+
+    const original = (row.items || []) as any[]
+    const originalTotals = sumQtyByName(original)
+    const submittedTotals = sumQtyByName(items)
+    for (const [key, qty] of submittedTotals) {
+      if (!Number.isInteger(qty) || qty < 0) {
+        return NextResponse.json({ success: false, error: `${key}: qty must be a whole number, 0 or more` }, { status: 400 })
+      }
+      if (qty > (originalTotals.get(key) ?? 0)) {
+        return NextResponse.json(
+          { success: false, error: `${key}: can't increase above what Packing List queued (${originalTotals.get(key) ?? 0})` },
+          { status: 400 }
+        )
+      }
+    }
+
+    const { missingReasons, releaseRows } = computeReleases(original, items, reductionReasons, {
+      orderId: row.order_id,
+      queueId: id,
+      createdBy: editedBy,
+    })
+    if (missingReasons.length > 0) {
+      return NextResponse.json(
+        { success: false, error: `Reason required for reduced qty on: ${missingReasons.join(", ")}` },
+        { status: 400 }
+      )
+    }
+    if (releaseRows.length === 0) return NextResponse.json({ success: true, changed: false })
+
+    // Spread each name's new total back over its original entries in order
+    // (a pending wave normally has one entry per name), trimming serials.
+    const remaining = new Map(originalTotals)
+    for (const [key] of originalTotals) remaining.set(key, submittedTotals.get(key) ?? (originalTotals.get(key) || 0))
+    const newItems = original
+      .map((it) => {
+        const key = nameKey(it.item_name)
+        const qty = Math.min(Number(it.qty) || 0, remaining.get(key) || 0)
+        remaining.set(key, (remaining.get(key) || 0) - qty)
+        return { ...it, qty, serials: (it.serials || []).slice(0, qty) }
+      })
+      .filter((it) => it.qty > 0)
+
+    const { error: releaseError } = await supabase.from("otp_released_stock").insert(releaseRows)
+    if (releaseError) throw releaseError
+
+    // Emptied wave -> 'cancelled' with no items rather than deleted: the
+    // released-stock rows just inserted point at it (ON DELETE CASCADE).
+    const { error: updateError } = await supabase
+      .from("otp_pre_invoice_queue")
+      .update(newItems.length === 0 ? { items: [], status: "cancelled" } : { items: newItems })
+      .eq("id", id)
+      .eq("status", "pending")
+    if (updateError) throw updateError
+
+    return NextResponse.json({ success: true, changed: true })
+  } catch (err: any) {
+    console.error("PATCH /api/otp-supabase/pre-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

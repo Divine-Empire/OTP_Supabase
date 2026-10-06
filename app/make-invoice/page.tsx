@@ -93,6 +93,7 @@ export default function MakeInvoicePage() {
   const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
+  const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([])
   const [invoiceNumber, setInvoiceNumber] = useState("")
   const [invoiceDate, setInvoiceDate] = useState("")
   const [invoiceUploadFile, setInvoiceUploadFile] = useState<File | null>(null)
@@ -228,6 +229,23 @@ export default function MakeInvoicePage() {
     setIsDialogOpen(true)
   }
 
+  // Multi-wave billing: several pending waves of ONE order -> one invoice
+  // (merged server-side — see otp_merge_queue_waves).
+  const selectedWaveRows = filteredOrders.filter((o) => selectedQueueIds.includes(o.queueId))
+  const selectedOrderId = selectedWaveRows[0]?.orderId
+  const toggleWave = (order: any) =>
+    setSelectedQueueIds((prev) =>
+      prev.includes(order.queueId) ? prev.filter((x) => x !== order.queueId) : [...prev, order.queueId]
+    )
+  const handleProcessSelected = () => {
+    if (selectedWaveRows.length < 2) return
+    handleProcess({
+      ...selectedWaveRows[0],
+      rawItems: selectedWaveRows.flatMap((r) => r.rawItems || []),
+      mergeIds: selectedWaveRows.slice(1).map((r) => r.queueId),
+    })
+  }
+
   const handleViewItemList = (order: any) => {
     setItemListDialogItems(order.rawItems || [])
     setItemListDialogOpen(true)
@@ -291,6 +309,7 @@ export default function MakeInvoicePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           queueId: selectedOrder.queueId || selectedOrder.id,
+          mergeIds: selectedOrder.mergeIds || [],
           invoiceNumber: invoiceNumber.trim(),
           invoiceDate: invoiceDate || null,
           invoiceUploadUrl,
@@ -311,6 +330,7 @@ export default function MakeInvoicePage() {
       if (result.success) {
         setIsDialogOpen(false)
         setSelectedOrder(null)
+        setSelectedQueueIds([])
         await fetchOrders()
         alert(`Order ${selectedOrder.orderNo} — Invoice ${invoiceNumber.trim()} created.`)
       } else {
@@ -329,9 +349,17 @@ export default function MakeInvoicePage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
-            Process
-          </Button>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              aria-label="Select wave for one combined invoice"
+              checked={selectedQueueIds.includes(order.queueId)}
+              disabled={!!selectedOrderId && selectedOrderId !== order.orderId}
+              onCheckedChange={() => toggleWave(order)}
+            />
+            <Button size="sm" onClick={() => handleProcess(order)}>
+              Process
+            </Button>
+          </div>
         )
       case "itemList":
         return (
@@ -481,6 +509,16 @@ export default function MakeInvoicePage() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {currentTab === "pending" && selectedWaveRows.length >= 2 && (
+                    <Button onClick={handleProcessSelected} size="sm">
+                      One invoice for {selectedWaveRows.length} waves ({selectedWaveRows[0].orderNo})
+                    </Button>
+                  )}
+                  {currentTab === "pending" && selectedQueueIds.length > 0 && (
+                    <Button onClick={() => setSelectedQueueIds([])} variant="ghost" size="sm">
+                      Clear selection
+                    </Button>
+                  )}
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh

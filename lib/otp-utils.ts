@@ -422,6 +422,16 @@ export function mapCheckInventoryRowToUI(row: any): any {
     // Pending tab for anything that CAN still be auto-reconciled.
     overResolvedItems: row.overResolvedItems || [],
 
+    // History-only: whether this scan wave can still be edited (all its
+    // Pre-Invoice / Indent Creation / ledger rows uncommitted), its
+    // Pre-Invoice state ("pending" | "processed" | "none") for the filter,
+    // and the wave's own recorded items (with the quotation-adjusted
+    // suggested_ordered_qty) for the edit dialog — see packing-list/route.ts.
+    editable: !!row.editable,
+    preInvoiceStatus: row.preInvoiceStatus || "",
+    inventoryId: inventory?.id || "",
+    inventoryItems: inventory?.items || [],
+
     // items in {name, qty} shape (not {item_name, quantity}) so the existing
     // "Items Not Available" prefill logic in packing-list/page.tsx (which
     // reads item.name/item.qty) keeps working unchanged.
@@ -442,18 +452,29 @@ export function mapCheckInventoryRowToUI(row: any): any {
 // (one per wave — Check Inventory's available qty, later Material Received's
 // partial receipts), so orderNo/companyName come from the row's own `order`,
 // not assumed unique per order.
+// Outstanding shortage qty for an order. A first-time shortage sits in
+// otp_indent_creation (open until Material Received is answered) and only
+// moves into the otp_check_inventory_shortage ledger after that — counting
+// just the ledger showed 0 for every order whose shortage was still in
+// Indent Creation. Needs the route to embed both `shortages` and `indents`.
+export function orderPendingShortageQty(order: any): number {
+  const ledger = (order?.shortages || [])
+    .filter((s: any) => s.status === "pending")
+    .reduce((sum: number, s: any) => sum + (Number(s.shortage_qty) || 0), 0)
+  const indent = (order?.indents || [])
+    .filter((i: any) => i.material_received == null)
+    .reduce(
+      (sum: number, i: any) => sum + (i.items || []).reduce((s: number, it: any) => s + (Number(it.qty) || 0), 0),
+      0
+    )
+  return ledger + indent
+}
+
 export function mapPreInvoiceRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
-  
-  const shortages = order.shortages || []
-  let pendingQty = 0
-  shortages.forEach((s: any) => {
-    if (s.status === "pending") {
-      pendingQty += Number(s.shortage_qty) || 0
-    }
-  })
+  const pendingQty = orderPendingShortageQty(order)
 
   return {
     id: row.id,
@@ -598,9 +619,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     acceptanceCopy: order.acceptance_file_upload || "",
     totalOrderQty: order.total_qty || 0,
     totalQty: order.total_qty || 0,
-    pendingQty: (order.shortages || [])
-      .filter((s: any) => s.status === "pending")
-      .reduce((sum: number, s: any) => sum + (Number(s.shortage_qty) || 0), 0),
+    pendingQty: orderPendingShortageQty(order),
     amount: order.amount_with_tax || 0,
     sourceStage: row.source_stage || "",
     DeliveryNoteForInvoiceRequired: row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",

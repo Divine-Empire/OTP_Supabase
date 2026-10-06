@@ -19,7 +19,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight } from "lucide-react"
+import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight, Bell } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
@@ -191,6 +191,8 @@ const pendingColumns = [
 
 // Column definitions for History tab — base columns + this stage's own outcome
 const historyColumns = [
+  { key: "historyEdit", label: "Edit", searchable: false },
+  { key: "preInvoiceStatus", label: "Pre-Invoice", searchable: false },
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "availabilityStatus", label: "Availability Status", searchable: true },
   { key: "inventoryRemarks", label: "Remarks", searchable: true },
@@ -261,6 +263,17 @@ export default function CheckInventoryPage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [selectedColumn, setSelectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
+  // History: show only waves not yet processed downstream (still editable)
+  const [onlyEditable, setOnlyEditable] = useState(false)
+
+  // History edit dialog
+  const [editWave, setEditWave] = useState<any>(null)
+  const [editScanned, setEditScanned] = useState<Record<string, string>>({})
+
+  // Notifications (bell)
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [openNotification, setOpenNotification] = useState<any>(null)
   const [crmNameFilter, setCrmNameFilter] = useState<string>("all")
   const [isSubmitting, setIsSubmitting] = useState(false)
   // Offer Show / Conveyed For Registration Form are hidden by default (still
@@ -396,6 +409,8 @@ export default function CheckInventoryPage() {
       );
     }
 
+    if (onlyEditable) filtered = filtered.filter((order) => order.editable)
+
     // Apply search filter
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -412,13 +427,76 @@ export default function CheckInventoryPage() {
     }
 
     return filtered;
-  }, [processedOrders, searchTerm, selectedColumn, availabilityFilter, currentUser, crmNameFilter]);
+  }, [processedOrders, searchTerm, selectedColumn, availabilityFilter, currentUser, crmNameFilter, onlyEditable]);
 
   const handleProcessedTabClick = async () => {
     setProcessedLoading(true)
     const processed = await fetchProcessedOrders()
     setProcessedOrders(processed)
     setProcessedLoading(false)
+  }
+
+  const notificationUser = currentUser?.username || ""
+
+  const fetchNotifications = async () => {
+    if (!notificationUser) return
+    try {
+      const res = await fetch(`/api/otp-supabase/notifications?stage=packing-list&username=${encodeURIComponent(notificationUser)}`)
+      const json = await res.json()
+      if (json.success) {
+        setNotifications(json.data)
+        setUnreadCount(json.unread)
+      }
+    } catch (err) {
+      console.error("Failed to load notifications:", err)
+    }
+  }
+
+  useEffect(() => {
+    fetchNotifications()
+  }, [notificationUser])
+
+  const handleOpenNotification = async (n: any) => {
+    setOpenNotification(n)
+    if (n.read) return
+    await fetch("/api/otp-supabase/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [n.id], username: notificationUser }),
+    })
+    fetchNotifications()
+  }
+
+  const handleOpenHistoryEdit = (order: any) => {
+    setEditWave(order)
+    setEditScanned(
+      Object.fromEntries((order.inventoryItems || []).map((it: any) => [it.item_name, String(it.scanned_qty ?? 0)]))
+    )
+  }
+
+  const handleSaveHistoryEdit = async () => {
+    if (!editWave) return
+    setIsSubmitting(true)
+    try {
+      const res = await fetch("/api/otp-supabase/packing-list", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inventoryId: editWave.inventoryId,
+          editedBy: currentUser?.fullName || currentUser?.username || "Unknown",
+          items: Object.entries(editScanned).map(([item_name, qty]) => ({ item_name, scanned_qty: Number(qty) })),
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || "Update failed")
+      setEditWave(null)
+      await Promise.all([handleProcessedTabClick(), fetchNotifications()])
+      alert(json.changes?.length ? `Saved — ${json.changes.length} item(s) changed.` : "No changes to save.")
+    } catch (err: any) {
+      alert(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Column visibility handlers
@@ -865,6 +943,22 @@ export default function CheckInventoryPage() {
       case "shippingAddress":
       case "inventoryRemarks":
         return <div className="max-w-[200px] whitespace-normal break-words">{value}</div>
+      case "historyEdit":
+        return order.editable ? (
+          <Button size="sm" variant="outline" onClick={() => handleOpenHistoryEdit(order)}>
+            Edit
+          </Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">Locked</span>
+        )
+      case "preInvoiceStatus":
+        return value === "pending" ? (
+          <Badge variant="secondary">Pending</Badge>
+        ) : value === "processed" ? (
+          <Badge variant="default">Processed</Badge>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        )
       case "overResolvedItems": {
         const items: string[] = Array.isArray(value) ? value : []
         if (items.length === 0) return ""
@@ -971,6 +1065,43 @@ export default function CheckInventoryPage() {
                       </SelectContent>
                     </Select>
                   )}
+                  {currentTab === "history" && (
+                    <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+                      <Checkbox checked={onlyEditable} onCheckedChange={(c) => setOnlyEditable(c === true)} />
+                      Not yet processed in Pre-Invoice
+                    </label>
+                  )}
+                  <DropdownMenu onOpenChange={(open) => open && fetchNotifications()}>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="relative" aria-label="Notifications">
+                        <Bell className="h-4 w-4" />
+                        {unreadCount > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
+                      <DropdownMenuLabel>History edits</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      {notifications.length === 0 ? (
+                        <p className="px-2 py-3 text-sm text-muted-foreground">No notifications</p>
+                      ) : (
+                        notifications.map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => handleOpenNotification(n)}
+                            className={`w-full text-left px-2 py-2 rounded-sm hover:bg-muted ${n.read ? "" : "bg-blue-50"}`}
+                          >
+                            <p className={`text-sm ${n.read ? "" : "font-semibold"}`}>{n.message}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(n.created_at).toLocaleString()}</p>
+                          </button>
+                        ))
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button onClick={fetchOrders} variant="outline" size="sm" className="flex-1 sm:flex-initial">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -1141,7 +1272,7 @@ export default function CheckInventoryPage() {
                     <div className="md:hidden space-y-3 overflow-y-auto flex-1">
                       {filteredProcessedOrders.map((order, idx) => (
                         <MobileRecordCard
-                          key={order.id || order.orderId || order.orderNo || idx}
+                          key={order.inventoryId || idx}
                           columns={historyColumns}
                           visibleColumns={visibleHistoryColumns}
                           record={order}
@@ -1191,7 +1322,7 @@ export default function CheckInventoryPage() {
                           </TableHeader>
                           <TableBody>
                             {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
+                              <TableRow key={order.inventoryId || idx} className="hover:bg-gray-50">
                                 {historyColumns
                                   .filter((col) => visibleHistoryColumns[col.key])
                                   .map((column) => (
@@ -1772,6 +1903,131 @@ export default function CheckInventoryPage() {
                 )}
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* History Edit Dialog */}
+        <Dialog open={!!editWave} onOpenChange={(open) => !open && setEditWave(null)}>
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Edit Packing List — {editWave?.orderNo}</DialogTitle>
+              <DialogDescription>
+                Ordered qty follows the latest quotation. Change Scanned qty to what was actually packed — Pre-Invoice and
+                Indent Creation update automatically.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10">
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Ordered</TableHead>
+                    <TableHead className="text-right w-28">Scanned</TableHead>
+                    <TableHead className="text-right">Shortage</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(editWave?.inventoryItems || []).map((it: any) => {
+                    const ordered = Number(it.suggested_ordered_qty ?? it.ordered_qty) || 0
+                    const scanned = Number(editScanned[it.item_name]) || 0
+                    const orderedChanged = ordered !== (Number(it.ordered_qty) || 0)
+                    const invalid = scanned < 0 || scanned > ordered || !Number.isInteger(scanned)
+                    return (
+                      <TableRow key={it.item_name}>
+                        <TableCell className="whitespace-normal">{it.item_name}</TableCell>
+                        <TableCell className="text-right">
+                          {orderedChanged ? (
+                            <span>
+                              <span className="line-through text-muted-foreground mr-1">{it.ordered_qty}</span>
+                              <span className="font-semibold text-red-600">{ordered}</span>
+                            </span>
+                          ) : (
+                            ordered
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Input
+                            type="number"
+                            min={0}
+                            max={ordered}
+                            className={`w-20 ml-auto text-right ${invalid ? "border-red-500" : ""}`}
+                            value={editScanned[it.item_name] ?? ""}
+                            onChange={(e) => setEditScanned((prev) => ({ ...prev, [it.item_name]: e.target.value }))}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">{Math.max(ordered - scanned, 0)}</TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditWave(null)}>
+                Cancel
+              </Button>
+              <Button onClick={handleSaveHistoryEdit} disabled={isSubmitting}>
+                {isSubmitting ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Notification detail — what changed in that History edit */}
+        <Dialog open={!!openNotification} onOpenChange={(open) => !open && setOpenNotification(null)}>
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>{openNotification?.order_no} — Packing List changes</DialogTitle>
+              <DialogDescription>
+                {openNotification?.crm_name ? `CRM: ${openNotification.crm_name} · ` : ""}
+                Edited by {openNotification?.created_by || "—"} ·{" "}
+                {openNotification ? new Date(openNotification.created_at).toLocaleString() : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10">
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Ordered</TableHead>
+                    <TableHead className="text-right">Packed</TableHead>
+                    <TableHead className="text-right">Shortage</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(openNotification?.changes || []).map((c: any) => (
+                    <TableRow key={c.item_name}>
+                      <TableCell className="whitespace-normal">{c.item_name}</TableCell>
+                      {(["ordered", "scanned", "shortage"] as const).map((f) => {
+                        const before = c[`${f}_before`]
+                        const after = c[`${f}_after`]
+                        const diff = after - before
+                        // Less shortage is good news, unlike less ordered/packed.
+                        const good = f === "shortage" ? diff < 0 : diff > 0
+                        return (
+                          <TableCell key={f} className="text-right whitespace-nowrap">
+                            {diff === 0 ? (
+                              after
+                            ) : (
+                              <>
+                                {before} → <span className="font-semibold">{after}</span>{" "}
+                                <span className={good ? "text-green-600" : "text-red-600"}>
+                                  ({diff > 0 ? "+" : ""}
+                                  {diff})
+                                </span>
+                              </>
+                            )}
+                          </TableCell>
+                        )
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setOpenNotification(null)}>Close</Button>
+            </div>
           </DialogContent>
         </Dialog>
 
