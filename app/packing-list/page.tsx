@@ -31,13 +31,19 @@ import { MobileRecordCard } from "@/components/mobile-record-card"
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
 // Purchase-FMS-Supabase's serial format is "SN-<vendorCode>/<encodedDate>/<seq>"
 // (see qr-scanner.tsx) — items that get an individually-numbered label (seq
-// present, e.g. ".../001", ".../002") are countable physical units: each
-// distinct serial scanned becomes its own sub-row under the item, and qty
-// is just the count of those sub-rows (auto, not hand-edited — removing a
-// sub-row is how you undo a bad scan). Items whose label has no per-unit
-// sequence (seq empty, e.g. ".../BF0GAF/") aren't individually serialized —
-// re-scanning the same label just re-confirms the same item, so there are
-// no sub-rows and qty is still filled in by hand, same as before.
+// present, e.g. ".../001", ".../002") are usually countable physical units:
+// each distinct serial scanned becomes its own sub-row under the item, and
+// qty defaults to the count of those sub-rows. But Purchase-FMS-Supabase's
+// Serial Generation also has a "No" (bulk) toggle that still stamps a
+// numbered label (seq present) while that ONE label actually stands in for
+// the whole lift's quantity (N units, one shared serial) — indistinguishable
+// from a real per-unit serial by the label alone. So qty here is hand-editable
+// for numbered items too (same as bulk), defaulting to the sub-row count;
+// removing a sub-row (a bad scan) still recomputes it back to that count.
+// Items whose label has no per-unit sequence (seq empty, e.g. ".../BF0GAF/")
+// aren't individually serialized — re-scanning the same label just
+// re-confirms the same item, so there are no sub-rows and qty is filled in
+// by hand from the start.
 interface ScanRow {
   itemName: string
   itemCode: string
@@ -658,9 +664,10 @@ export default function CheckInventoryPage() {
     setAccessoryScanRows((prev) => prev.filter((_, i) => i !== index))
   }
 
-  // Bulk (non-serialized) items only — their qty can't come from a scan
-  // count, so it's typed in by hand. Numbered items never call this; their
-  // qty is always the count of serial sub-rows.
+  // Bulk items' qty can't come from a scan count, so it's typed in by hand.
+  // Numbered items default to the serial sub-row count but call this too —
+  // see the ScanRow comment above for why their qty still needs hand-editing
+  // (a "No"-mode bulk lift's one shared numbered label covers N units, not 1).
   const updateScanRowQty = (index: number, qty: string) => {
     setScanRows((prev) => prev.map((r, i) => (i === index ? { ...r, qty } : r)))
   }
@@ -1432,18 +1439,13 @@ export default function CheckInventoryPage() {
                                 <p className="text-sm font-medium truncate">{row.itemName}</p>
                                 <p className="text-xs text-muted-foreground">Code: {row.itemCode}</p>
                               </div>
-                              {row.serials.length > 0 ? (
-                                // Numbered item — qty is just the sub-row count, not hand-edited.
-                                <span className="w-24 text-center text-sm font-medium">{row.qty} pcs</span>
-                              ) : (
-                                <Input
-                                  type="number"
-                                  className="w-24"
-                                  placeholder="Qty"
-                                  value={row.qty}
-                                  onChange={(e) => updateScanRowQty(index, e.target.value)}
-                                />
-                              )}
+                              <Input
+                                type="number"
+                                className="w-24"
+                                placeholder="Qty"
+                                value={row.qty}
+                                onChange={(e) => updateScanRowQty(index, e.target.value)}
+                              />
                               <Button type="button" size="icon" variant="ghost" onClick={() => removeScanRow(index)}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
