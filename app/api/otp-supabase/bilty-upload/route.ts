@@ -97,7 +97,7 @@ export async function POST(request: Request) {
       .maybeSingle()
     if (ptError) throw ptError
     if (!packagingTransportRow) {
-      return NextResponse.json({ success: false, error: "Packaging and Transport record not found" }, { status: 404 })
+      return NextResponse.json({ success: false, error: "Packaging and Dispatch record not found" }, { status: 404 })
     }
 
     const toNumberOrNull = (val: unknown) => {

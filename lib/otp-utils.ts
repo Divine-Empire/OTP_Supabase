@@ -806,6 +806,10 @@ export function mapPackagingTransportPendingRowToUI(row: any): any {
     invoiceDate: makeInvoice.invoice_date || "",
     invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
     isDraft,
+    // Pre-fill for the process form's Transport Mode select — from the
+    // live order (never overwritten there), not this row (which only ever
+    // saves a mode once Final-submitted — see packaging-transport/route.ts).
+    transportMode: order.transport_mode || "",
     beforePhotoUrls: row.before_photo_urls || [],
     afterPhotoUrls: row.after_photo_urls || [],
     planned: formatDateTime(makeInvoice.packaging_transport_planned),
@@ -841,6 +845,8 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
 
     beforePhotoUrls: row.before_photo_urls || [],
     afterPhotoUrls: row.after_photo_urls || [],
+    transportMode: row.transport_mode || "",
+    receivingCopyUrl: row.receiving_copy_url || "",
     transporterName: row.transporter_name || "",
     transporterContact: row.transporter_contact || "",
     transporterRemarks: row.transporter_remarks || "",
@@ -946,12 +952,18 @@ export function mapClientConfirmationPendingRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
-  const packagingTransport = row.packagingTransport || {}
-  const makeInvoice = packagingTransport.makeInvoice || {}
+  // Two parent shapes (see client-confirmation/route.ts GET): "bilty" rows
+  // are otp_bilty_upload rows with packaging info nested under
+  // row.packagingTransport; "packaging" rows (Receiving's Section, Bilty
+  // Upload skipped) ARE the otp_packaging_transport row itself.
+  const isPackaging = row.parentType === "packaging"
+  const packagingTransport = isPackaging ? row : row.packagingTransport || {}
+  const makeInvoice = (isPackaging ? row.makeInvoice : packagingTransport.makeInvoice) || {}
 
   return {
     id: row.id,
-    biltyUploadId: row.id,
+    biltyUploadId: isPackaging ? undefined : row.id,
+    packagingTransportId: isPackaging ? row.id : undefined,
     orderId: order.id || row.order_id,
     orderNo: order.order_no || "",
     quotationNo: order.quotation_number || "",
@@ -962,7 +974,9 @@ export function mapClientConfirmationPendingRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
+    transportMode: packagingTransport.transport_mode || "",
     transporterName: packagingTransport.transporter_name || "",
+    receivingCopyUrl: isPackaging ? row.receiving_copy_url || "" : "",
     biltyNumber: row.bilty_number || "",
     planned: formatDateTime(row.client_confirmation_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
@@ -978,8 +992,12 @@ export function mapClientConfirmationHistoryRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
+  const isPackaging = !!row.packaging_transport_id
   const biltyUpload = row.biltyUpload || {}
-  const packagingTransport = biltyUpload.packagingTransport || {}
+  // Normal path: nested under biltyUpload.packagingTransport. Receiving's
+  // Section path: row.packagingTransport is the direct parent (see GET's
+  // top-level `packagingTransport:otp_packaging_transport(...)` join).
+  const packagingTransport = isPackaging ? row.packagingTransport || {} : biltyUpload.packagingTransport || {}
   const makeInvoice = packagingTransport.makeInvoice || {}
 
   return {
@@ -994,13 +1012,15 @@ export function mapClientConfirmationHistoryRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
+    transportMode: packagingTransport.transport_mode || "",
     transporterName: packagingTransport.transporter_name || "",
+    receivingCopyUrl: isPackaging ? packagingTransport.receiving_copy_url || "" : "",
 
     materialReceived: row.material_received || "",
     sitePersonName: row.site_person_name || "",
     clientContactNumber: row.contact_number || "",
     createdBy: row.created_by || "",
-    planned: formatDateTime(biltyUpload.client_confirmation_planned),
+    planned: formatDateTime(isPackaging ? packagingTransport.client_confirmation_planned : biltyUpload.client_confirmation_planned),
     actual: formatDateTime(row.created_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),

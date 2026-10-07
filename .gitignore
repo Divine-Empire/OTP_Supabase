@@ -26,10 +26,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-Flow.txt
+task.txt
 SESSION_CONTEXT.md
 
 # Agent and Context files
 .agents/
 .claude/
 skills-lock.json
+

@@ -56,7 +56,7 @@ const allSteps = [
   { id: "delivery-note-for-invoice", label: "Delivery Note (Inv.)" },
   { id: "make-invoice", label: "Make Invoice" },
   { id: "calibration", label: "Calibration Certificate" },
-  { id: "packaging-transport", label: "Packaging and Transport" },
+  { id: "packaging-transport", label: "Packaging and Dispatch" },
   { id: "bilty-upload", label: "Bilty Upload" },
   { id: "client-confirmation", label: "Client Confirmation" },
   { id: "delivery-note", label: "Delivery Note" },

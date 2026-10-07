@@ -93,7 +93,7 @@ const menuItems = [
   },
   {
     href: "/packaging-transport",
-    label: "Packaging and Transport",
+    label: "Packaging and Dispatch",
     icon: Truck,
     step: "packaging-transport",
   },

@@ -20,7 +20,7 @@ const STAGE_LABELS: Record<string, string> = {
   debit_note_for_invoice: "Delivery Note (Inv.)",
   make_invoice: "Make Invoice",
   calibration: "Calibration Certificate",
-  packaging_transport: "Packaging and Transport",
+  packaging_transport: "Packaging and Dispatch",
   bilty_upload: "Bilty Upload",
 }
 

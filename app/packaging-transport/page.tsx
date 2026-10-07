@@ -24,6 +24,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { isReceivingSectionMode } from "@/lib/dispatch-mode"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -50,12 +51,14 @@ const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions" && col.key !== "draftStatus"),
   { key: "beforePhoto", label: "Before Photo", searchable: false },
   { key: "afterPhoto", label: "After Photo", searchable: false },
+  { key: "transportMode", label: "Transport Mode", searchable: true },
   { key: "transporterName", label: "Assigned Driver", searchable: true },
   { key: "transporterContact", label: "Driver Contact", searchable: true },
   { key: "expenseAmount", label: "Expense Amount", searchable: false },
   { key: "transporterRemarks", label: "Transporter's Remark", searchable: true },
   { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
   { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
+  { key: "receivingCopy", label: "Receiving's Copy", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
   { key: "actual", label: "Actual", searchable: true },
 ]
@@ -110,6 +113,10 @@ export default function PackagingTransportPage() {
   const [existingBeforePhotoUrls, setExistingBeforePhotoUrls] = useState<string[]>([])
   const [existingAfterPhotoUrls, setExistingAfterPhotoUrls] = useState<string[]>([])
   const [isSavingPhotos, setIsSavingPhotos] = useState(false)
+  const [transportMode, setTransportMode] = useState("")
+  const [transportModeOptions, setTransportModeOptions] = useState<string[]>([])
+  const [receivingCopyFile, setReceivingCopyFile] = useState<File | null>(null)
+  const [existingReceivingCopyUrl, setExistingReceivingCopyUrl] = useState("")
   const [transporterName, setTransporterName] = useState("")
   const [transporterContact, setTransporterContact] = useState("")
   const [transporterRemarks, setTransporterRemarks] = useState("")
@@ -117,6 +124,10 @@ export default function PackagingTransportPage() {
   const [dispatchStatus, setDispatchStatus] = useState("okay")
   const [notOkReason, setNotOkReason] = useState("")
   const [assignedDriverOptions, setAssignedDriverOptions] = useState<string[]>([])
+
+  // Transport Mode decides which section the form shows below it — see
+  // lib/dispatch-mode.ts.
+  const isReceivingPath = isReceivingSectionMode(transportMode)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
@@ -184,6 +195,14 @@ export default function PackagingTransportPage() {
         }
       })
       .catch((err) => console.error("Error fetching assigned driver options:", err))
+    fetch("/api/otp-supabase/dropdowns?category=transport_mode")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && Array.isArray(result.data)) {
+          setTransportModeOptions(result.data.map((d: any) => d.value))
+        }
+      })
+      .catch((err) => console.error("Error fetching transport mode options:", err))
   }, [])
 
   const handleProcessedTabClick = async () => {
@@ -241,6 +260,20 @@ export default function PackagingTransportPage() {
     setAfterPhotoFiles([])
     setExistingBeforePhotoUrls(order.beforePhotoUrls || [])
     setExistingAfterPhotoUrls(order.afterPhotoUrls || [])
+    // Pre-filled from the order's own transport_mode (order-acceptable's
+    // value) — user can change it here; the change is saved only on this
+    // otp_packaging_transport row, never written back to otp_orders.
+    // otp_orders.transport_mode is synced from LTO verbatim and is
+    // lowercase ("by hand-warehouse"), while the transport_mode dropdown
+    // (and the Select below) use Title Case ("By Hand-Warehouse") — a
+    // case-sensitive match against transportModeOptions is needed so the
+    // Select actually shows it as selected instead of silently falling
+    // back to the placeholder.
+    const rawMode = (order.transportMode || "").trim()
+    const matchedMode = transportModeOptions.find((opt) => opt.toLowerCase() === rawMode.toLowerCase())
+    setTransportMode(matchedMode || rawMode)
+    setReceivingCopyFile(null)
+    setExistingReceivingCopyUrl("")
     setTransporterName("")
     setTransporterContact("")
     setTransporterRemarks("")
@@ -312,7 +345,16 @@ export default function PackagingTransportPage() {
       alert("Please upload at least one Before Photo (Packing).")
       return
     }
-    if (!transporterName.trim()) {
+    if (!transportMode) {
+      alert("Please select a Transport Mode.")
+      return
+    }
+    if (isReceivingPath) {
+      if (!existingReceivingCopyUrl && !receivingCopyFile) {
+        alert("Please upload Receiving's Copy.")
+        return
+      }
+    } else if (!transporterName.trim()) {
       alert("Please enter Transporter / Driver Name.")
       return
     }
@@ -323,9 +365,10 @@ export default function PackagingTransportPage() {
 
     setIsSubmitting(true)
     try {
-      const [newBeforeUrls, newAfterUrls] = await Promise.all([
+      const [newBeforeUrls, newAfterUrls, newReceivingCopyUrls] = await Promise.all([
         uploadFiles(beforePhotoFiles, "packaging_transport/before"),
         uploadFiles(afterPhotoFiles, "packaging_transport/after"),
+        isReceivingPath && receivingCopyFile ? uploadFiles([receivingCopyFile], "packaging_transport/receiving") : Promise.resolve([]),
       ])
 
       const response = await fetch("/api/otp-supabase/packaging-transport", {
@@ -336,10 +379,10 @@ export default function PackagingTransportPage() {
           makeInvoiceId: selectedOrder.makeInvoiceId || selectedOrder.id,
           beforePhotoUrls: [...existingBeforePhotoUrls, ...newBeforeUrls],
           afterPhotoUrls: [...existingAfterPhotoUrls, ...newAfterUrls],
-          transporterName,
-          transporterContact,
-          transporterRemarks,
-          expenseAmount,
+          transportMode,
+          ...(isReceivingPath
+            ? { receivingCopyUrl: existingReceivingCopyUrl || newReceivingCopyUrls[0] }
+            : { transporterName, transporterContact, transporterRemarks, expenseAmount }),
           dispatchStatus,
           notOkReason,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
@@ -399,6 +442,14 @@ export default function PackagingTransportPage() {
               </a>
             ))}
           </div>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "receivingCopy":
+        return order.receivingCopyUrl ? (
+          <a href={order.receivingCopyUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
         ) : (
           <Badge variant="secondary">N/A</Badge>
         )
@@ -713,7 +764,7 @@ export default function PackagingTransportPage() {
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Packaging and Transport</DialogTitle>
+              <DialogTitle>Packaging and Dispatch</DialogTitle>
               <DialogDescription>Upload packaging photos and enter transportation details for this order</DialogDescription>
             </DialogHeader>
             <div className="space-y-6">
@@ -812,60 +863,109 @@ export default function PackagingTransportPage() {
                 </div>
               </div>
 
-              {/* Transportation details */}
-              <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-4">
-                <h4 className="text-sm font-bold text-indigo-900">Transportation Details</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="transporterName" className="text-indigo-700">
-                      Assigned Driver <span className="text-red-500 font-bold">*</span>
-                    </Label>
-                    <Select value={transporterName} onValueChange={setTransporterName}>
-                      <SelectTrigger id="transporterName">
-                        <SelectValue placeholder="Select driver" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assignedDriverOptions.map((opt) => (
-                          <SelectItem key={opt} value={opt}>
-                            {opt}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="transporterContact" className="text-indigo-700">
-                      Driver Contact
-                    </Label>
-                    <Input
-                      id="transporterContact"
-                      value={transporterContact}
-                      onChange={(e) => setTransporterContact(e.target.value)}
-                      placeholder="Enter contact number"
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="expenseAmount" className="text-indigo-700">
-                      Expense Amount
-                    </Label>
-                    <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="transporterRemarks" className="text-indigo-700">
-                      Transporter's Remark
-                    </Label>
-                    <Textarea
-                      id="transporterRemarks"
-                      value={transporterRemarks}
-                      onChange={(e) => setTransporterRemarks(e.target.value)}
-                      placeholder="Enter transporter's remark..."
-                      rows={1}
-                    />
-                  </div>
-                </div>
+              {/* Transport Mode — decides which section renders below */}
+              <div className="space-y-2">
+                <Label htmlFor="transportMode">
+                  Transport Mode <span className="text-red-500 font-bold">*</span>
+                </Label>
+                <Select value={transportMode} onValueChange={setTransportMode}>
+                  <SelectTrigger id="transportMode">
+                    <SelectValue placeholder="Select transport mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {transportModeOptions.map((opt) => (
+                      <SelectItem key={opt} value={opt}>
+                        {opt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+
+              {isReceivingPath ? (
+                /* Receiving's Section — self pickup/delivery modes: no
+                   transporter, just proof the client received it directly. */
+                <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
+                  <h4 className="text-sm font-bold text-amber-900">Receiving's Section</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="receivingCopy" className="text-amber-700">
+                      Receiving's Copy <span className="text-red-500 font-bold">*</span>
+                    </Label>
+                    {existingReceivingCopyUrl && (
+                      <a
+                        href={existingReceivingCopyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block h-16 w-16 overflow-hidden rounded-lg border border-amber-200 bg-white"
+                      >
+                        <img src={existingReceivingCopyUrl} alt="Receiving's Copy" className="h-full w-full object-cover" />
+                      </a>
+                    )}
+                    <Input
+                      id="receivingCopy"
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={(e) => setReceivingCopyFile(e.target.files?.[0] || null)}
+                    />
+                    {receivingCopyFile && <p className="text-xs text-muted-foreground">{receivingCopyFile.name} selected</p>}
+                  </div>
+                </div>
+              ) : (
+                /* Transportation details */
+                <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-4">
+                  <h4 className="text-sm font-bold text-indigo-900">Transportation Details</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="transporterName" className="text-indigo-700">
+                        Assigned Driver <span className="text-red-500 font-bold">*</span>
+                      </Label>
+                      <Select value={transporterName} onValueChange={setTransporterName}>
+                        <SelectTrigger id="transporterName">
+                          <SelectValue placeholder="Select driver" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {assignedDriverOptions.map((opt) => (
+                            <SelectItem key={opt} value={opt}>
+                              {opt}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="transporterContact" className="text-indigo-700">
+                        Driver Contact
+                      </Label>
+                      <Input
+                        id="transporterContact"
+                        value={transporterContact}
+                        onChange={(e) => setTransporterContact(e.target.value)}
+                        placeholder="Enter contact number"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="expenseAmount" className="text-indigo-700">
+                        Expense Amount
+                      </Label>
+                      <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="transporterRemarks" className="text-indigo-700">
+                        Transporter's Remark
+                      </Label>
+                      <Textarea
+                        id="transporterRemarks"
+                        value={transporterRemarks}
+                        onChange={(e) => setTransporterRemarks(e.target.value)}
+                        placeholder="Enter transporter's remark..."
+                        rows={1}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Dispatch Confirmation */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">

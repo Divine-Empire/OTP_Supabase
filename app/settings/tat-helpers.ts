@@ -21,7 +21,7 @@ export const TAT_STAGE_OPTIONS: TatStageOption[] = [
   { key: "debit_note_for_invoice", label: "Delivery Note (Inv.)", plannedField: "otp_pre_invoice_queue.debit_note_planned" },
   { key: "make_invoice", label: "Make Invoice", plannedField: "otp_pre_invoice_queue.make_invoice_planned" },
   { key: "calibration", label: "Calibration Certificate", plannedField: "otp_make_invoice.calibration_planned" },
-  { key: "packaging_transport", label: "Packaging and Transport", plannedField: "otp_make_invoice.packaging_transport_planned" },
+  { key: "packaging_transport", label: "Packaging and Dispatch", plannedField: "otp_make_invoice.packaging_transport_planned" },
   { key: "bilty_upload", label: "Bilty Upload", plannedField: "otp_packaging_transport.bilty_upload_planned" },
   { key: "client_confirmation", label: "Client Confirmation", plannedField: "otp_bilty_upload.client_confirmation_planned" },
 ]

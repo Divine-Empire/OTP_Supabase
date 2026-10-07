@@ -36,7 +36,9 @@ const pendingColumns = [
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
   { key: "contactNumber", label: "Contact Number", searchable: true },
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
+  { key: "transportMode", label: "Transport Mode", searchable: true },
   { key: "transporterName", label: "Assigned Driver for Dispatch", searchable: true },
+  { key: "receivingCopy", label: "Receiving's Copy", searchable: false },
   { key: "itemList", label: "Item List", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
   { key: "planned", label: "Planned", searchable: true },
@@ -202,7 +204,9 @@ export default function ClientConfirmationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          biltyUploadId: selectedOrder.biltyUploadId || selectedOrder.id,
+          // Exactly one parent — see Database/59_packaging_dispatch_receiving_section.sql.
+          biltyUploadId: selectedOrder.biltyUploadId || undefined,
+          packagingTransportId: selectedOrder.packagingTransportId || undefined,
           materialReceived,
           sitePersonName,
           contactNumber: clientContactNumber,
@@ -250,6 +254,14 @@ export default function ClientConfirmationPage() {
         )
       case "materialReceived":
         return value ? <Badge variant={value === "Yes" ? "default" : "secondary"}>{value}</Badge> : ""
+      case "receivingCopy":
+        return order.receivingCopyUrl ? (
+          <a href={order.receivingCopyUrl} target="_blank" rel="noopener noreferrer">
+            <Badge variant="default">Link</Badge>
+          </a>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
       default:
         return value || ""
     }
