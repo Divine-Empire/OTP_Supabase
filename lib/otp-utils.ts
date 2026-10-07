@@ -767,6 +767,34 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
   }
 }
 
+// Maps a row from /api/otp-supabase/credit-note (status=pending|history) —
+// a plain otp_credit_note row, no parent join needed (company/PO/CRM are
+// denormalized onto the row itself at creation time — see
+// Database/60_credit_note.sql). Same shape for both tabs; `actual`/
+// `submittedBy` are only meaningful once status='completed'.
+export function mapCreditNoteRowToUI(row: any): any {
+  if (!row) return {}
+
+  const items = row.items || []
+  return {
+    id: row.id,
+    invoiceNumber: row.invoice_number || "",
+    companyName: row.company_name || "",
+    poNumber: row.po_number || "",
+    crmName: row.crm_name || "",
+    orderNos: Array.from(new Set(items.map((it: any) => it.order_no).filter(Boolean))).join(", "),
+    status: row.status || "pending",
+    remarks: row.remarks || "",
+    createdBy: row.created_by || "",
+    submittedBy: row.submitted_by || "",
+    timestamp: formatDateTime(row.created_at),
+    actual: formatDateTime(row.submitted_at),
+
+    items: items.map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: items,
+  }
+}
+
 // Maps a Pending row from /api/otp-supabase/packaging-transport (an
 // otp_make_invoice row, joined to its parent otp_orders — the pending
 // source table, since no otp_packaging_transport row exists yet) into the

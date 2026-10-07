@@ -23,6 +23,7 @@ import {
   FileCheck2,
   XCircle,
   UserCheck,
+  Banknote,
 } from "lucide-react";
 
 // Module-scoped (not component state) so it survives Sidebar's own
@@ -115,6 +116,12 @@ const menuItems = [
       icon: FileMinus,
       step: "delivery-note",
     },
+  {
+    href: "/credit-note",
+    label: "Credit Note",
+    icon: Banknote,
+    step: "credit-note",
+  },
   {
     href: "/order-cancel",
     label: "Order Cancel",

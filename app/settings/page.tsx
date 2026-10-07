@@ -60,6 +60,7 @@ const allSteps = [
   { id: "bilty-upload", label: "Bilty Upload" },
   { id: "client-confirmation", label: "Client Confirmation" },
   { id: "delivery-note", label: "Delivery Note" },
+  { id: "credit-note", label: "Credit Note" },
   { id: "order-cancel", label: "Order Cancel" },
   { id: "settings", label: "Settings" },
 ]

@@ -19,7 +19,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Search, Settings, Eye, Banknote, ChevronLeft } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapMakeInvoicePendingRowToUI, mapMakeInvoiceHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
@@ -120,6 +120,95 @@ export default function MakeInvoicePage() {
     historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
+
+  // Credit Note — invoice-picker modal launched from this page's header
+  // (see app/api/otp-supabase/credit-note/route.ts's `?view=invoices`).
+  const [creditNoteOpen, setCreditNoteOpen] = useState(false)
+  const [creditNoteStep, setCreditNoteStep] = useState<"grid" | "items">("grid")
+  const [creditNoteLoading, setCreditNoteLoading] = useState(false)
+  const [creditNoteCards, setCreditNoteCards] = useState<any[]>([])
+  const [creditNoteSearch, setCreditNoteSearch] = useState("")
+  const [selectedCard, setSelectedCard] = useState<any>(null)
+  const [creditNoteChecked, setCreditNoteChecked] = useState<Record<number, boolean>>({})
+  const [creditNoteQty, setCreditNoteQty] = useState<Record<number, string>>({})
+  const [creditNoteSubmitting, setCreditNoteSubmitting] = useState(false)
+
+  const openCreditNote = async () => {
+    setCreditNoteOpen(true)
+    setCreditNoteStep("grid")
+    setSelectedCard(null)
+    setCreditNoteLoading(true)
+    try {
+      const res = await fetch("/api/otp-supabase/credit-note?view=invoices")
+      const json = await res.json()
+      setCreditNoteCards(json.success ? json.data : [])
+    } catch (err) {
+      console.error("Error loading invoices for Credit Note:", err)
+      setCreditNoteCards([])
+    } finally {
+      setCreditNoteLoading(false)
+    }
+  }
+
+  const filteredCreditNoteCards = useMemo(() => {
+    if (!creditNoteSearch) return creditNoteCards
+    const q = creditNoteSearch.toLowerCase()
+    return creditNoteCards.filter(
+      (c) =>
+        c.invoiceNumber.toLowerCase().includes(q) ||
+        c.companyName.toLowerCase().includes(q) ||
+        c.orderNos.some((o: string) => o.toLowerCase().includes(q)) ||
+        c.poNumbers.some((p: string) => p.toLowerCase().includes(q))
+    )
+  }, [creditNoteCards, creditNoteSearch])
+
+  const openCreditNoteItems = (card: any) => {
+    setSelectedCard(card)
+    setCreditNoteStep("items")
+    setCreditNoteChecked({})
+    setCreditNoteQty(Object.fromEntries(card.items.map((it: any, idx: number) => [idx, String(it.remaining_qty)])))
+  }
+
+  const handleSubmitCreditNote = async () => {
+    if (!selectedCard) return
+    const selectedItems = selectedCard.items
+      .map((it: any, idx: number) => ({ ...it, qty: Number(creditNoteQty[idx]) || 0, _checked: creditNoteChecked[idx] }))
+      .filter((it: any) => it._checked)
+    if (selectedItems.length === 0) {
+      alert("Select at least one item.")
+      return
+    }
+    setCreditNoteSubmitting(true)
+    try {
+      const res = await fetch("/api/otp-supabase/credit-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          invoiceNumber: selectedCard.invoiceNumber,
+          companyName: selectedCard.companyName,
+          poNumber: selectedCard.poNumbers[0] || "",
+          crmName: selectedCard.crmName,
+          items: selectedItems.map((it: any) => ({
+            order_id: it.order_id,
+            order_no: it.order_no,
+            make_invoice_id: it.make_invoice_id,
+            item_code: it.item_code,
+            item_name: it.item_name,
+            qty: it.qty,
+          })),
+          createdBy: currentUser?.fullName || currentUser?.username || "Admin",
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || "Failed to create Credit Note")
+      alert(`Credit Note created for invoice ${selectedCard.invoiceNumber} — find it in Credit Note's Pending tab.`)
+      setCreditNoteOpen(false)
+    } catch (err: any) {
+      alert(`Error: ${err.message}`)
+    } finally {
+      setCreditNoteSubmitting(false)
+    }
+  }
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -519,6 +608,14 @@ export default function MakeInvoicePage() {
                       Clear selection
                     </Button>
                   )}
+                  <Button
+                    onClick={openCreditNote}
+                    size="sm"
+                    className="bg-[#7A2E3B] hover:bg-[#631F2A] text-white"
+                  >
+                    <Banknote className="h-4 w-4 mr-2" />
+                    Credit Note
+                  </Button>
                   <Button onClick={fetchOrders} variant="outline" size="sm">
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Refresh
@@ -984,6 +1081,190 @@ export default function MakeInvoicePage() {
             <div className="flex justify-end">
               <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Credit Note — invoice picker (step "grid") then item/qty
+            selection (step "items"). Ledger-strip visual treatment,
+            distinct from the rest of the app — see Database/60_credit_note.sql
+            and app/api/otp-supabase/credit-note/route.ts. */}
+        <Dialog open={creditNoteOpen} onOpenChange={setCreditNoteOpen}>
+          <DialogContent
+            className="max-w-3xl max-h-[85vh] flex flex-col overflow-hidden p-0 gap-0"
+            style={{ background: "#FAF8F5" }}
+          >
+            {creditNoteStep === "grid" ? (
+              <>
+                <DialogHeader className="px-6 pt-6 pb-4 border-b" style={{ borderColor: "#E4DED8" }}>
+                  <DialogTitle className="text-xl" style={{ color: "#241F1D" }}>
+                    Credit Note
+                  </DialogTitle>
+                  <DialogDescription style={{ color: "#5B6168" }}>
+                    Pick an invoice to issue a credit against. Only invoices with something left to credit are listed.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="px-6 pt-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: "#5B6168" }} />
+                    <Input
+                      placeholder="Search invoice no., order no., company, PO..."
+                      value={creditNoteSearch}
+                      onChange={(e) => setCreditNoteSearch(e.target.value)}
+                      className="pl-10 bg-white"
+                      style={{ borderColor: "#E4DED8" }}
+                    />
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+                  {creditNoteLoading ? (
+                    <div className="flex items-center justify-center py-16" style={{ color: "#5B6168" }}>
+                      <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
+                      Loading invoices...
+                    </div>
+                  ) : filteredCreditNoteCards.length === 0 ? (
+                    <div className="text-center py-16" style={{ color: "#5B6168" }}>
+                      Nothing left to credit.
+                    </div>
+                  ) : (
+                    filteredCreditNoteCards.map((card) => (
+                      <button
+                        key={card.invoiceNumber}
+                        type="button"
+                        onClick={() => openCreditNoteItems(card)}
+                        className="w-full text-left bg-white hover:shadow-md transition-shadow rounded-r-md overflow-hidden flex"
+                        style={{
+                          borderTop: "1px solid #E4DED8",
+                          borderRight: "1px solid #E4DED8",
+                          borderBottom: "1px solid #E4DED8",
+                        }}
+                      >
+                        {/* Perforated stub edge — a credit note is a tear-off against an invoice */}
+                        <div
+                          className="w-2 shrink-0"
+                          style={{
+                            background: "repeating-linear-gradient(to bottom, #7A2E3B 0 6px, transparent 6px 12px)",
+                          }}
+                        />
+                        <div className="flex-1 px-5 py-4 flex items-center justify-between gap-4">
+                          <div className="min-w-0">
+                            <div className="flex items-baseline gap-2">
+                              <span className="font-mono text-base font-semibold" style={{ color: "#241F1D" }}>
+                                {card.invoiceNumber}
+                              </span>
+                              {card.invoiceDate && (
+                                <span className="text-xs font-mono" style={{ color: "#5B6168" }}>
+                                  {new Date(card.invoiceDate).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-sm mt-0.5 truncate" style={{ color: "#241F1D" }}>
+                              {card.companyName}
+                            </p>
+                            <p className="text-xs mt-0.5 truncate" style={{ color: "#5B6168" }}>
+                              Order {card.orderNos.join(", ")}
+                              {card.poNumbers.length > 0 ? ` · PO ${card.poNumbers.join(", ")}` : ""}
+                            </p>
+                          </div>
+                          <span
+                            className="text-xs font-medium px-2.5 py-1 rounded-sm shrink-0"
+                            style={{ background: "#F4E7E9", color: "#7A2E3B" }}
+                          >
+                            {card.items.filter((it: any) => it.remaining_qty > 0).length} item(s) creditable
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <DialogHeader className="px-6 pt-6 pb-4 border-b" style={{ borderColor: "#E4DED8" }}>
+                  <button
+                    type="button"
+                    onClick={() => setCreditNoteStep("grid")}
+                    className="flex items-center gap-1 text-sm mb-1"
+                    style={{ color: "#7A2E3B" }}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    All invoices
+                  </button>
+                  <DialogTitle className="text-xl font-mono" style={{ color: "#241F1D" }}>
+                    {selectedCard?.invoiceNumber}
+                  </DialogTitle>
+                  <DialogDescription style={{ color: "#5B6168" }}>
+                    {selectedCard?.companyName} — select items and the qty to credit.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex-1 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow style={{ borderColor: "#E4DED8" }}>
+                        <TableHead className="w-10"></TableHead>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right font-mono">Invoiced</TableHead>
+                        <TableHead className="text-right font-mono">Remaining</TableHead>
+                        <TableHead className="text-right w-28">Credit Qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(selectedCard?.items || []).map((it: any, idx: number) => {
+                        const disabled = it.remaining_qty <= 0
+                        return (
+                          <TableRow key={idx} style={{ borderColor: "#E4DED8", opacity: disabled ? 0.45 : 1 }}>
+                            <TableCell>
+                              <Checkbox
+                                checked={!!creditNoteChecked[idx]}
+                                disabled={disabled}
+                                onCheckedChange={(c) => setCreditNoteChecked((prev) => ({ ...prev, [idx]: c === true }))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div style={{ color: "#241F1D" }}>{it.item_name}</div>
+                              {it.order_no && (
+                                <div className="text-xs" style={{ color: "#5B6168" }}>
+                                  Order {it.order_no}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono" style={{ color: "#5B6168" }}>
+                              {it.invoiced_qty}
+                            </TableCell>
+                            <TableCell className="text-right font-mono" style={{ color: "#5B6168" }}>
+                              {it.remaining_qty}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                min={1}
+                                max={it.remaining_qty}
+                                disabled={disabled || !creditNoteChecked[idx]}
+                                value={creditNoteQty[idx] ?? ""}
+                                onChange={(e) => setCreditNoteQty((prev) => ({ ...prev, [idx]: e.target.value }))}
+                                className="w-20 ml-auto text-right font-mono"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: "#E4DED8" }}>
+                  <Button variant="outline" onClick={() => setCreditNoteStep("grid")}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSubmitCreditNote}
+                    disabled={creditNoteSubmitting}
+                    className="text-white"
+                    style={{ background: "#7A2E3B" }}
+                  >
+                    {creditNoteSubmitting ? "Creating..." : "Make Credit Note"}
+                  </Button>
+                </div>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       </div>

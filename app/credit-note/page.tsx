@@ -1,0 +1,628 @@
+"use client"
+
+import { useState, useEffect, useMemo } from "react"
+import { MainLayout } from "@/components/layout/main-layout"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu"
+import { RefreshCw, Search, Settings, Eye, Trash2, Banknote } from "lucide-react"
+import { useAuth } from "@/components/auth-provider"
+import { mapCreditNoteRowToUI } from "@/lib/otp-utils"
+import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { MobileRecordCard } from "@/components/mobile-record-card"
+
+// Ledger palette — deliberately distinct from the rest of the app (the
+// user asked for the whole Credit Note stage to have its own professional
+// look, not just match the indigo system used everywhere else).
+const INK = "#241F1D"
+const SLATE = "#5B6168"
+const WINE = "#7A2E3B"
+const WINE_SOFT = "#F4E7E9"
+const PAPER = "#FAF8F5"
+const LINE = "#E4DED8"
+
+const pendingColumns = [
+  { key: "actions", label: "Actions", searchable: false },
+  { key: "timestamp", label: "Created", searchable: true },
+  { key: "invoiceNumber", label: "Invoice Number", searchable: true },
+  { key: "orderNos", label: "Order No.", searchable: true },
+  { key: "companyName", label: "Company Name", searchable: true },
+  { key: "poNumber", label: "PO Number", searchable: true },
+  { key: "crmName", label: "CRM Name", searchable: true },
+  { key: "itemList", label: "Item List", searchable: false },
+  { key: "createdBy", label: "Created By", searchable: true },
+]
+
+const historyColumns = [
+  ...pendingColumns.filter((col) => col.key !== "actions"),
+  { key: "remarks", label: "Remarks", searchable: true },
+  { key: "submittedBy", label: "Submitted By", searchable: true },
+  { key: "actual", label: "Submitted At", searchable: true },
+]
+
+export default function CreditNotePage() {
+  const [orders, setOrders] = useState<any[]>([])
+  const [processedOrders, setProcessedOrders] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [processedLoading, setProcessedLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<any>(null)
+
+  const [creditItems, setCreditItems] = useState<any[]>([])
+  const [remarks, setRemarks] = useState("")
+
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
+  const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
+  const [searchTerm, setSearchTerm] = useState("")
+  const [crmNameFilter, setCrmNameFilter] = useState("all")
+  const [currentTab, setCurrentTab] = useState("pending")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
+    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+  )
+  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
+    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
+  )
+  const { user: currentUser } = useAuth()
+
+  const fetchOrders = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch("/api/otp-supabase/credit-note?status=pending")
+      const result = await response.json()
+      if (result.success && Array.isArray(result.data)) {
+        setOrders(result.data.map(mapCreditNoteRowToUI))
+      } else {
+        setOrders([])
+      }
+    } catch (err: any) {
+      console.error("Error fetching credit-note pending queue:", err)
+      setError(err.message)
+      setOrders([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchProcessedOrders = async () => {
+    setProcessedLoading(true)
+    try {
+      const response = await fetch("/api/otp-supabase/credit-note?status=history")
+      const result = await response.json()
+      if (result.success && Array.isArray(result.data)) {
+        setProcessedOrders(result.data.map(mapCreditNoteRowToUI))
+      } else {
+        setProcessedOrders([])
+      }
+    } catch (err) {
+      console.error("Error fetching credit-note history:", err)
+      setProcessedOrders([])
+    } finally {
+      setProcessedLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchOrders()
+  }, [])
+
+  const handleProcessedTabClick = async () => {
+    await fetchProcessedOrders()
+  }
+
+  const filteredOrders = useMemo(() => {
+    let filtered = filterByCrmAccess(orders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = pendingColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [orders, searchTerm, crmNameFilter, currentUser])
+
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
+
+  const filteredProcessedOrders = useMemo(() => {
+    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+    if (searchTerm) {
+      filtered = filtered.filter((order) => {
+        const searchableFields = historyColumns
+          .filter((col) => col.searchable)
+          .map((col) => String(order[col.key] || "").toLowerCase())
+        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
+      })
+    }
+    return filtered
+  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
+
+  const togglePendingColumn = (columnKey: string) =>
+    setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
+  const toggleHistoryColumn = (columnKey: string) =>
+    setVisibleHistoryColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
+  const showAllPendingColumns = () =>
+    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
+  const hideAllPendingColumns = () =>
+    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actions" }), {}))
+  const showAllHistoryColumns = () =>
+    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
+  const hideAllHistoryColumns = () =>
+    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: false }), {}))
+
+  const handleProcess = (order: any) => {
+    setSelectedOrder(order)
+    setCreditItems((order.rawItems || []).map((it: any) => ({ ...it })))
+    setRemarks("")
+    setIsDialogOpen(true)
+  }
+
+  const handleViewItemList = (order: any) => {
+    setItemListDialogItems(order.rawItems || [])
+    setItemListDialogOpen(true)
+  }
+
+  const removeCreditItem = (idx: number) => setCreditItems((prev) => prev.filter((_, i) => i !== idx))
+  const updateCreditItemQty = (idx: number, qty: string) =>
+    setCreditItems((prev) => prev.map((it, i) => (i === idx ? { ...it, qty } : it)))
+
+  // Submits the Credit Note process form — otp_credit_note's own status
+  // flips to 'completed' (see Database/60_credit_note.sql); items can be
+  // trimmed further and remarks added here, on top of whatever was first
+  // selected back on Make Invoice's invoice grid.
+  const handleSubmit = async () => {
+    if (!selectedOrder) return
+    if (creditItems.length === 0) {
+      alert("At least one item is required — remove the record instead if nothing should be credited.")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const response = await fetch("/api/otp-supabase/credit-note", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedOrder.id,
+          items: creditItems.map((it) => ({
+            order_id: it.order_id,
+            order_no: it.order_no,
+            make_invoice_id: it.make_invoice_id,
+            item_code: it.item_code,
+            item_name: it.item_name,
+            qty: Number(it.qty) || 0,
+          })),
+          remarks,
+          submittedBy: currentUser?.fullName || currentUser?.username || "Admin",
+        }),
+      })
+      const result = await response.json()
+
+      if (result.success) {
+        setIsDialogOpen(false)
+        setSelectedOrder(null)
+        await fetchOrders()
+        alert(`Credit Note for invoice ${selectedOrder.invoiceNumber} submitted.`)
+      } else {
+        throw new Error(result.error || "Update failed")
+      }
+    } catch (err: any) {
+      console.error("Error submitting credit-note:", err)
+      alert(`Error: ${err.message}`)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const renderCellContent = (order: any, columnKey: string) => {
+    const value = order[columnKey]
+    switch (columnKey) {
+      case "actions":
+        return (
+          <Button size="sm" onClick={() => handleProcess(order)} style={{ background: WINE }} className="text-white hover:opacity-90">
+            Process
+          </Button>
+        )
+      case "invoiceNumber":
+        return <span className="font-mono font-semibold" style={{ color: INK }}>{value}</span>
+      case "itemList":
+        return (
+          <Button size="sm" variant="outline" className="gap-1.5" style={{ borderColor: LINE, color: WINE }} onClick={() => handleViewItemList(order)}>
+            <Eye className="h-3.5 w-3.5" />
+            View Items
+          </Button>
+        )
+      default:
+        return value || ""
+    }
+  }
+
+  if (loading) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center h-64">
+          <RefreshCw className="h-8 w-8 animate-spin" style={{ color: WINE }} />
+          <span className="ml-2">Loading credit notes...</span>
+        </div>
+      </MainLayout>
+    )
+  }
+
+  if (error) {
+    return (
+      <MainLayout>
+        <div className="space-y-6">
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <p className="text-muted-foreground mt-2">{error}</p>
+            <Button onClick={fetchOrders} className="mt-4">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          </div>
+        </div>
+      </MainLayout>
+    )
+  }
+
+  return (
+    <MainLayout>
+      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col" style={{ background: PAPER }}>
+        <div className="flex items-center gap-3 px-2 py-3 shrink-0">
+          <div className="h-9 w-9 rounded-sm flex items-center justify-center shrink-0" style={{ background: WINE }}>
+            <Banknote className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold leading-none" style={{ color: INK }}>
+              Credit Note
+            </h1>
+            <p className="text-xs mt-1" style={{ color: SLATE }}>
+              Reversals raised against already-invoiced items
+            </p>
+          </div>
+        </div>
+
+        <Tabs value={currentTab} onValueChange={(value) => setCurrentTab(value)} className="flex-1 flex flex-col min-h-0">
+          <Card className="flex-1 flex flex-col min-h-0" style={{ borderColor: LINE }}>
+            <CardHeader className="border-b py-3 shrink-0" style={{ borderColor: LINE }}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <TabsList style={{ background: WINE_SOFT }}>
+                  <TabsTrigger value="pending" className="data-[state=active]:bg-white" style={{ color: INK }}>
+                    Pending ({filteredOrders.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="history" onClick={handleProcessedTabClick} className="data-[state=active]:bg-white" style={{ color: INK }}>
+                    History ({filteredProcessedOrders.length})
+                  </TabsTrigger>
+                </TabsList>
+
+                <div className="relative flex-1 min-w-[200px] max-w-md">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" style={{ color: SLATE }} />
+                  <Input
+                    placeholder="Search invoice, order, company, PO..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="All CRM Names" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM Names</SelectItem>
+                      {crmNameOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={fetchOrders} variant="outline" size="sm">
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Refresh
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Settings className="h-4 w-4 mr-2" />
+                        Column Visibility
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
+                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <div className="flex gap-2 p-2">
+                        <Button size="sm" variant="outline" onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}>
+                          Show All
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}>
+                          Hide All
+                        </Button>
+                      </div>
+                      <DropdownMenuSeparator />
+                      <div className="p-2 space-y-2">
+                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
+                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns
+                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn
+                          return (
+                            <div key={column.key} className="flex items-center space-x-2">
+                              <Checkbox id={`col-${column.key}`} checked={visibleCols[column.key]} onCheckedChange={() => toggleCol(column.key)} />
+                              <Label htmlFor={`col-${column.key}`} className="text-sm">
+                                {column.label}
+                              </Label>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-4 flex-1 min-h-0 flex flex-col" style={{ background: PAPER }}>
+              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
+                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
+                  {filteredOrders.map((order, idx) => (
+                    <MobileRecordCard key={order.id || idx} columns={pendingColumns} visibleColumns={visiblePendingColumns} record={order} renderCellContent={renderCellContent} />
+                  ))}
+                  {filteredOrders.length === 0 && (
+                    <p className="text-center py-8" style={{ color: SLATE }}>
+                      {searchTerm ? "No credit notes match your search" : "No pending credit notes"}
+                    </p>
+                  )}
+                </div>
+
+                <div className="hidden md:flex flex-col flex-1 min-h-0 rounded-lg overflow-hidden relative border" style={{ borderColor: LINE }}>
+                  <div className="overflow-auto flex-1 min-h-0">
+                    <Table className="w-full relative">
+                      <TableHeader className="sticky top-0 z-20 shadow-[0_1px_2px_rgba(0,0,0,0.06)]" style={{ background: WINE_SOFT }}>
+                        <TableRow style={{ borderColor: LINE }}>
+                          {pendingColumns
+                            .filter((col) => visiblePendingColumns[col.key])
+                            .map((column) => (
+                              <TableHead key={column.key} className="font-semibold px-4 py-3 whitespace-nowrap" style={{ minWidth: column.key === "actions" ? "120px" : "160px", color: WINE }}>
+                                {column.label}
+                              </TableHead>
+                            ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredOrders.map((order, idx) => (
+                          <TableRow key={order.id || idx} className="hover:bg-[#F4E7E9]/40" style={{ borderColor: LINE }}>
+                            {pendingColumns
+                              .filter((col) => visiblePendingColumns[col.key])
+                              .map((column) => (
+                                <TableCell key={column.key} className="border-b px-4 py-3 align-top" style={{ minWidth: column.key === "actions" ? "120px" : "160px", borderColor: LINE }}>
+                                  <div className="break-words whitespace-normal leading-relaxed">{renderCellContent(order, column.key)}</div>
+                                </TableCell>
+                              ))}
+                          </TableRow>
+                        ))}
+                        {filteredOrders.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length} className="text-center h-32" style={{ color: SLATE }}>
+                              {searchTerm ? "No credit notes match your search" : "No pending credit notes"}
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
+                {processedLoading ? (
+                  <div className="flex items-center justify-center h-32">
+                    <RefreshCw className="h-6 w-6 animate-spin" style={{ color: WINE }} />
+                    <span className="ml-2">Loading history...</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
+                      {filteredProcessedOrders.map((order, idx) => (
+                        <MobileRecordCard key={order.id || idx} columns={historyColumns} visibleColumns={visibleHistoryColumns} record={order} renderCellContent={renderCellContent} />
+                      ))}
+                      {filteredProcessedOrders.length === 0 && (
+                        <p className="text-center py-8" style={{ color: SLATE }}>
+                          {searchTerm ? "No credit notes match your search" : "No credit notes yet"}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="hidden md:flex flex-col flex-1 min-h-0 rounded-lg overflow-hidden relative border" style={{ borderColor: LINE }}>
+                      <div className="overflow-auto flex-1 min-h-0">
+                        <Table className="w-full relative">
+                          <TableHeader className="sticky top-0 z-20 shadow-[0_1px_2px_rgba(0,0,0,0.06)]" style={{ background: WINE_SOFT }}>
+                            <TableRow style={{ borderColor: LINE }}>
+                              {historyColumns
+                                .filter((col) => visibleHistoryColumns[col.key])
+                                .map((column) => (
+                                  <TableHead key={column.key} className="font-semibold px-4 py-3 whitespace-nowrap" style={{ minWidth: "160px", color: WINE }}>
+                                    {column.label}
+                                  </TableHead>
+                                ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredProcessedOrders.map((order, idx) => (
+                              <TableRow key={order.id || idx} className="hover:bg-[#F4E7E9]/40" style={{ borderColor: LINE }}>
+                                {historyColumns
+                                  .filter((col) => visibleHistoryColumns[col.key])
+                                  .map((column) => (
+                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top" style={{ minWidth: "160px", borderColor: LINE }}>
+                                      <div className="break-words whitespace-normal leading-relaxed">{renderCellContent(order, column.key)}</div>
+                                    </TableCell>
+                                  ))}
+                              </TableRow>
+                            ))}
+                            {filteredProcessedOrders.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length} className="text-center h-32" style={{ color: SLATE }}>
+                                  {searchTerm ? "No credit notes match your search" : "No credit notes yet"}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </TabsContent>
+            </CardContent>
+          </Card>
+        </Tabs>
+
+        {/* Process Dialog — document-style: read-only reference block, then
+            an editable line-item ledger, then remarks + submit. */}
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden p-0 gap-0" style={{ background: PAPER }}>
+            <DialogHeader className="px-6 pt-6 pb-4 border-b" style={{ borderColor: LINE }}>
+              <DialogTitle className="font-mono text-xl" style={{ color: INK }}>
+                {selectedOrder?.invoiceNumber}
+              </DialogTitle>
+              <DialogDescription style={{ color: SLATE }}>
+                {selectedOrder?.companyName}
+                {selectedOrder?.poNumber ? ` · PO ${selectedOrder.poNumber}` : ""} — Order {selectedOrder?.orderNos}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow style={{ borderColor: LINE }}>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right w-28">Qty</TableHead>
+                    <TableHead className="w-10"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {creditItems.map((it, idx) => (
+                    <TableRow key={idx} style={{ borderColor: LINE }}>
+                      <TableCell>
+                        <div style={{ color: INK }}>{it.item_name}</div>
+                        {it.order_no && (
+                          <div className="text-xs" style={{ color: SLATE }}>
+                            Order {it.order_no}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min={1}
+                          value={it.qty}
+                          onChange={(e) => updateCreditItemQty(idx, e.target.value)}
+                          className="w-20 ml-auto text-right font-mono"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Button size="icon" variant="ghost" onClick={() => removeCreditItem(idx)} style={{ color: WINE }}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {creditItems.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center h-20" style={{ color: SLATE }}>
+                        No items left — removing all of them means nothing gets credited.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="px-6 py-4 border-t space-y-3" style={{ borderColor: LINE }}>
+              <div className="space-y-1.5">
+                <Label htmlFor="remarks" style={{ color: INK }}>
+                  Remarks
+                </Label>
+                <Textarea id="remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Reason for this credit note..." rows={2} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSubmit} disabled={isSubmitting} className="text-white" style={{ background: WINE }}>
+                  {isSubmitting ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Item List Dialog */}
+        <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
+          <DialogContent className="max-w-md max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Item List</DialogTitle>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background z-10">
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Item Name</TableHead>
+                    <TableHead className="text-right">Qty</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {itemListDialogItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-center text-muted-foreground">
+                        No items
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    itemListDialogItems.map((item: any, idx: number) => (
+                      <TableRow key={idx}>
+                        <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                        <TableCell>{item.item_name}</TableCell>
+                        <TableCell className="text-right">{item.qty}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setItemListDialogOpen(false)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </MainLayout>
+  )
+}

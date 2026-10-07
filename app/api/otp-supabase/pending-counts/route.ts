@@ -27,6 +27,7 @@ export async function GET() {
       packagingTransportRes,
       biltyUploadRes,
       clientConfirmationRes,
+      creditNotePendingRes,
     ] = await Promise.all([
       supabase.from("otp_orders").select("id"),
       supabase.from("otp_orders_acceptable").select("order_id, check_inventory_planned, proforma_invoice_planned, debit_note_planned"),
@@ -42,11 +43,13 @@ export async function GET() {
       supabase.from("otp_packaging_transport").select("id, make_invoice_id, status, bilty_upload_planned"),
       supabase.from("otp_bilty_upload").select("id, packaging_transport_id, client_confirmation_planned"),
       supabase.from("otp_client_confirmation").select("bilty_upload_id"),
+      supabase.from("otp_credit_note").select("id", { count: "exact", head: true }).eq("status", "pending"),
     ])
 
     for (const r of [
       ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, repeatShortageRes, queueRes,
       DeliveryNoteInvRes, makeInvoiceRes, calibrationRes, packagingTransportRes, biltyUploadRes, clientConfirmationRes,
+      creditNotePendingRes,
     ]) {
       if (r.error) throw r.error
     }
@@ -90,6 +93,7 @@ export async function GET() {
       "packaging-transport": makeInvoiceRows.filter((r: any) => r.packaging_transport_planned && !packagingSubmittedIds.has(r.id)).length,
       "bilty-upload": packagingTransportRows.filter((r: any) => r.bilty_upload_planned && !biltyDoneIds.has(r.id)).length,
       "client-confirmation": biltyUploadRows.filter((r: any) => r.client_confirmation_planned && !clientConfirmationDoneIds.has(r.id)).length,
+      "credit-note": creditNotePendingRes.count || 0,
     }
 
     return NextResponse.json({ success: true, data })
