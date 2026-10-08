@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { ALL_LOCATIONS } from "@/lib/locations";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription, VisuallyHidden } from "@/components/ui/sheet";
@@ -35,6 +36,7 @@ import {
 // stale-while-revalidate fetch after that instead of a blocking one.
 let pendingCountsCache: Record<string, number> | null = null
 let pendingCountsCacheAt = 0
+let pendingCountsCacheKey = ""
 const PENDING_COUNTS_TTL_MS = 25_000
 
 const menuItems = [
@@ -135,23 +137,34 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
-  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>(pendingCountsCache || {});
+  // Same rule as lib/access.ts: admins, and users with no location yet, see
+  // every location's counts.
+  const countsLocation =
+    user && user.role !== "admin" && user.location && user.location !== ALL_LOCATIONS ? user.location : "";
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>(
+    pendingCountsCacheKey === countsLocation ? pendingCountsCache || {} : {}
+  );
 
   useEffect(() => {
-    const isFresh = pendingCountsCache && Date.now() - pendingCountsCacheAt < PENDING_COUNTS_TTL_MS;
+    const isFresh =
+      pendingCountsCache &&
+      pendingCountsCacheKey === countsLocation &&
+      Date.now() - pendingCountsCacheAt < PENDING_COUNTS_TTL_MS;
     if (isFresh) return; // cache already applied as initial state above — nothing to do
 
-    fetch("/api/otp-supabase/pending-counts")
+    const query = countsLocation ? `?location=${encodeURIComponent(countsLocation)}` : "";
+    fetch(`/api/otp-supabase/pending-counts${query}`)
       .then((res) => res.json())
       .then((result) => {
         if (result.success && result.data) {
           pendingCountsCache = result.data;
           pendingCountsCacheAt = Date.now();
+          pendingCountsCacheKey = countsLocation;
           setPendingCounts(result.data);
         }
       })
       .catch((err) => console.error("Error fetching sidebar pending counts:", err));
-  }, []);
+  }, [countsLocation]);
 
   const filteredMenuItems = menuItems.filter((item) => {
     if (user?.role === "admin") return true;

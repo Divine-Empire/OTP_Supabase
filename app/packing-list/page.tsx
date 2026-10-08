@@ -22,7 +22,7 @@ import {
 import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight, Bell } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { checkSerialWithIms } from "@/lib/ims"
@@ -356,13 +356,13 @@ export default function CheckInventoryPage() {
     saveDraft(orderId, currentUser?.username || "shared", scanRows, accessoryScanRows)
   }, [isDialogOpen, selectedOrder, scanRows, accessoryScanRows, currentUser?.username])
 
-  // Role-based access: 'user' role only sees rows whose crmName is in their
-  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // Role-based access: 'user' role only sees rows matching their assigned
+  // CRM names and location (Settings > User Management) — see lib/access.ts.
   // admin is unrestricted.
 
   // Update the filteredOrders useMemo to include role-based filtering
   const filteredOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(orders, currentUser);
+    let filtered = filterByAccess(orders, currentUser);
 
     if (crmNameFilter !== "all") {
       filtered = filtered.filter((order) => order.crmName === crmNameFilter)
@@ -389,14 +389,14 @@ export default function CheckInventoryPage() {
   const pendingOrders = filteredOrders;
 
   const crmNameOptions = useMemo(
-    () => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)),
+    () => crmNameOptionsFrom(filterByAccess(orders, currentUser)),
     [orders, currentUser]
   )
 
   // Filter processed orders based on search term
   // Update the filteredProcessedOrders useMemo
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(processedOrders, currentUser);
+    let filtered = filterByAccess(processedOrders, currentUser);
 
     if (crmNameFilter !== "all") {
       filtered = filtered.filter((order) => order.crmName === crmNameFilter)
@@ -559,7 +559,7 @@ export default function CheckInventoryPage() {
     setManualHasSerial(false)
     setManualQty("1")
     setManualSerials([""])
-    setSubGodown(currentUser?.defaultGodown || "")
+    setSubGodown("")
     setIsDialogOpen(true)
   }
 
@@ -1798,7 +1798,12 @@ export default function CheckInventoryPage() {
                     </p>
                   )}
 
-                  {subGodownOptions.length > 0 && (
+                  {selectedOrder?.orderLocation ? (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">Packing from:</span>
+                      <Badge variant="outline">{selectedOrder.orderLocation}</Badge>
+                    </div>
+                  ) : subGodownOptions.length > 0 && (
                     <div className="flex items-center gap-2">
                       <span className="text-sm text-muted-foreground whitespace-nowrap">Godown (CG only):</span>
                       <Select value={subGodown || "NONE"} onValueChange={(v) => setSubGodown(v === "NONE" ? "" : v)}>

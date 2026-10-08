@@ -24,7 +24,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { toast } from "sonner"
 import { useAuth } from "@/components/auth-provider"
 import { mapIndentCreationRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Base columns shared across all 3 tabs.
@@ -177,7 +177,7 @@ export default function IndentCreationPage() {
   }, [])
 
   const filteredPendingOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(pendingOrders, currentUser)
+    let filtered = filterByAccess(pendingOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -190,10 +190,10 @@ export default function IndentCreationPage() {
     return filtered
   }, [pendingOrders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(pendingOrders, currentUser)), [pendingOrders, currentUser])
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(pendingOrders, currentUser)), [pendingOrders, currentUser])
 
   const filteredMaterialReceivedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(materialReceivedOrders, currentUser)
+    let filtered = filterByAccess(materialReceivedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -207,7 +207,7 @@ export default function IndentCreationPage() {
   }, [materialReceivedOrders, searchTerm, crmNameFilter, currentUser])
 
   const filteredHistoryOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(historyOrders, currentUser)
+    let filtered = filterByAccess(historyOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {

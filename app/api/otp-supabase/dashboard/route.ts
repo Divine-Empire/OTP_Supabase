@@ -6,8 +6,11 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 // otp_v_dispatch_full views). Pending counts per stage mirror the exact
 // same "planned IS NOT NULL AND no matching child row" logic each stage's
 // own GET route already uses.
-export async function GET() {
+// ?location=<label> scopes everything to that location (plus orders with
+// no location yet) — same rule as pending-counts and lib/access.ts.
+export async function GET(request: Request) {
   try {
+    const location = new URL(request.url).searchParams.get("location")
     const supabase = getSupabaseAdmin()
 
     const [
@@ -22,15 +25,15 @@ export async function GET() {
       makeInvoiceRes,
       calibrationRes,
     ] = await Promise.all([
-      supabase.from("otp_orders").select("id, order_no, company_name, payment_mode, amount_with_tax, created_at"),
+      supabase.from("otp_orders").select("id, order_no, company_name, payment_mode, amount_with_tax, created_at, order_location"),
       supabase.from("otp_orders_acceptable").select("order_id, is_order_acceptable, check_inventory_planned, proforma_invoice_planned, debit_note_planned"),
       supabase.from("otp_proforma_invoice").select("order_id"),
       supabase.from("otp_debit_note").select("order_id"),
       supabase.from("otp_check_inventory").select("order_id"),
-      supabase.from("otp_indent_creation").select("material_received"),
-      supabase.from("otp_pre_invoice_queue").select("id, status, debit_note_planned, make_invoice_planned"),
+      supabase.from("otp_indent_creation").select("order_id, material_received"),
+      supabase.from("otp_pre_invoice_queue").select("id, order_id, status, debit_note_planned, make_invoice_planned"),
       supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
-      supabase.from("otp_make_invoice").select("id, pre_invoice_queue_id, total_bill_amount, calibration_planned, created_at"),
+      supabase.from("otp_make_invoice").select("id, order_id, pre_invoice_queue_id, total_bill_amount, calibration_planned, created_at"),
       supabase.from("otp_calibration_certificate").select("make_invoice_id"),
     ])
 
@@ -38,26 +41,28 @@ export async function GET() {
       if (r.error) throw r.error
     }
 
-    const orders = ordersRes.data || []
-    const acceptableRows = acceptableRes.data || []
+    const orders = (ordersRes.data || []).filter((o: any) => !location || !o.order_location || o.order_location === location)
+    const visibleOrderIds = new Set(orders.map((o: any) => o.id))
+    const visible = (rows: any[] | null) => (rows || []).filter((r: any) => visibleOrderIds.has(r.order_id))
+    const acceptableRows = visible(acceptableRes.data)
     const proformaDoneIds = new Set((proformaRes.data || []).map((r: any) => r.order_id))
     const DeliveryNoteDoneIds = new Set((DeliveryNoteRes.data || []).map((r: any) => r.order_id))
     const checkInvDoneIds = new Set((checkInvRes.data || []).map((r: any) => r.order_id))
-    const indentRows = indentRes.data || []
-    const queueRows = queueRes.data || []
+    const indentRows = visible(indentRes.data)
+    const queueRows = visible(queueRes.data)
     const DeliveryNoteInvDoneIds = new Set((DeliveryNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
-    const makeInvoiceRows = makeInvoiceRes.data || []
-    const makeInvoiceDoneQueueIds = new Set(makeInvoiceRows.map((r: any) => r.pre_invoice_queue_id))
+    const makeInvoiceRows = visible(makeInvoiceRes.data)
+    const makeInvoiceDoneQueueIds = new Set((makeInvoiceRes.data || []).map((r: any) => r.pre_invoice_queue_id))
     const calibrationDoneIds = new Set((calibrationRes.data || []).map((r: any) => r.make_invoice_id))
 
-    const acceptableDoneIds = new Set(acceptableRows.map((r: any) => r.order_id))
+    const acceptableDoneIds = new Set((acceptableRes.data || []).map((r: any) => r.order_id))
 
     // Pipeline stage pending counts, in pipeline order.
     const pipelineStages = [
       {
         key: "order_acceptable",
         label: "Order Acceptable",
-        pending: orders.length - acceptableDoneIds.size,
+        pending: orders.filter((o: any) => !acceptableDoneIds.has(o.id)).length,
       },
       {
         key: "proforma_invoice",

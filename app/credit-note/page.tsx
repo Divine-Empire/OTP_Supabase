@@ -22,7 +22,7 @@ import {
 import { RefreshCw, Search, Settings, Eye, Trash2, Banknote } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapCreditNoteRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Ledger palette — deliberately distinct from the rest of the app (the
@@ -127,7 +127,7 @@ export default function CreditNotePage() {
   }
 
   const filteredOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(orders, currentUser)
+    let filtered = filterByAccess(orders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -140,10 +140,10 @@ export default function CreditNotePage() {
     return filtered
   }, [orders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    let filtered = filterByAccess(processedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {

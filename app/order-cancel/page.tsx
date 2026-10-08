@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { RefreshCw, Search, XCircle, AlertTriangle, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
+import { canSeeLocation } from "@/lib/access"
 import { formatDateTime } from "@/lib/otp-utils"
 
 const logColumns = [
@@ -65,14 +66,15 @@ export default function OrderCancelPage() {
   }, [])
 
   const filteredLogs = useMemo(() => {
-    if (!searchTerm) return logs
-    return logs.filter((log) => {
+    const visible = logs.filter((log) => canSeeLocation(log.order?.order_location, currentUser))
+    if (!searchTerm) return visible
+    return visible.filter((log) => {
       const searchableFields = logColumns
         .filter((col) => col.searchable)
         .map((col) => String(log[col.key] || "").toLowerCase())
       return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
     })
-  }, [logs, searchTerm])
+  }, [logs, searchTerm, currentUser])
 
   const resetForm = () => {
     setOrderNoInput("")
@@ -102,7 +104,9 @@ export default function OrderCancelPage() {
       const response = await fetch(`/api/otp-supabase/cancel?orderNo=${encodeURIComponent(orderNoInput.trim())}`)
       const result = await response.json()
 
-      if (result.success) {
+      if (result.success && !canSeeLocation(result.order?.order_location, currentUser)) {
+        setSearchError(`This order belongs to ${result.order.order_location} — not your location.`)
+      } else if (result.success) {
         setOrder(result.order)
         setPendingStages(result.pendingStages || [])
         setSelectedStages(new Set((result.pendingStages || []).map((s: any) => s.key)))

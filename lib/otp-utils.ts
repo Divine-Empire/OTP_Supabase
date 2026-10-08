@@ -3,6 +3,30 @@
 // Formatters and converters between Supabase Views and UI Table models
 // ==============================================================================
 
+import { FIELD_DEFS, getSectionForMode } from "@/lib/dispatch-mode"
+
+// Packaging and Dispatch History has no per-mode static columns (11 modes x
+// several fields each would be an unmanageable column explosion) — instead
+// this renders every populated field FIELD_DEFS says this row's own
+// transport_mode has, as one "Label: value" list, from the single set of
+// generic columns every mode shares (see lib/dispatch-mode.ts).
+function buildDispatchModeDetails(row: any): string {
+  const section = getSectionForMode(row.transport_mode)
+  const defs = FIELD_DEFS[section] || []
+  const parts: string[] = []
+  for (const def of defs) {
+    // These two already have their own dedicated History columns.
+    if (def.key === "receiving_copy_url" || def.key === "expense_amount") continue
+    const dbCol =
+      def.key === "driver_name" ? "transporter_name" : def.key === "driver_mobile" ? "transporter_contact" : def.key
+    const val = row[dbCol]
+    if (val !== null && val !== undefined && val !== "") {
+      parts.push(`${def.label}: ${def.key === "event_datetime" ? formatDateTime(val) : val}`)
+    }
+  }
+  return parts.join(" | ")
+}
+
 export function formatDateTime(dateVal: any): string {
   if (!dateVal) return ""
   try {
@@ -61,6 +85,7 @@ export function mapOrderAcceptableRowToUI(row: any): any {
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -112,6 +137,7 @@ export function mapProformaInvoicePendingRowToUI(row: any): any {
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -150,6 +176,7 @@ export function mapProformaInvoicePaymentAgainstPiRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -193,6 +220,7 @@ export function mapProformaInvoiceHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -242,6 +270,7 @@ export function mapDeliveryNotePendingRowToUI(row: any): any {
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -289,6 +318,7 @@ export function mapDeliveryNoteHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -370,6 +400,7 @@ export function mapCheckInventoryRowToUI(row: any): any {
     timestamp: formatDateTime(order.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -485,6 +516,7 @@ export function mapPreInvoiceRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -544,6 +576,7 @@ export function mapDeliveryNoteForInvoicePendingRowToUI(row: any): any {
     timestamp: formatDateTime(row.invoiced_at || row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -572,6 +605,7 @@ export function mapDeliveryNoteForInvoiceHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -605,6 +639,7 @@ export function mapMakeInvoicePendingRowToUI(row: any): any {
     timestamp: formatDateTime(row.invoiced_at || row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -658,6 +693,7 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -716,6 +752,7 @@ export function mapCalibrationPendingRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -746,6 +783,7 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -782,6 +820,7 @@ export function mapCreditNoteRowToUI(row: any): any {
     companyName: row.company_name || "",
     poNumber: row.po_number || "",
     crmName: row.crm_name || "",
+    orderLocation: row.order_location || "",
     orderNos: Array.from(new Set(items.map((it: any) => it.order_no).filter(Boolean))).join(", "),
     status: row.status || "pending",
     remarks: row.remarks || "",
@@ -827,6 +866,7 @@ export function mapPackagingTransportPendingRowToUI(row: any): any {
     timestamp: formatDateTime(isDraft ? makeInvoice.created_at : row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -864,6 +904,7 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -879,6 +920,7 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     transporterContact: row.transporter_contact || "",
     transporterRemarks: row.transporter_remarks || "",
     expenseAmount: row.expense_amount ?? "",
+    modeDetails: buildDispatchModeDetails(row),
     dispatchStatus: row.dispatch_status || "okay",
     notOkReason: row.not_ok_reason || "",
     createdBy: row.created_by || "",
@@ -912,6 +954,7 @@ export function mapBiltyUploadPendingRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -946,6 +989,7 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -998,6 +1042,7 @@ export function mapClientConfirmationPendingRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -1036,6 +1081,7 @@ export function mapClientConfirmationHistoryRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
@@ -1077,6 +1123,7 @@ export function mapIndentCreationRowToUI(row: any): any {
     timestamp: formatDateTime(row.created_at),
     companyName: order.company_name || "",
     crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
     accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",

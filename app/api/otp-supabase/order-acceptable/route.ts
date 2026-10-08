@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
+import { ORDER_LOCATIONS } from "@/lib/locations"
 
 // Stage 1 — Order Acceptable.
 //
@@ -123,6 +124,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/order-acceptable exception:", err)
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
+
+// Admin sets/changes an order's location from Order Acceptable — mainly for
+// orders converted before Database/63_order_location.sql, which arrived
+// with none.
+export async function PATCH(request: Request) {
+  try {
+    const { orderId, orderLocation } = (await request.json()) as { orderId?: string; orderLocation?: string }
+    if (!orderId || !ORDER_LOCATIONS.some((l) => l.label === orderLocation)) {
+      return NextResponse.json({ success: false, error: "Valid orderId and orderLocation are required" }, { status: 400 })
+    }
+
+    const supabase = getSupabaseAdmin()
+    const { data, error } = await supabase
+      .from("otp_orders")
+      .update({ order_location: orderLocation })
+      .eq("id", orderId)
+      .select("id, order_location")
+      .maybeSingle()
+    if (error) throw error
+    if (!data) return NextResponse.json({ success: false, error: "Order not found" }, { status: 404 })
+
+    return NextResponse.json({ success: true, data })
+  } catch (err: any) {
+    console.error("PATCH /api/otp-supabase/order-acceptable exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }

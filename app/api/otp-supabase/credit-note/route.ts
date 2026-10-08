@@ -44,7 +44,7 @@ export async function GET(request: Request) {
     if (view === "invoices") {
       const { data: miRows, error: miError } = await supabase
         .from("otp_make_invoice")
-        .select("id, invoice_number, invoice_date, items, order:otp_orders(id, order_no, company_name, po_number, crm_name)")
+        .select("id, invoice_number, invoice_date, items, order:otp_orders(id, order_no, company_name, po_number, crm_name, order_location)")
         .order("invoice_number", { ascending: true })
       if (miError) throw miError
 
@@ -86,6 +86,7 @@ export async function GET(request: Request) {
             companyName: orders[0]?.company_name || "",
             poNumbers: Array.from(new Set(orders.map((o: any) => o.po_number).filter(Boolean))),
             crmName: orders[0]?.crm_name || "",
+            orderLocation: orders[0]?.order_location || "",
             items,
           }
         })
@@ -154,6 +155,13 @@ export async function POST(request: Request) {
     }
     const alreadyCredited = await loadAlreadyCredited(supabase, invoiceNumber)
 
+    const { data: locOrder, error: locError } = await supabase
+      .from("otp_orders")
+      .select("order_location")
+      .eq("id", miRows[0].order_id)
+      .maybeSingle()
+    if (locError) throw locError
+
     for (const it of items) {
       const key = `${it.order_id}::${nameKey(it.item_name)}`
       const remaining = (invoicedQtyByKey.get(key) || 0) - (alreadyCredited.get(key) || 0)
@@ -172,6 +180,7 @@ export async function POST(request: Request) {
         company_name: companyName || null,
         po_number: poNumber || null,
         crm_name: crmName || null,
+        order_location: locOrder?.order_location || null,
         items,
         created_by: createdBy || null,
       })

@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ORDER_LOCATIONS } from "@/lib/locations"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -24,7 +25,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 
 import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess } from "@/lib/crm-access"
+import { filterByAccess } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -33,6 +34,7 @@ const pendingColumns = [
   { key: "timestamp", label: "Timestamp", searchable: true },
   { key: "orderNo", label: "Order No.", searchable: true },
   { key: "crmName", label: "CRM Name", searchable: true },
+  { key: "orderLocation", label: "Order Location", searchable: true },
   { key: "quotationNo", label: "Quotation No.", searchable: true },
   { key: "companyName", label: "Company Name", searchable: true },
   { key: "contactPersonName", label: "Contact Person Name", searchable: true },
@@ -149,11 +151,11 @@ export default function OrderAcceptablePage() {
     fetchOrders()
   }, [])
 
-  // Role-based access: 'user' role only sees rows whose crmName is in their
-  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // Role-based access: 'user' role only sees rows matching their assigned
+  // CRM names and location (Settings > User Management) — see lib/access.ts.
   // admin is unrestricted.
   const filteredOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(orders, currentUser);
+    let filtered = filterByAccess(orders, currentUser);
 
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -178,14 +180,14 @@ export default function OrderAcceptablePage() {
 
   const creOptions = useMemo(() => {
     const options = new Set<string>()
-    filterByCrmAccess(orders, currentUser).forEach((order) => {
+    filterByAccess(orders, currentUser).forEach((order) => {
       if (order.crmName) options.add(order.crmName)
     })
     return Array.from(options)
   }, [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(processedOrders, currentUser);
+    let filtered = filterByAccess(processedOrders, currentUser);
 
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -322,6 +324,23 @@ export default function OrderAcceptablePage() {
     }
   }
 
+  const handleSetLocation = async (orderId: string, orderLocation: string) => {
+    try {
+      const res = await fetch("/api/otp-supabase/order-acceptable", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, orderLocation }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error || "Update failed")
+      const patch = (rows: any[]) => rows.map((r) => (r.orderId === orderId ? { ...r, orderLocation } : r))
+      setOrders(patch)
+      setProcessedOrders(patch)
+    } catch (err: any) {
+      alert(`Error: ${err.message}`)
+    }
+  }
+
   // Complete renderCellContent function
   const renderCellContent = (order: any, columnKey: string) => {
     const value = order[columnKey]
@@ -358,6 +377,26 @@ export default function OrderAcceptablePage() {
         return <Badge variant={value === "Yes" ? "default" : "destructive"}>{value || "N/A"}</Badge>
       case "crmName":
         return <Badge variant="outline">{value || "N/A"}</Badge>
+      case "orderLocation":
+        // Admin-only: orders converted before Database/63 have no location
+        // (visible to every user until set here).
+        if (currentUser?.role !== "admin") {
+          return value ? <Badge variant="outline">{value}</Badge> : <Badge variant="secondary">Not set</Badge>
+        }
+        return (
+          <Select value={value || undefined} onValueChange={(loc) => handleSetLocation(order.orderId, loc)}>
+            <SelectTrigger className={`h-8 w-[170px] ${value ? "" : "border-amber-400 text-amber-700"}`}>
+              <SelectValue placeholder="Set location" />
+            </SelectTrigger>
+            <SelectContent>
+              {ORDER_LOCATIONS.map((loc) => (
+                <SelectItem key={loc.label} value={loc.label}>
+                  {loc.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )
       case "orderAcceptanceChecklist":
       case "remarks":
         return <div className="max-w-[150px] truncate">{value}</div>

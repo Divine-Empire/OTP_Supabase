@@ -13,7 +13,6 @@ interface User {
   assignedCrmNames?: string[]
   warehousePageAccess?: string
   location?: string
-  defaultGodown?: string | null
 }
 
 interface AuthContextType {
@@ -87,6 +86,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const logout = () => {
+    // Clears the server's httpOnly session cookie (not reachable from JS).
+    fetch("/api/otp-supabase/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "logout" }),
+    }).catch(() => {})
     setUser(null)
     setIsAuthenticated(false)
     localStorage.removeItem("otp-user")

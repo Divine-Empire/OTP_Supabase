@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { subGodownFor } from "@/lib/locations"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -688,7 +689,7 @@ export async function POST(request: Request) {
 
     const { data: order, error: orderError } = await supabase
       .from("otp_orders")
-      .select("order_no, quotation_number")
+      .select("order_no, quotation_number, order_location")
       .eq("id", orderId)
       .maybeSingle()
     if (orderError) throw orderError
@@ -780,7 +781,9 @@ export async function POST(request: Request) {
         source_stage: "packing_list",
         source_id: inventoryRow.id,
         items: availableItems,
-        sub_godown: subGodown || null,
+        // Derived from the order's own location whenever it has one (the
+        // client's pick is only used for pre-Database/63 orders with none).
+        sub_godown: order.order_location ? subGodownFor(order.order_location) : subGodown || null,
       })
       if (queueError) throw queueError
     }

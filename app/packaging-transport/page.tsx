@@ -23,8 +23,8 @@ import {
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
-import { isReceivingSectionMode } from "@/lib/dispatch-mode"
+import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
+import { getSectionForMode, isReceivingSection, FIELD_DEFS, type FieldKey } from "@/lib/dispatch-mode"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -52,10 +52,9 @@ const historyColumns = [
   { key: "beforePhoto", label: "Before Photo", searchable: false },
   { key: "afterPhoto", label: "After Photo", searchable: false },
   { key: "transportMode", label: "Transport Mode", searchable: true },
-  { key: "transporterName", label: "Assigned Driver", searchable: true },
-  { key: "transporterContact", label: "Driver Contact", searchable: true },
-  { key: "expenseAmount", label: "Expense Amount", searchable: false },
-  { key: "transporterRemarks", label: "Transporter's Remark", searchable: true },
+  { key: "modeDetails", label: "Mode Details", searchable: true },
+  { key: "expenseAmount", label: "Freight/Fare", searchable: false },
+  { key: "transporterRemarks", label: "Remarks", searchable: true },
   { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
   { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
   { key: "receivingCopy", label: "Receiving's Copy", searchable: false },
@@ -74,8 +73,7 @@ const DEFAULT_HIDDEN_COLUMNS = new Set([
   "itemList",
   "beforePhoto",
   "afterPhoto",
-  "transporterName",
-  "transporterContact",
+  "modeDetails",
   "expenseAmount",
   "transporterRemarks",
   "dispatchStatus",
@@ -117,17 +115,22 @@ export default function PackagingTransportPage() {
   const [transportModeOptions, setTransportModeOptions] = useState<string[]>([])
   const [receivingCopyFile, setReceivingCopyFile] = useState<File | null>(null)
   const [existingReceivingCopyUrl, setExistingReceivingCopyUrl] = useState("")
-  const [transporterName, setTransporterName] = useState("")
-  const [transporterContact, setTransporterContact] = useState("")
+  // Every section's non-file fields live in one generic map, keyed by the
+  // shared FieldKey concept (driver_name, reference_no, ...) — see
+  // lib/dispatch-mode.ts's FIELD_DEFS. expense_amount also lives here
+  // ("Freight"/"Fare" depending on section).
+  const [fieldValues, setFieldValues] = useState<Partial<Record<FieldKey, string>>>({})
   const [transporterRemarks, setTransporterRemarks] = useState("")
-  const [expenseAmount, setExpenseAmount] = useState("")
   const [dispatchStatus, setDispatchStatus] = useState("okay")
   const [notOkReason, setNotOkReason] = useState("")
   const [assignedDriverOptions, setAssignedDriverOptions] = useState<string[]>([])
 
-  // Transport Mode decides which section the form shows below it — see
-  // lib/dispatch-mode.ts.
-  const isReceivingPath = isReceivingSectionMode(transportMode)
+  // Transport Mode decides which section (and which fields) the form shows
+  // below it — see lib/dispatch-mode.ts.
+  const section = getSectionForMode(transportMode)
+  const isReceivingPath = isReceivingSection(section)
+  const sectionFields = FIELD_DEFS[section] || []
+  const setFieldValue = (key: FieldKey, value: string) => setFieldValues((prev) => ({ ...prev, [key]: value }))
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
@@ -209,10 +212,10 @@ export default function PackagingTransportPage() {
     await fetchProcessedOrders()
   }
 
-  // Role-based access: 'user' role only sees rows whose crmName is in their
-  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // Role-based access: 'user' role only sees rows matching their assigned
+  // CRM names and location (Settings > User Management) — see lib/access.ts.
   const filteredOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(orders, currentUser)
+    let filtered = filterByAccess(orders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -225,10 +228,10 @@ export default function PackagingTransportPage() {
     return filtered
   }, [orders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    let filtered = filterByAccess(processedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -274,10 +277,8 @@ export default function PackagingTransportPage() {
     setTransportMode(matchedMode || rawMode)
     setReceivingCopyFile(null)
     setExistingReceivingCopyUrl("")
-    setTransporterName("")
-    setTransporterContact("")
+    setFieldValues({})
     setTransporterRemarks("")
-    setExpenseAmount("")
     setDispatchStatus("okay")
     setNotOkReason("")
     setIsDialogOpen(true)
@@ -349,13 +350,16 @@ export default function PackagingTransportPage() {
       alert("Please select a Transport Mode.")
       return
     }
-    if (isReceivingPath) {
-      if (!existingReceivingCopyUrl && !receivingCopyFile) {
-        alert("Please upload Receiving's Copy.")
+    const receivingCopyField = sectionFields.find((f) => f.key === "receiving_copy_url")
+    for (const def of sectionFields) {
+      if (!def.required || def.key === "receiving_copy_url") continue
+      if (!String(fieldValues[def.key] || "").trim()) {
+        alert(`Please enter ${def.label}.`)
         return
       }
-    } else if (!transporterName.trim()) {
-      alert("Please enter Transporter / Driver Name.")
+    }
+    if (receivingCopyField?.required && !existingReceivingCopyUrl && !receivingCopyFile) {
+      alert(`Please upload ${receivingCopyField.label}.`)
       return
     }
     if (dispatchStatus === "notokay" && !notOkReason.trim()) {
@@ -368,7 +372,7 @@ export default function PackagingTransportPage() {
       const [newBeforeUrls, newAfterUrls, newReceivingCopyUrls] = await Promise.all([
         uploadFiles(beforePhotoFiles, "packaging_transport/before"),
         uploadFiles(afterPhotoFiles, "packaging_transport/after"),
-        isReceivingPath && receivingCopyFile ? uploadFiles([receivingCopyFile], "packaging_transport/receiving") : Promise.resolve([]),
+        receivingCopyField && receivingCopyFile ? uploadFiles([receivingCopyFile], "packaging_transport/receiving") : Promise.resolve([]),
       ])
 
       const response = await fetch("/api/otp-supabase/packaging-transport", {
@@ -380,9 +384,9 @@ export default function PackagingTransportPage() {
           beforePhotoUrls: [...existingBeforePhotoUrls, ...newBeforeUrls],
           afterPhotoUrls: [...existingAfterPhotoUrls, ...newAfterUrls],
           transportMode,
-          ...(isReceivingPath
-            ? { receivingCopyUrl: existingReceivingCopyUrl || newReceivingCopyUrls[0] }
-            : { transporterName, transporterContact, transporterRemarks, expenseAmount }),
+          fieldValues,
+          ...(receivingCopyField ? { receivingCopyUrl: existingReceivingCopyUrl || newReceivingCopyUrls[0] } : {}),
+          transporterRemarks,
           dispatchStatus,
           notOkReason,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
@@ -882,14 +886,59 @@ export default function PackagingTransportPage() {
                 </Select>
               </div>
 
-              {isReceivingPath ? (
-                /* Receiving's Section — self pickup/delivery modes: no
-                   transporter, just proof the client received it directly. */
-                <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
-                  <h4 className="text-sm font-bold text-amber-900">Receiving's Section</h4>
+              {/* Section fields — driven entirely by FIELD_DEFS for the
+                  currently selected Transport Mode (see
+                  lib/dispatch-mode.ts). Every mode shares this one renderer
+                  instead of 11 hand-written blocks. */}
+              <div
+                className={`p-4 rounded-xl border space-y-4 ${
+                  isReceivingPath ? "bg-amber-50/50 border-amber-200" : "bg-indigo-50/50 border-indigo-200"
+                }`}
+              >
+                <h4 className={`text-sm font-bold ${isReceivingPath ? "text-amber-900" : "text-indigo-900"}`}>
+                  {isReceivingPath ? "Receiving's Section" : "Dispatch Details"}
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                  {sectionFields
+                    .filter((def) => def.key !== "receiving_copy_url")
+                    .map((def) => (
+                      <div key={def.key} className="space-y-2">
+                        <Label htmlFor={def.key} className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
+                          {def.label} {def.required && <span className="text-red-500 font-bold">*</span>}
+                        </Label>
+                        {def.key === "driver_name" ? (
+                          <Select value={fieldValues.driver_name || ""} onValueChange={(v) => setFieldValue("driver_name", v)}>
+                            <SelectTrigger id={def.key}>
+                              <SelectValue placeholder={`Select ${def.label.toLowerCase()}`} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {assignedDriverOptions.map((opt) => (
+                                <SelectItem key={opt} value={opt}>
+                                  {opt}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            id={def.key}
+                            type={def.type === "number" ? "number" : def.type === "datetime-local" ? "datetime-local" : "text"}
+                            value={fieldValues[def.key] || ""}
+                            onChange={(e) => setFieldValue(def.key, e.target.value)}
+                            placeholder={`Enter ${def.label.toLowerCase()}`}
+                          />
+                        )}
+                      </div>
+                    ))}
+                </div>
+
+                {sectionFields.some((def) => def.key === "receiving_copy_url") && (
                   <div className="space-y-2">
-                    <Label htmlFor="receivingCopy" className="text-amber-700">
-                      Receiving's Copy <span className="text-red-500 font-bold">*</span>
+                    <Label htmlFor="receivingCopy" className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
+                      {sectionFields.find((def) => def.key === "receiving_copy_url")!.label}{" "}
+                      {sectionFields.find((def) => def.key === "receiving_copy_url")!.required && (
+                        <span className="text-red-500 font-bold">*</span>
+                      )}
                     </Label>
                     {existingReceivingCopyUrl && (
                       <a
@@ -898,7 +947,7 @@ export default function PackagingTransportPage() {
                         rel="noopener noreferrer"
                         className="block h-16 w-16 overflow-hidden rounded-lg border border-amber-200 bg-white"
                       >
-                        <img src={existingReceivingCopyUrl} alt="Receiving's Copy" className="h-full w-full object-cover" />
+                        <img src={existingReceivingCopyUrl} alt="Proof document" className="h-full w-full object-cover" />
                       </a>
                     )}
                     <Input
@@ -909,63 +958,21 @@ export default function PackagingTransportPage() {
                     />
                     {receivingCopyFile && <p className="text-xs text-muted-foreground">{receivingCopyFile.name} selected</p>}
                   </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="transporterRemarks" className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
+                    Remarks
+                  </Label>
+                  <Textarea
+                    id="transporterRemarks"
+                    value={transporterRemarks}
+                    onChange={(e) => setTransporterRemarks(e.target.value)}
+                    placeholder="Enter remarks..."
+                    rows={1}
+                  />
                 </div>
-              ) : (
-                /* Transportation details */
-                <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-200 space-y-4">
-                  <h4 className="text-sm font-bold text-indigo-900">Transportation Details</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="transporterName" className="text-indigo-700">
-                        Assigned Driver <span className="text-red-500 font-bold">*</span>
-                      </Label>
-                      <Select value={transporterName} onValueChange={setTransporterName}>
-                        <SelectTrigger id="transporterName">
-                          <SelectValue placeholder="Select driver" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {assignedDriverOptions.map((opt) => (
-                            <SelectItem key={opt} value={opt}>
-                              {opt}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="transporterContact" className="text-indigo-700">
-                        Driver Contact
-                      </Label>
-                      <Input
-                        id="transporterContact"
-                        value={transporterContact}
-                        onChange={(e) => setTransporterContact(e.target.value)}
-                        placeholder="Enter contact number"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="expenseAmount" className="text-indigo-700">
-                        Expense Amount
-                      </Label>
-                      <Input id="expenseAmount" type="number" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="Enter expense amount" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="transporterRemarks" className="text-indigo-700">
-                        Transporter's Remark
-                      </Label>
-                      <Textarea
-                        id="transporterRemarks"
-                        value={transporterRemarks}
-                        onChange={(e) => setTransporterRemarks(e.target.value)}
-                        placeholder="Enter transporter's remark..."
-                        rows={1}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              </div>
 
               {/* Dispatch Confirmation */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">

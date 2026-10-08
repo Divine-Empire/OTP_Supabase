@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useAuth } from "@/components/auth-provider"
+import { ALL_LOCATIONS } from "@/lib/locations"
 
 export interface PipelineStage {
   key: string
@@ -38,13 +40,18 @@ export function useDashboardData() {
   const [dashboardData, setDashboardData] = useState<DashboardData>(EMPTY_DATA)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { user } = useAuth()
+  const location =
+    user && user.role !== "admin" && user.location && user.location !== ALL_LOCATIONS ? user.location : ""
 
   const fetchAllData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      const response = await fetch("/api/otp-supabase/dashboard")
+      const response = await fetch(
+        `/api/otp-supabase/dashboard${location ? `?location=${encodeURIComponent(location)}` : ""}`
+      )
       const result = await response.json()
 
       if (result.success) {
@@ -58,7 +65,7 @@ export function useDashboardData() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [location])
 
   useEffect(() => {
     fetchAllData()

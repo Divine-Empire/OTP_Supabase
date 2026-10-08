@@ -22,7 +22,7 @@ import {
 import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapDeliveryNoteForInvoicePendingRowToUI, mapDeliveryNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
-import { filterByCrmAccess, crmNameOptionsFrom } from "@/lib/crm-access"
+import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -132,10 +132,10 @@ export default function DeliveryNoteForInvoicePage() {
     else fetchOrders()
   }
 
-  // Role-based access: 'user' role only sees rows whose crmName is in their
-  // assignedCrmNames (Settings > User Management) — see lib/crm-access.ts.
+  // Role-based access: 'user' role only sees rows matching their assigned
+  // CRM names and location (Settings > User Management) — see lib/access.ts.
   const filteredOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(orders, currentUser)
+    let filtered = filterByAccess(orders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {
@@ -148,10 +148,10 @@ export default function DeliveryNoteForInvoicePage() {
     return filtered
   }, [orders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByCrmAccess(orders, currentUser)), [orders, currentUser])
+  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
 
   const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByCrmAccess(processedOrders, currentUser)
+    let filtered = filterByAccess(processedOrders, currentUser)
     if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
     if (searchTerm) {
       filtered = filtered.filter((order) => {

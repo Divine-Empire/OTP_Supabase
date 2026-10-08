@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
-import { isReceivingSectionMode } from "@/lib/dispatch-mode"
+import {
+  getSectionForMode,
+  isReceivingSection,
+  FIELD_DEFS,
+  FIELD_DB_COLUMN,
+  ALL_DYNAMIC_DB_COLUMNS,
+  type FieldKey,
+} from "@/lib/dispatch-mode"
 
 // Stage — Packaging and Dispatch (otp_* identifiers kept as
 // "packaging_transport" — only the UI label changed).
@@ -16,15 +23,14 @@ import { isReceivingSectionMode } from "@/lib/dispatch-mode"
 //   mode "draft" — only Before/After Photo. Creates/updates the SAME
 //                  otp_packaging_transport row (keyed by make_invoice_id,
 //                  unique) with status='draft'. Still counts as Pending.
-//   mode "final" — the rest of the form, branching on Transport Mode (see
-//                  lib/dispatch-mode.ts and
-//                  Database/59_packaging_dispatch_receiving_section.sql):
-//                    Receiving's Section (self pickup/delivery modes) —
-//                      just a Receiving's Copy upload. Sets
-//                      client_confirmation_planned directly, skipping
-//                      Bilty Upload (bilty_upload_planned stays null).
-//                    Transportation Details (freight modes) — unchanged
-//                      original flow, sets bilty_upload_planned.
+//   mode "final" — the rest of the form, branching on the 11-way (+2
+//                  legacy) Transport Mode section (see lib/dispatch-mode.ts
+//                  and Database/62_dispatch_mode_11way.sql). Downstream is
+//                  still only ever 2-way: every section except
+//                  "Customer Pickup / Self Pickup" (and the 2 legacy
+//                  receiving modes) sets bilty_upload_planned exactly like
+//                  before; only Customer Pickup/legacy-receiving skip Bilty
+//                  Upload and set client_confirmation_planned directly.
 //                  Either way flips status to 'submitted' (creating the
 //                  row directly if no draft ever existed) — only now does
 //                  it count as History.
@@ -101,11 +107,9 @@ export async function POST(request: Request) {
       beforePhotoUrls,
       afterPhotoUrls,
       transportMode,
+      fieldValues,
       receivingCopyUrl,
-      transporterName,
-      transporterContact,
       transporterRemarks,
-      expenseAmount,
       dispatchStatus,
       notOkReason,
       createdBy,
@@ -115,11 +119,9 @@ export async function POST(request: Request) {
       beforePhotoUrls?: string[]
       afterPhotoUrls?: string[]
       transportMode?: string
+      fieldValues?: Partial<Record<FieldKey, string>>
       receivingCopyUrl?: string
-      transporterName?: string
-      transporterContact?: string
       transporterRemarks?: string
-      expenseAmount?: string | number
       dispatchStatus?: string
       notOkReason?: string
       createdBy?: string
@@ -133,7 +135,9 @@ export async function POST(request: Request) {
     // Never trust the client's section choice — re-derive it from the mode
     // string itself (same classification the page used to pick which
     // section to show).
-    const isReceiving = isReceivingSectionMode(transportMode)
+    const section = getSectionForMode(transportMode)
+    const isReceiving = isReceivingSection(section)
+    const sectionDefs = FIELD_DEFS[section] || []
 
     if (isDraft && (!beforePhotoUrls || beforePhotoUrls.length === 0)) {
       return NextResponse.json({ success: false, error: "At least one Before Photo is required" }, { status: 400 })
@@ -142,11 +146,12 @@ export async function POST(request: Request) {
       if (!transportMode || !transportMode.trim()) {
         return NextResponse.json({ success: false, error: "Transport Mode is required" }, { status: 400 })
       }
-      if (isReceiving && (!receivingCopyUrl || !receivingCopyUrl.trim())) {
-        return NextResponse.json({ success: false, error: "Receiving's Copy is required" }, { status: 400 })
-      }
-      if (!isReceiving && (!transporterName || !transporterName.trim())) {
-        return NextResponse.json({ success: false, error: "Transporter name is required" }, { status: 400 })
+      for (const def of sectionDefs) {
+        if (!def.required) continue
+        const val = def.key === "receiving_copy_url" ? receivingCopyUrl : fieldValues?.[def.key]
+        if (!val || !String(val).trim()) {
+          return NextResponse.json({ success: false, error: `${def.label} is required` }, { status: 400 })
+        }
       }
     }
 
@@ -207,46 +212,52 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, data })
     }
 
-    // Final submit. Receiving's Section (self pickup/delivery modes) skips
-    // Bilty Upload entirely — client_confirmation_planned is set directly
-    // here instead of bilty_upload_planned, so Client Confirmation's own
-    // Pending picks it up straight from this row (see
+    // Final submit. Build the dynamic (per-section) columns generically
+    // from FIELD_DEFS/FIELD_DB_COLUMN — every dynamic column this section
+    // doesn't use is explicitly nulled so a later re-submit under a
+    // different mode never leaves stale data from a prior section behind.
+    const dynamicFields: Record<string, any> = {}
+    for (const col of ALL_DYNAMIC_DB_COLUMNS) dynamicFields[col] = null
+    for (const def of sectionDefs) {
+      const dbCol = FIELD_DB_COLUMN[def.key]
+      if (def.key === "receiving_copy_url") {
+        dynamicFields[dbCol] = receivingCopyUrl ? receivingCopyUrl.trim() : null
+      } else if (def.key === "expense_amount") {
+        dynamicFields[dbCol] = toNumberOrNull(fieldValues?.[def.key])
+      } else {
+        const val = fieldValues?.[def.key]
+        dynamicFields[dbCol] = val && String(val).trim() ? String(val).trim() : null
+      }
+    }
+
+    // Receiving's Section (legacy "By Hand ..." modes and the new Customer
+    // Pickup / Self Pickup) skips Bilty Upload entirely —
+    // client_confirmation_planned is set directly here instead of
+    // bilty_upload_planned, so Client Confirmation's own Pending picks it
+    // up straight from this row (see
     // Database/59_packaging_dispatch_receiving_section.sql and
-    // client-confirmation/route.ts). Transportation Details keeps the
+    // client-confirmation/route.ts). Every other section keeps the
     // original bilty_upload_planned flow, unchanged.
-    const finalFields = isReceiving
-      ? {
-          transport_mode: transportMode!.trim(),
-          receiving_copy_url: receivingCopyUrl!.trim(),
-          transporter_name: null,
-          transporter_contact: null,
-          transporter_remarks: null,
-          expense_amount: null,
-          dispatch_status: "okay",
-          not_ok_reason: null,
-          created_by: createdBy || null,
-          status: "submitted",
-          bilty_upload_planned: null,
-          client_confirmation_planned: addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation")),
-          ...(beforePhotoUrls ? { before_photo_urls: beforePhotoUrls } : {}),
-          ...(afterPhotoUrls ? { after_photo_urls: afterPhotoUrls } : {}),
-        }
-      : {
-          transport_mode: transportMode!.trim(),
-          receiving_copy_url: null,
-          transporter_name: transporterName!.trim(),
-          transporter_contact: transporterContact || null,
-          transporter_remarks: transporterRemarks || null,
-          expense_amount: toNumberOrNull(expenseAmount),
-          dispatch_status: dispatchStatus === "notokay" ? "notokay" : "okay",
-          not_ok_reason: dispatchStatus === "notokay" ? notOkReason || null : null,
-          created_by: createdBy || null,
-          status: "submitted",
-          bilty_upload_planned: addTatMinutes(new Date(), await getStageTatMinutes("bilty_upload")),
-          client_confirmation_planned: null,
-          ...(beforePhotoUrls ? { before_photo_urls: beforePhotoUrls } : {}),
-          ...(afterPhotoUrls ? { after_photo_urls: afterPhotoUrls } : {}),
-        }
+    const finalFields = {
+      transport_mode: transportMode!.trim(),
+      ...dynamicFields,
+      transporter_remarks: transporterRemarks || null,
+      dispatch_status: dispatchStatus === "notokay" ? "notokay" : "okay",
+      not_ok_reason: dispatchStatus === "notokay" ? notOkReason || null : null,
+      created_by: createdBy || null,
+      status: "submitted",
+      ...(isReceiving
+        ? {
+            bilty_upload_planned: null,
+            client_confirmation_planned: addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation")),
+          }
+        : {
+            bilty_upload_planned: addTatMinutes(new Date(), await getStageTatMinutes("bilty_upload")),
+            client_confirmation_planned: null,
+          }),
+      ...(beforePhotoUrls ? { before_photo_urls: beforePhotoUrls } : {}),
+      ...(afterPhotoUrls ? { after_photo_urls: afterPhotoUrls } : {}),
+    }
 
     if (existingRow) {
       const { data, error } = await supabase

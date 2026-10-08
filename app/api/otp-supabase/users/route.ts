@@ -1,12 +1,30 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, createSessionToken, readSessionFromRequest } from "@/lib/session"
 
-export async function GET() {
+// Passwords (stored plain-text, shown to admins in Settings) are only
+// included when the caller holds a valid signed session cookie belonging to
+// a user who is STILL an active admin right now — re-checked against the DB
+// so a demoted/disabled admin's old cookie stops working immediately.
+export async function GET(request: Request) {
   try {
     const supabase = getSupabaseAdmin()
+
+    const session = readSessionFromRequest(request)
+    let isAdmin = false
+    if (session) {
+      const { data: caller } = await supabase
+        .from("otp_users")
+        .select("role, is_active")
+        .eq("id", session.uid)
+        .maybeSingle()
+      isAdmin = caller?.role === "admin" && caller?.is_active === true
+    }
+
+    const columns = "id, username, full_name, role, assigned_steps, assigned_crm_names, warehouse_page_access, location, default_godown, is_active, created_at, updated_at"
     const { data, error } = await supabase
       .from("otp_users")
-      .select("id, username, full_name, password_hash, role, assigned_steps, assigned_crm_names, warehouse_page_access, location, default_godown, is_active, created_at, updated_at")
+      .select(isAdmin ? `${columns}, password_hash` : columns)
       .order("created_at", { ascending: true })
 
     if (error) {
@@ -14,7 +32,7 @@ export async function GET() {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data: data || [], passwordsVisible: isAdmin })
   } catch (err: any) {
     console.error("GET users exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -25,6 +43,12 @@ export async function POST(request: Request) {
   try {
     const body = await request.json()
     const supabase = getSupabaseAdmin()
+
+    if (body.action === "logout") {
+      const res = NextResponse.json({ success: true })
+      res.cookies.set(SESSION_COOKIE, "", { httpOnly: true, path: "/", maxAge: 0 })
+      return res
+    }
 
     // Login Action
     if (body.action === "login") {
@@ -79,7 +103,15 @@ export async function POST(request: Request) {
         defaultGodown: user.default_godown || null,
       }
 
-      return NextResponse.json({ success: true, user: safeUser })
+      const res = NextResponse.json({ success: true, user: safeUser })
+      res.cookies.set(SESSION_COOKIE, createSessionToken(user.id, user.role), {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: SESSION_MAX_AGE_SECONDS,
+      })
+      return res
     }
 
     // Create User Action (Settings page)

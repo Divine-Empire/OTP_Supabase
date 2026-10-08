@@ -45,7 +45,7 @@ export async function GET(request: Request) {
       // No order given — behave like the old route's plain log listing.
       const { data, error } = await supabase
         .from("otp_order_cancel")
-        .select("*")
+        .select("*, order:otp_orders(order_location)")
         .order("cancelled_at", { ascending: false })
         .limit(200)
       if (error) throw error

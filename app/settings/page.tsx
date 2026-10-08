@@ -17,6 +17,7 @@ import { Plus, Edit, Trash2, RefreshCw, Clock, Users as UsersIcon, Save, ShieldC
 import { toast } from "@/components/ui/use-toast"
 import { TAT_STAGE_OPTIONS, minutesToDHM, dhmToMinutes, formatDHM } from "./tat-helpers"
 import { formatCategoryLabel } from "./dropdown-helpers"
+import { ORDER_LOCATIONS, ALL_LOCATIONS } from "@/lib/locations"
 
 interface User {
   id: string
@@ -26,7 +27,7 @@ interface User {
   role: "admin" | "user"
   assignedSteps: string[]
   assignedCrmNames: string[]
-  defaultGodown: string | null
+  location: string
 }
 
 interface StageTat {
@@ -78,6 +79,9 @@ export default function SettingsPage() {
   const [userLoading, setUserLoading] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set())
+  // False when the server couldn't verify an admin session (e.g. logged in
+  // before session cookies existed) — passwords are withheld, not empty.
+  const [passwordsVisible, setPasswordsVisible] = useState(true)
   const [userFormData, setUserFormData] = useState({
     username: "",
     fullName: "",
@@ -85,7 +89,7 @@ export default function SettingsPage() {
     role: "user" as "admin" | "user",
     assignedSteps: [] as string[],
     assignedCrmNames: [] as string[],
-    defaultGodown: "" as string,
+    location: "" as string,
   })
   const [crmNameOptions, setCrmNameOptions] = useState<string[]>([])
 
@@ -131,9 +135,10 @@ export default function SettingsPage() {
           role: u.role || "user",
           assignedSteps: Array.isArray(u.assigned_steps) ? u.assigned_steps : [],
           assignedCrmNames: Array.isArray(u.assigned_crm_names) ? u.assigned_crm_names : [],
-          defaultGodown: u.default_godown || null,
+          location: u.location || "",
         }))
         setUsers(usersData)
+        setPasswordsVisible(result.passwordsVisible === true)
       }
     } catch (error) {
       console.error("Error fetching users:", error)
@@ -232,7 +237,7 @@ export default function SettingsPage() {
       role: "user",
       assignedSteps: [],
       assignedCrmNames: [],
-      defaultGodown: "",
+      location: "",
     })
     setShowPassword(false)
     setIsUserDialogOpen(true)
@@ -250,7 +255,7 @@ export default function SettingsPage() {
       // opens, same as a fresh admin selection would.
       assignedSteps: user.role === "admin" ? allSteps.map((s) => s.id) : user.assignedSteps,
       assignedCrmNames: user.role === "admin" ? crmNameOptions : user.assignedCrmNames || [],
-      defaultGodown: user.defaultGodown || "",
+      location: user.role === "admin" ? ALL_LOCATIONS : user.location || "",
     })
     setShowPassword(true)
     setIsUserDialogOpen(true)
@@ -312,6 +317,9 @@ export default function SettingsPage() {
     // checkbox grid happened to hold when Save was clicked.
     const finalAssignedSteps = userFormData.role === "admin" ? allSteps.map((s) => s.id) : userFormData.assignedSteps
     const finalAssignedCrmNames = userFormData.role === "admin" ? crmNameOptions : userFormData.assignedCrmNames
+    // Admins see every location; a user with none set yet is unrestricted
+    // until one is picked (see lib/access.ts).
+    const finalLocation = userFormData.role === "admin" ? ALL_LOCATIONS : userFormData.location || null
 
     try {
       let response: Response
@@ -327,7 +335,7 @@ export default function SettingsPage() {
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
             assignedCrmNames: finalAssignedCrmNames,
-            defaultGodown: userFormData.defaultGodown || null,
+            location: finalLocation,
           }),
         })
       } else {
@@ -341,7 +349,7 @@ export default function SettingsPage() {
             role: userFormData.role,
             assignedSteps: finalAssignedSteps,
             assignedCrmNames: finalAssignedCrmNames,
-            defaultGodown: userFormData.defaultGodown || null,
+            location: finalLocation,
           }),
         })
       }
@@ -470,7 +478,6 @@ export default function SettingsPage() {
   // (whatever otp_dropdown already has rows for), enforced both here (the
   // Select only lists existing categories) and server-side in the POST
   // handler.
-  const subGodownOptions = dropdownOptions.filter((o) => o.category === "sub_godown").map((o) => o.value)
   const dropdownCategories = Array.from(new Set(dropdownOptions.map((o) => o.category))).sort()
   const dropdownGroups = dropdownCategories.map((category) => ({
     category,
@@ -645,6 +652,7 @@ export default function SettingsPage() {
                           <TableHead className="w-[150px]">Username</TableHead>
                           <TableHead className="w-[140px]">Password</TableHead>
                           <TableHead className="w-[120px]">Role</TableHead>
+                          <TableHead className="w-[160px]">Location</TableHead>
                           <TableHead>Page Access</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -665,7 +673,13 @@ export default function SettingsPage() {
                             <TableCell className="font-semibold text-slate-800 dark:text-slate-200">{user.username}</TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1.5 font-mono text-sm">
-                                <span>{visiblePasswords.has(user.id) ? user.password || "—" : "••••••••"}</span>
+                                <span>
+                                  {visiblePasswords.has(user.id)
+                                    ? passwordsVisible
+                                      ? user.password || "—"
+                                      : "Log in again to view"
+                                    : "••••••••"}
+                                </span>
                                 <button
                                   type="button"
                                   onClick={() => togglePasswordVisibility(user.id)}
@@ -683,6 +697,15 @@ export default function SettingsPage() {
                               >
                                 {user.role}
                               </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {user.role === "admin" || user.location === ALL_LOCATIONS ? (
+                                <span className="text-xs text-slate-500">All locations</span>
+                              ) : user.location ? (
+                                <Badge variant="outline" className="text-xs">{user.location}</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-xs border-amber-400 text-amber-700">Not set</Badge>
+                              )}
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1">
@@ -1046,22 +1069,26 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Default Godown (Optional)</Label>
+                <Label>Location</Label>
                 <p className="text-xs text-muted-foreground">
-                  If this user is in-charge of a specific CG godown, it auto-fills at Packing List.
-                  Leave blank if not applicable.
+                  The user only sees orders from this location. Admins always see every location.
                 </p>
                 <Select
-                  value={userFormData.defaultGodown || "NONE"}
-                  onValueChange={(value) => setUserFormData((prev) => ({ ...prev, defaultGodown: value === "NONE" ? "" : value }))}
+                  value={userFormData.role === "admin" ? ALL_LOCATIONS : userFormData.location || "NONE"}
+                  onValueChange={(value) => setUserFormData((prev) => ({ ...prev, location: value === "NONE" ? "" : value }))}
+                  disabled={userFormData.role === "admin"}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder="Not set" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="NONE">None</SelectItem>
-                    {subGodownOptions.map((g) => (
-                      <SelectItem key={g} value={g}>{g}</SelectItem>
+                    {userFormData.role === "admin" ? (
+                      <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+                    ) : (
+                      <SelectItem value="NONE">Not set (sees all)</SelectItem>
+                    )}
+                    {ORDER_LOCATIONS.map((loc) => (
+                      <SelectItem key={loc.label} value={loc.label}>{loc.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
