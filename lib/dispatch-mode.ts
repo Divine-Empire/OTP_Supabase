@@ -4,18 +4,20 @@
 // read from this single FIELD_DEFS catalogue so the two can never drift
 // apart on which fields a mode has or which ones are required.
 //
-// Downstream is only ever 2-way though: every section except
-// "Customer Pickup / Self Pickup" still goes through Bilty Upload — only
-// Customer Pickup skips it and sets client_confirmation_planned directly
-// (confirmed with the user — not, e.g., Door Delivery, which still has its
-// own POD field but goes through Bilty Upload like every freight mode).
+// Every mode now goes straight to Client Confirmation (the Bilty Upload
+// stage no longer exists — Database/65_remove_bilty_upload_stage.sql). What
+// differs is only whether the Bilty section at the bottom of the form is
+// mandatory: Freight Charge + Bilty/Docket files are REQUIRED for every
+// freight/delivery mode (the ones that used to go through Bilty Upload) and
+// OPTIONAL for the receiving modes (Customer Pickup / Self Pickup and the 2
+// legacy "By Hand" modes, which used to skip it). See isBiltyRequired().
 //
 // The 2 "legacy_receiving" modes (By Hand Maniquip Store / By Hand-
 // Warehouse) are a temporary staging shim: kept only because real pending
 // orders still carry those exact otp_orders.transport_mode values from
 // before this 11-way rollout (Database/62_dispatch_mode_11way.sql) — they
 // reuse the OLD simple Receiving's Section UI (just a Receiving's Copy) and
-// OLD skip-bilty downstream, unchanged from Database/59. Remove
+// OLD optional-bilty rule, unchanged from Database/59. Remove
 // LEGACY_RECEIVING_MODES (and its FIELD_DEFS/MODE_TO_SECTION entries) once
 // every such pending order has been processed — check with:
 //   select o.transport_mode, count(*) from otp_make_invoice mi
@@ -91,6 +93,12 @@ export function getSectionForMode(transportMode: string | null | undefined): Sec
 
 export function isReceivingSection(section: SectionKey): boolean {
   return section === "legacy_receiving" || section === "customer_pickup"
+}
+
+// Bilty/Docket upload + Freight Charge are mandatory for every non-receiving
+// section (the ones that used to go through the removed Bilty Upload stage).
+export function isBiltyRequired(section: SectionKey): boolean {
+  return !isReceivingSection(section)
 }
 
 // Back-compat for any remaining direct transportMode check.

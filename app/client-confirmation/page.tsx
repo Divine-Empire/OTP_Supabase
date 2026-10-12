@@ -188,7 +188,7 @@ export default function ClientConfirmationPage() {
   const isFormValid = materialReceived !== "" && sitePersonName.trim() !== "" && clientContactNumber.trim() !== ""
 
   // Submits Client Confirmation — inserts a row into
-  // otp_client_confirmation (one per otp_bilty_upload record), which is
+  // otp_client_confirmation (one per otp_packaging_transport record), which is
   // what moves this order from Pending to History here. Terminal stage:
   // nothing downstream gets scheduled from here.
   const handleSubmit = async () => {
@@ -204,9 +204,7 @@ export default function ClientConfirmationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          // Exactly one parent — see Database/59_packaging_dispatch_receiving_section.sql.
-          biltyUploadId: selectedOrder.biltyUploadId || undefined,
-          packagingTransportId: selectedOrder.packagingTransportId || undefined,
+          packagingTransportId: selectedOrder.packagingTransportId,
           materialReceived,
           sitePersonName,
           contactNumber: clientContactNumber,

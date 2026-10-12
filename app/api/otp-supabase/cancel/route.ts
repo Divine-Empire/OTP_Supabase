@@ -21,7 +21,6 @@ const STAGE_LABELS: Record<string, string> = {
   make_invoice: "Make Invoice",
   calibration: "Calibration Certificate",
   packaging_transport: "Packaging and Dispatch",
-  bilty_upload: "Bilty Upload",
 }
 
 // Item shape is inconsistent across tables (item_name/name,
@@ -174,7 +173,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Make Invoice rows feed calibration / packaging_transport / bilty_upload.
+    // Make Invoice rows feed calibration / packaging_transport.
     const { data: makeInvoiceRows } = await supabase
       .from("otp_make_invoice")
       .select("id, items, calibration_planned, packaging_transport_planned")
@@ -198,7 +197,7 @@ export async function GET(request: Request) {
 
       const { data: ptRows } = await supabase
         .from("otp_packaging_transport")
-        .select("id, make_invoice_id, status, bilty_upload_planned")
+        .select("id, make_invoice_id, status")
         .in("make_invoice_id", miIds)
       const draftPt = (ptRows || []).filter((r: any) => r.status === "draft")
       const ptSubmittedIds = (ptRows || []).filter((r: any) => r.status === "submitted").map((r: any) => r.make_invoice_id)
@@ -216,21 +215,6 @@ export async function GET(request: Request) {
         })
       }
 
-      // 11. Bilty Upload — off submitted packaging_transport rows.
-      const submittedPt = (ptRows || []).filter((r: any) => r.status === "submitted")
-      if (submittedPt.length > 0) {
-        const ptIds = submittedPt.map((r: any) => r.id)
-        const { data: biltyRows } = await supabase.from("otp_bilty_upload").select("packaging_transport_id").in("packaging_transport_id", ptIds)
-        const biltyDoneIds = (biltyRows || []).map((r: any) => r.packaging_transport_id)
-        const biltyPendingPt = submittedPt.filter((r: any) => r.bilty_upload_planned && !biltyDoneIds.includes(r.id))
-        if (biltyPendingPt.length > 0) {
-          pendingStages.push({
-            key: "bilty_upload",
-            label: STAGE_LABELS.bilty_upload,
-            items: normalizeItems(biltyPendingPt.flatMap((r: any) => itemsByMiId.get(r.make_invoice_id) || [])),
-          })
-        }
-      }
     }
 
     return NextResponse.json({
@@ -324,10 +308,6 @@ export async function POST(request: Request) {
           // be removed outright, see app/api/otp-supabase/packaging-transport/route.ts.
           await supabase.from("otp_packaging_transport").delete().eq("order_id", order.id).eq("status", "draft")
           await supabase.from("otp_make_invoice").update({ packaging_transport_planned: null }).eq("order_id", order.id)
-          break
-        }
-        case "bilty_upload": {
-          await supabase.from("otp_packaging_transport").update({ bilty_upload_planned: null }).eq("order_id", order.id).eq("status", "submitted")
           break
         }
         default:

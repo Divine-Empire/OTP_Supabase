@@ -3,13 +3,22 @@
 // Formatters and converters between Supabase Views and UI Table models
 // ==============================================================================
 
-import { FIELD_DEFS, getSectionForMode } from "@/lib/dispatch-mode"
+import { FIELD_DEFS, FIELD_DB_COLUMN, getSectionForMode, type FieldKey } from "@/lib/dispatch-mode"
 
 // Packaging and Dispatch History has no per-mode static columns (11 modes x
 // several fields each would be an unmanageable column explosion) — instead
 // this renders every populated field FIELD_DEFS says this row's own
 // transport_mode has, as one "Label: value" list, from the single set of
 // generic columns every mode shares (see lib/dispatch-mode.ts).
+// <input type="datetime-local"> wants local "YYYY-MM-DDTHH:mm", not an ISO/UTC string.
+function toDatetimeLocal(value: any): string {
+  if (!value) return ""
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return ""
+  const p = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function buildDispatchModeDetails(row: any): string {
   const section = getSectionForMode(row.transport_mode)
   const defs = FIELD_DEFS[section] || []
@@ -880,6 +889,29 @@ export function mapPackagingTransportPendingRowToUI(row: any): any {
     transportMode: order.transport_mode || "",
     beforePhotoUrls: row.before_photo_urls || [],
     afterPhotoUrls: row.after_photo_urls || [],
+    // A draft row can already carry submitted dispatch data (an order sent
+    // back from the removed Bilty Upload stage, Database/65) — the process
+    // form prefills from these instead of starting blank.
+    draftTransportMode: isDraft ? row.transport_mode || "" : "",
+    draftFieldValues: isDraft
+      ? (Object.fromEntries(
+          (Object.keys(FIELD_DB_COLUMN) as FieldKey[])
+            .filter((k) => k !== "receiving_copy_url")
+            .map((k) => {
+              const v = row[FIELD_DB_COLUMN[k]]
+              return [k, v === null || v === undefined ? "" : k === "event_datetime" ? toDatetimeLocal(v) : String(v)]
+            })
+            .filter(([, v]) => v !== "")
+        ) as Partial<Record<FieldKey, string>>)
+      : {},
+    draftReceivingCopyUrl: isDraft ? row.receiving_copy_url || "" : "",
+    draftRemarks: isDraft ? row.transporter_remarks || "" : "",
+    draftDispatchStatus: isDraft ? row.dispatch_status || "okay" : "okay",
+    draftNotOkReason: isDraft ? row.not_ok_reason || "" : "",
+    draftFreightCharge: isDraft && row.freight_charge != null ? String(row.freight_charge) : "",
+    draftHamaliCharge: isDraft && row.hamali_charge != null ? String(row.hamali_charge) : "",
+    draftParkingCharge: isDraft && row.parking_charge != null ? String(row.parking_charge) : "",
+    draftBiltyUploadUrls: isDraft ? row.bilty_upload_urls || [] : [],
     planned: formatDateTime(makeInvoice.packaging_transport_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
@@ -921,6 +953,10 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
     transporterRemarks: row.transporter_remarks || "",
     expenseAmount: row.expense_amount ?? "",
     modeDetails: buildDispatchModeDetails(row),
+    freightCharge: row.freight_charge ?? "",
+    hamaliCharge: row.hamali_charge ?? "",
+    parkingCharge: row.parking_charge ?? "",
+    biltyUploadUrls: row.bilty_upload_urls || [],
     dispatchStatus: row.dispatch_status || "okay",
     notOkReason: row.not_ok_reason || "",
     createdBy: row.created_by || "",
@@ -935,11 +971,12 @@ export function mapPackagingTransportHistoryRowToUI(row: any): any {
   }
 }
 
-// Maps a Pending row from /api/otp-supabase/bilty-upload (an
+// Maps a Pending row from /api/otp-supabase/client-confirmation (an
 // otp_packaging_transport row, joined to its parent otp_orders +
-// otp_make_invoice — the pending source table, since no otp_bilty_upload
-// row exists yet) into the UI field names bilty-upload/page.tsx expects.
-export function mapBiltyUploadPendingRowToUI(row: any): any {
+// otp_make_invoice — the pending source table, since no
+// otp_client_confirmation row exists yet) into the UI field names
+// client-confirmation/page.tsx expects.
+export function mapClientConfirmationPendingRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -959,22 +996,21 @@ export function mapBiltyUploadPendingRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
-    invoiceDate: makeInvoice.invoice_date || "",
-    invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
+    transportMode: row.transport_mode || "",
     transporterName: row.transporter_name || "",
-    transporterContact: row.transporter_contact || "",
-    biltyNumber: row.bilty_number || "",
-    planned: formatDateTime(row.bilty_upload_planned),
+    receivingCopyUrl: row.receiving_copy_url || "",
+    biltyNumber: row.reference_no || "",
+    planned: formatDateTime(row.client_confirmation_planned),
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],
   }
 }
 
-// Maps a History row from /api/otp-supabase/bilty-upload (an
-// otp_bilty_upload row, joined to its parent otp_orders +
+// Maps a History row from /api/otp-supabase/client-confirmation (an
+// otp_client_confirmation row, joined to its parent otp_orders +
 // otp_packaging_transport + otp_make_invoice) into the UI field names
-// bilty-upload/page.tsx expects.
-export function mapBiltyUploadHistoryRowToUI(row: any): any {
+// client-confirmation/page.tsx expects.
+export function mapClientConfirmationHistoryRowToUI(row: any): any {
   if (!row) return {}
 
   const order = row.order || {}
@@ -994,107 +1030,15 @@ export function mapBiltyUploadHistoryRowToUI(row: any): any {
     contactPersonName: order.contact_person || "",
     contactNumber: order.phone_number || "",
     invoiceNumber: makeInvoice.invoice_number || "",
-    invoiceDate: makeInvoice.invoice_date || "",
-    invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
-    transporterName: packagingTransport.transporter_name || "",
-
-    biltyTransporterName: row.transporter_name || "",
-    transporterContact: row.transporter_contact || "",
-    biltyNumber: row.bilty_number || "",
-    biltyUploadUrls: row.bilty_upload_urls || [],
-    freightCharge: row.freight_charge ?? "",
-    hamaliCharge: row.hamali_charge ?? "",
-    parkingCharge: row.parking_charge ?? "",
-    transporterRemarks: row.transporter_remarks || "",
-    createdBy: row.created_by || "",
-    planned: formatDateTime(packagingTransport.bilty_upload_planned),
-    actual: formatDateTime(row.created_at),
-
-    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
-    rawItems: makeInvoice.items || [],
-  }
-}
-
-// Maps a Pending row from /api/otp-supabase/client-confirmation (an
-// otp_bilty_upload row, joined to its parent otp_orders +
-// otp_packaging_transport + otp_make_invoice — the pending source table,
-// since no otp_client_confirmation row exists yet) into the UI field
-// names client-confirmation/page.tsx expects.
-export function mapClientConfirmationPendingRowToUI(row: any): any {
-  if (!row) return {}
-
-  const order = row.order || {}
-  // Two parent shapes (see client-confirmation/route.ts GET): "bilty" rows
-  // are otp_bilty_upload rows with packaging info nested under
-  // row.packagingTransport; "packaging" rows (Receiving's Section, Bilty
-  // Upload skipped) ARE the otp_packaging_transport row itself.
-  const isPackaging = row.parentType === "packaging"
-  const packagingTransport = isPackaging ? row : row.packagingTransport || {}
-  const makeInvoice = (isPackaging ? row.makeInvoice : packagingTransport.makeInvoice) || {}
-
-  return {
-    id: row.id,
-    biltyUploadId: isPackaging ? undefined : row.id,
-    packagingTransportId: isPackaging ? row.id : undefined,
-    orderId: order.id || row.order_id,
-    orderNo: order.order_no || "",
-    quotationNo: order.quotation_number || "",
-    timestamp: formatDateTime(row.created_at),
-    companyName: order.company_name || "",
-    crmName: order.crm_name || "",
-    orderLocation: order.order_location || "",
-    accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
-    contactPersonName: order.contact_person || "",
-    contactNumber: order.phone_number || "",
-    invoiceNumber: makeInvoice.invoice_number || "",
     transportMode: packagingTransport.transport_mode || "",
     transporterName: packagingTransport.transporter_name || "",
-    receivingCopyUrl: isPackaging ? row.receiving_copy_url || "" : "",
-    biltyNumber: row.bilty_number || "",
-    planned: formatDateTime(row.client_confirmation_planned),
-    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
-    rawItems: makeInvoice.items || [],
-  }
-}
-
-// Maps a History row from /api/otp-supabase/client-confirmation (an
-// otp_client_confirmation row, joined to its parent otp_orders +
-// otp_bilty_upload + otp_packaging_transport + otp_make_invoice) into the
-// UI field names client-confirmation/page.tsx expects.
-export function mapClientConfirmationHistoryRowToUI(row: any): any {
-  if (!row) return {}
-
-  const order = row.order || {}
-  const isPackaging = !!row.packaging_transport_id
-  const biltyUpload = row.biltyUpload || {}
-  // Normal path: nested under biltyUpload.packagingTransport. Receiving's
-  // Section path: row.packagingTransport is the direct parent (see GET's
-  // top-level `packagingTransport:otp_packaging_transport(...)` join).
-  const packagingTransport = isPackaging ? row.packagingTransport || {} : biltyUpload.packagingTransport || {}
-  const makeInvoice = packagingTransport.makeInvoice || {}
-
-  return {
-    id: row.id,
-    orderId: order.id || row.order_id,
-    orderNo: order.order_no || "",
-    quotationNo: order.quotation_number || "",
-    timestamp: formatDateTime(row.created_at),
-    companyName: order.company_name || "",
-    crmName: order.crm_name || "",
-    orderLocation: order.order_location || "",
-    accessories: (order.items_accessories || []).map((a: any) => `${a.item_name} x${a.quantity}`).join(", "),
-    contactPersonName: order.contact_person || "",
-    contactNumber: order.phone_number || "",
-    invoiceNumber: makeInvoice.invoice_number || "",
-    transportMode: packagingTransport.transport_mode || "",
-    transporterName: packagingTransport.transporter_name || "",
-    receivingCopyUrl: isPackaging ? packagingTransport.receiving_copy_url || "" : "",
+    receivingCopyUrl: packagingTransport.receiving_copy_url || "",
 
     materialReceived: row.material_received || "",
     sitePersonName: row.site_person_name || "",
     clientContactNumber: row.contact_number || "",
     createdBy: row.created_by || "",
-    planned: formatDateTime(isPackaging ? packagingTransport.client_confirmation_planned : biltyUpload.client_confirmation_planned),
+    planned: formatDateTime(packagingTransport.client_confirmation_planned),
     actual: formatDateTime(row.created_at),
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),

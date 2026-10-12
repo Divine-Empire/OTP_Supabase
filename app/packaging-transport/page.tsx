@@ -24,7 +24,7 @@ import { RefreshCw, Search, Settings, Eye } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
-import { getSectionForMode, isReceivingSection, FIELD_DEFS, type FieldKey } from "@/lib/dispatch-mode"
+import { getSectionForMode, isReceivingSection, isBiltyRequired, FIELD_DEFS, type FieldKey } from "@/lib/dispatch-mode"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // Column definitions for Pending tab
@@ -54,6 +54,10 @@ const historyColumns = [
   { key: "transportMode", label: "Transport Mode", searchable: true },
   { key: "modeDetails", label: "Mode Details", searchable: true },
   { key: "expenseAmount", label: "Freight/Fare", searchable: false },
+  { key: "freightCharge", label: "Freight Charge", searchable: false },
+  { key: "hamaliCharge", label: "Hamali Charge", searchable: false },
+  { key: "parkingCharge", label: "Parking Charge", searchable: false },
+  { key: "biltyUpload", label: "Bilty / Docket", searchable: false },
   { key: "transporterRemarks", label: "Remarks", searchable: true },
   { key: "dispatchStatus", label: "Dispatch Status", searchable: false },
   { key: "notOkReason", label: "Reason for Not Okay", searchable: true },
@@ -75,6 +79,9 @@ const DEFAULT_HIDDEN_COLUMNS = new Set([
   "afterPhoto",
   "modeDetails",
   "expenseAmount",
+  "freightCharge",
+  "hamaliCharge",
+  "parkingCharge",
   "transporterRemarks",
   "dispatchStatus",
   "notOkReason",
@@ -120,16 +127,24 @@ export default function PackagingTransportPage() {
   // lib/dispatch-mode.ts's FIELD_DEFS. expense_amount also lives here
   // ("Freight"/"Fare" depending on section).
   const [fieldValues, setFieldValues] = useState<Partial<Record<FieldKey, string>>>({})
+  // Bilty section (what the removed Bilty Upload stage used to collect,
+  // Database/65_remove_bilty_upload_stage.sql). Freight Charge + at least one
+  // Bilty/Docket file are mandatory unless the mode is a receiving one.
+  const [freightCharge, setFreightCharge] = useState("")
+  const [hamaliCharge, setHamaliCharge] = useState("")
+  const [parkingCharge, setParkingCharge] = useState("")
+  const [biltyFiles, setBiltyFiles] = useState<File[]>([])
+  const [existingBiltyUrls, setExistingBiltyUrls] = useState<string[]>([])
   const [transporterRemarks, setTransporterRemarks] = useState("")
   const [dispatchStatus, setDispatchStatus] = useState("okay")
   const [notOkReason, setNotOkReason] = useState("")
-  const [assignedDriverOptions, setAssignedDriverOptions] = useState<string[]>([])
 
   // Transport Mode decides which section (and which fields) the form shows
   // below it — see lib/dispatch-mode.ts.
   const section = getSectionForMode(transportMode)
   const isReceivingPath = isReceivingSection(section)
   const sectionFields = FIELD_DEFS[section] || []
+  const biltyRequired = isBiltyRequired(section)
   const setFieldValue = (key: FieldKey, value: string) => setFieldValues((prev) => ({ ...prev, [key]: value }))
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -190,14 +205,6 @@ export default function PackagingTransportPage() {
   }, [])
 
   useEffect(() => {
-    fetch("/api/otp-supabase/dropdowns?category=assign_driver_for_dispatch")
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success && Array.isArray(result.data)) {
-          setAssignedDriverOptions(result.data.map((d: any) => d.value))
-        }
-      })
-      .catch((err) => console.error("Error fetching assigned driver options:", err))
     fetch("/api/otp-supabase/dropdowns?category=transport_mode")
       .then((res) => res.json())
       .then((result) => {
@@ -272,15 +279,22 @@ export default function PackagingTransportPage() {
     // case-sensitive match against transportModeOptions is needed so the
     // Select actually shows it as selected instead of silently falling
     // back to the placeholder.
-    const rawMode = (order.transportMode || "").trim()
+    const rawMode = (order.draftTransportMode || order.transportMode || "").trim()
     const matchedMode = transportModeOptions.find((opt) => opt.toLowerCase() === rawMode.toLowerCase())
     setTransportMode(matchedMode || rawMode)
     setReceivingCopyFile(null)
-    setExistingReceivingCopyUrl("")
-    setFieldValues({})
-    setTransporterRemarks("")
-    setDispatchStatus("okay")
-    setNotOkReason("")
+    // Drafts normally only hold photos, but an order sent back from the
+    // removed Bilty Upload stage already has its dispatch data, so prefill it.
+    setExistingReceivingCopyUrl(order.draftReceivingCopyUrl || "")
+    setFieldValues(order.draftFieldValues || {})
+    setFreightCharge(order.draftFreightCharge || "")
+    setHamaliCharge(order.draftHamaliCharge || "")
+    setParkingCharge(order.draftParkingCharge || "")
+    setBiltyFiles([])
+    setExistingBiltyUrls(order.draftBiltyUploadUrls || [])
+    setTransporterRemarks(order.draftRemarks || "")
+    setDispatchStatus(order.draftDispatchStatus || "okay")
+    setNotOkReason(order.draftNotOkReason || "")
     setIsDialogOpen(true)
   }
 
@@ -362,6 +376,16 @@ export default function PackagingTransportPage() {
       alert(`Please upload ${receivingCopyField.label}.`)
       return
     }
+    if (biltyRequired) {
+      if (!freightCharge.trim()) {
+        alert("Please enter the Freight Charge.")
+        return
+      }
+      if (existingBiltyUrls.length + biltyFiles.length === 0) {
+        alert("Please upload at least one Bilty / Docket file.")
+        return
+      }
+    }
     if (dispatchStatus === "notokay" && !notOkReason.trim()) {
       alert("Please provide a reason for 'Not Okay' status.")
       return
@@ -369,6 +393,7 @@ export default function PackagingTransportPage() {
 
     setIsSubmitting(true)
     try {
+      const newBiltyUrls = await uploadFiles(biltyFiles, "bilty_upload")
       const [newBeforeUrls, newAfterUrls, newReceivingCopyUrls] = await Promise.all([
         uploadFiles(beforePhotoFiles, "packaging_transport/before"),
         uploadFiles(afterPhotoFiles, "packaging_transport/after"),
@@ -386,6 +411,10 @@ export default function PackagingTransportPage() {
           transportMode,
           fieldValues,
           ...(receivingCopyField ? { receivingCopyUrl: existingReceivingCopyUrl || newReceivingCopyUrls[0] } : {}),
+          freightCharge,
+          hamaliCharge,
+          parkingCharge,
+          biltyUploadUrls: [...existingBiltyUrls, ...newBiltyUrls],
           transporterRemarks,
           dispatchStatus,
           notOkReason,
@@ -441,6 +470,22 @@ export default function PackagingTransportPage() {
         return order.beforePhotoUrls && order.beforePhotoUrls.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {order.beforePhotoUrls.map((url: string, idx: number) => (
+              <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                <Badge variant="default">{idx + 1}</Badge>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <Badge variant="secondary">N/A</Badge>
+        )
+      case "freightCharge":
+      case "hamaliCharge":
+      case "parkingCharge":
+        return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
+      case "biltyUpload":
+        return order.biltyUploadUrls && order.biltyUploadUrls.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {order.biltyUploadUrls.map((url: string, idx: number) => (
               <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
                 <Badge variant="default">{idx + 1}</Badge>
               </a>
@@ -906,28 +951,13 @@ export default function PackagingTransportPage() {
                         <Label htmlFor={def.key} className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
                           {def.label} {def.required && <span className="text-red-500 font-bold">*</span>}
                         </Label>
-                        {def.key === "driver_name" ? (
-                          <Select value={fieldValues.driver_name || ""} onValueChange={(v) => setFieldValue("driver_name", v)}>
-                            <SelectTrigger id={def.key}>
-                              <SelectValue placeholder={`Select ${def.label.toLowerCase()}`} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {assignedDriverOptions.map((opt) => (
-                                <SelectItem key={opt} value={opt}>
-                                  {opt}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <Input
-                            id={def.key}
-                            type={def.type === "number" ? "number" : def.type === "datetime-local" ? "datetime-local" : "text"}
-                            value={fieldValues[def.key] || ""}
-                            onChange={(e) => setFieldValue(def.key, e.target.value)}
-                            placeholder={`Enter ${def.label.toLowerCase()}`}
-                          />
-                        )}
+                        <Input
+                          id={def.key}
+                          type={def.type === "number" ? "number" : def.type === "datetime-local" ? "datetime-local" : "text"}
+                          value={fieldValues[def.key] || ""}
+                          onChange={(e) => setFieldValue(def.key, e.target.value)}
+                          placeholder={`Enter ${def.label.toLowerCase()}`}
+                        />
                       </div>
                     ))}
                 </div>
@@ -971,6 +1001,54 @@ export default function PackagingTransportPage() {
                     placeholder="Enter remarks..."
                     rows={1}
                   />
+                </div>
+              </div>
+
+              {/* Bilty section: the same 4 fields the removed Bilty Upload stage
+                  collected. Freight Charge + Bilty/Docket are mandatory for every
+                  non-receiving mode, optional for Customer Pickup and the legacy
+                  receiving modes (see isBiltyRequired in lib/dispatch-mode.ts). */}
+              <div className="bg-sky-50/50 p-4 rounded-xl border border-sky-200 space-y-4">
+                <h4 className="text-sm font-bold text-sky-900">
+                  Bilty / Docket {!biltyRequired && <span className="font-normal text-sky-700">(optional for this mode)</span>}
+                </h4>
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="freightCharge" className="text-sky-700">
+                      Freight Charge {biltyRequired && <span className="text-red-500 font-bold">*</span>}
+                    </Label>
+                    <Input id="freightCharge" type="number" value={freightCharge} onChange={(e) => setFreightCharge(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="hamaliCharge" className="text-sky-700">Hamali Charge</Label>
+                    <Input id="hamaliCharge" type="number" value={hamaliCharge} onChange={(e) => setHamaliCharge(e.target.value)} placeholder="0" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="parkingCharge" className="text-sky-700">Parking Charge</Label>
+                    <Input id="parkingCharge" type="number" value={parkingCharge} onChange={(e) => setParkingCharge(e.target.value)} placeholder="0" />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="biltyUpload" className="text-sky-700">
+                    Bilty / Docket Upload {biltyRequired && <span className="text-red-500 font-bold">*</span>}
+                  </Label>
+                  {existingBiltyUrls.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {existingBiltyUrls.map((url, idx) => (
+                        <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                          <Badge variant="default">{idx + 1}</Badge>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  <Input
+                    id="biltyUpload"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    multiple
+                    onChange={(e) => setBiltyFiles(Array.from(e.target.files || []))}
+                  />
+                  {biltyFiles.length > 0 && <p className="text-xs text-muted-foreground">{biltyFiles.length} file(s) selected</p>}
                 </div>
               </div>
 

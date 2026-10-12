@@ -21,7 +21,6 @@ import {
   Menu,
   FileMinus,
   Truck,
-  FileCheck2,
   XCircle,
   UserCheck,
   Banknote,
@@ -99,12 +98,6 @@ const menuItems = [
     label: "Packaging and Dispatch",
     icon: Truck,
     step: "packaging-transport",
-  },
-  {
-    href: "/bilty-upload",
-    label: "Bilty Upload",
-    icon: FileCheck2,
-    step: "bilty-upload",
   },
   {
     href: "/client-confirmation",

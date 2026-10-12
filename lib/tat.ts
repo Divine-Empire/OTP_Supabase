@@ -12,7 +12,6 @@ const FALLBACK_TAT_MINUTES: Record<string, number> = {
   make_invoice: 4320,
   calibration: 7200,
   packaging_transport: 4320,
-  bilty_upload: 1440,
   client_confirmation: 1440,
 }
 

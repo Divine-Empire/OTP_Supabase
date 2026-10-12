@@ -30,7 +30,6 @@ export async function GET(request: Request) {
       makeInvoiceRes,
       calibrationRes,
       packagingTransportRes,
-      biltyUploadRes,
       clientConfirmationRes,
       creditNotePendingRes,
     ] = await Promise.all([
@@ -45,15 +44,14 @@ export async function GET(request: Request) {
       supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
       supabase.from("otp_make_invoice").select("id, order_id, pre_invoice_queue_id, calibration_planned, packaging_transport_planned"),
       supabase.from("otp_calibration_certificate").select("make_invoice_id"),
-      supabase.from("otp_packaging_transport").select("id, order_id, make_invoice_id, status, bilty_upload_planned, client_confirmation_planned"),
-      supabase.from("otp_bilty_upload").select("id, order_id, packaging_transport_id, client_confirmation_planned"),
-      supabase.from("otp_client_confirmation").select("bilty_upload_id, packaging_transport_id"),
+      supabase.from("otp_packaging_transport").select("id, order_id, make_invoice_id, status, client_confirmation_planned"),
+      supabase.from("otp_client_confirmation").select("packaging_transport_id"),
       supabase.from("otp_credit_note").select("order_location").eq("status", "pending"),
     ])
 
     for (const r of [
       ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, repeatShortageRes, queueRes,
-      DeliveryNoteInvRes, makeInvoiceRes, calibrationRes, packagingTransportRes, biltyUploadRes, clientConfirmationRes,
+      DeliveryNoteInvRes, makeInvoiceRes, calibrationRes, packagingTransportRes, clientConfirmationRes,
       creditNotePendingRes,
     ]) {
       if (r.error) throw r.error
@@ -80,11 +78,8 @@ export async function GET(request: Request) {
     const packagingSubmittedIds = new Set(
       (packagingTransportRes.data || []).filter((r: any) => r.status === "submitted").map((r: any) => r.make_invoice_id)
     )
-    const biltyUploadRows = visible(biltyUploadRes.data as any[])
-    const biltyDoneIds = new Set(((biltyUploadRes.data || []).map((r: any) => r.packaging_transport_id)).filter(Boolean))
     const confirmations = clientConfirmationRes.data || []
-    const clientConfirmationDoneIds = new Set(confirmations.map((r: any) => r.bilty_upload_id).filter(Boolean))
-    const clientConfirmationDonePtIds = new Set(confirmations.map((r: any) => r.packaging_transport_id).filter(Boolean))
+    const clientConfirmationDonePtIds = new Set(confirmations.map((r: any) => r.packaging_transport_id))
 
     const acceptableDoneIds = new Set((acceptableRes.data || []).map((r: any) => r.order_id))
 
@@ -101,12 +96,11 @@ export async function GET(request: Request) {
       "make-invoice": queueRows.filter((r: any) => r.make_invoice_planned && !makeInvoiceDoneQueueIds.has(r.id)).length,
       calibration: makeInvoiceRows.filter((r: any) => r.calibration_planned && !calibrationDoneIds.has(r.id)).length,
       "packaging-transport": makeInvoiceRows.filter((r: any) => r.packaging_transport_planned && !packagingSubmittedIds.has(r.id)).length,
-      "bilty-upload": packagingTransportRows.filter((r: any) => r.bilty_upload_planned && !biltyDoneIds.has(r.id)).length,
-      // Two parallel parents since Database/59: Bilty Upload, or Packaging
-      // and Dispatch directly for receiving-section modes.
-      "client-confirmation":
-        biltyUploadRows.filter((r: any) => r.client_confirmation_planned && !clientConfirmationDoneIds.has(r.id)).length +
-        packagingTransportRows.filter((r: any) => r.client_confirmation_planned && !clientConfirmationDonePtIds.has(r.id)).length,
+      // Packaging and Dispatch is the only parent (the Bilty Upload stage in
+      // between was removed, Database/65).
+      "client-confirmation": packagingTransportRows.filter(
+        (r: any) => r.client_confirmation_planned && !clientConfirmationDonePtIds.has(r.id)
+      ).length,
       "credit-note": (creditNotePendingRes.data || []).filter((r: any) => visibleLocation(r.order_location)).length,
     }
 

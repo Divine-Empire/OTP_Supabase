@@ -3,7 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 import {
   getSectionForMode,
-  isReceivingSection,
+  isBiltyRequired,
   FIELD_DEFS,
   FIELD_DB_COLUMN,
   ALL_DYNAMIC_DB_COLUMNS,
@@ -25,15 +25,17 @@ import {
 //                  unique) with status='draft'. Still counts as Pending.
 //   mode "final" — the rest of the form, branching on the 11-way (+2
 //                  legacy) Transport Mode section (see lib/dispatch-mode.ts
-//                  and Database/62_dispatch_mode_11way.sql). Downstream is
-//                  still only ever 2-way: every section except
-//                  "Customer Pickup / Self Pickup" (and the 2 legacy
-//                  receiving modes) sets bilty_upload_planned exactly like
-//                  before; only Customer Pickup/legacy-receiving skip Bilty
-//                  Upload and set client_confirmation_planned directly.
-//                  Either way flips status to 'submitted' (creating the
-//                  row directly if no draft ever existed) — only now does
-//                  it count as History.
+//                  and Database/62_dispatch_mode_11way.sql), plus the Bilty
+//                  section (Freight/Hamali/Parking Charge + Bilty/Docket
+//                  files — what the removed Bilty Upload stage used to
+//                  collect, Database/65_remove_bilty_upload_stage.sql).
+//                  Freight Charge + at least one Bilty/Docket file are
+//                  mandatory for every non-receiving section, optional for
+//                  Customer Pickup / the 2 legacy receiving modes. Always
+//                  sets client_confirmation_planned (straight to Client
+//                  Confirmation) and flips status to 'submitted'
+//                  (creating the row directly if no draft ever existed) —
+//                  only now does it count as History.
 //
 // Pending: otp_make_invoice.packaging_transport_planned IS NOT NULL AND
 //          either no otp_packaging_transport row yet, OR one exists with
@@ -109,6 +111,10 @@ export async function POST(request: Request) {
       transportMode,
       fieldValues,
       receivingCopyUrl,
+      freightCharge,
+      hamaliCharge,
+      parkingCharge,
+      biltyUploadUrls,
       transporterRemarks,
       dispatchStatus,
       notOkReason,
@@ -121,6 +127,10 @@ export async function POST(request: Request) {
       transportMode?: string
       fieldValues?: Partial<Record<FieldKey, string>>
       receivingCopyUrl?: string
+      freightCharge?: string | number
+      hamaliCharge?: string | number
+      parkingCharge?: string | number
+      biltyUploadUrls?: string[]
       transporterRemarks?: string
       dispatchStatus?: string
       notOkReason?: string
@@ -136,7 +146,6 @@ export async function POST(request: Request) {
     // string itself (same classification the page used to pick which
     // section to show).
     const section = getSectionForMode(transportMode)
-    const isReceiving = isReceivingSection(section)
     const sectionDefs = FIELD_DEFS[section] || []
 
     if (isDraft && (!beforePhotoUrls || beforePhotoUrls.length === 0)) {
@@ -151,6 +160,14 @@ export async function POST(request: Request) {
         const val = def.key === "receiving_copy_url" ? receivingCopyUrl : fieldValues?.[def.key]
         if (!val || !String(val).trim()) {
           return NextResponse.json({ success: false, error: `${def.label} is required` }, { status: 400 })
+        }
+      }
+      if (isBiltyRequired(section)) {
+        if (freightCharge === undefined || freightCharge === null || String(freightCharge).trim() === "") {
+          return NextResponse.json({ success: false, error: "Freight Charge is required" }, { status: 400 })
+        }
+        if (!Array.isArray(biltyUploadUrls) || biltyUploadUrls.length === 0) {
+          return NextResponse.json({ success: false, error: "At least one Bilty / Docket file is required" }, { status: 400 })
         }
       }
     }
@@ -230,31 +247,22 @@ export async function POST(request: Request) {
       }
     }
 
-    // Receiving's Section (legacy "By Hand ..." modes and the new Customer
-    // Pickup / Self Pickup) skips Bilty Upload entirely —
-    // client_confirmation_planned is set directly here instead of
-    // bilty_upload_planned, so Client Confirmation's own Pending picks it
-    // up straight from this row (see
-    // Database/59_packaging_dispatch_receiving_section.sql and
-    // client-confirmation/route.ts). Every other section keeps the
-    // original bilty_upload_planned flow, unchanged.
+    // Straight to Client Confirmation for every mode — the old Bilty Upload
+    // stage (and its bilty_upload_planned date) no longer exists. The Bilty
+    // section's own requirement is enforced above.
     const finalFields = {
       transport_mode: transportMode!.trim(),
       ...dynamicFields,
+      freight_charge: toNumberOrNull(freightCharge),
+      hamali_charge: toNumberOrNull(hamaliCharge),
+      parking_charge: toNumberOrNull(parkingCharge),
+      bilty_upload_urls: Array.isArray(biltyUploadUrls) ? biltyUploadUrls : [],
       transporter_remarks: transporterRemarks || null,
       dispatch_status: dispatchStatus === "notokay" ? "notokay" : "okay",
       not_ok_reason: dispatchStatus === "notokay" ? notOkReason || null : null,
       created_by: createdBy || null,
       status: "submitted",
-      ...(isReceiving
-        ? {
-            bilty_upload_planned: null,
-            client_confirmation_planned: addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation")),
-          }
-        : {
-            bilty_upload_planned: addTatMinutes(new Date(), await getStageTatMinutes("bilty_upload")),
-            client_confirmation_planned: null,
-          }),
+      client_confirmation_planned: addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation")),
       ...(beforePhotoUrls ? { before_photo_urls: beforePhotoUrls } : {}),
       ...(afterPhotoUrls ? { after_photo_urls: afterPhotoUrls } : {}),
     }
