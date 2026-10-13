@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { consumeWaveReservation, syncWaveReservation } from "@/lib/ims-reservation"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
@@ -263,6 +264,10 @@ export async function POST(request: Request) {
       )
     }
 
+    // Processed: the stock this wave had reserved at its location now really
+    // leaves it (OUT in IMS). What the dialog finally saved is what goes out.
+    await consumeWaveReservation(supabase, { primaryId: id, mergedIds: mergeIds, finalItems: items })
+
     return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("POST /api/otp-supabase/pre-invoice exception:", err)
@@ -348,6 +353,9 @@ export async function PATCH(request: Request) {
       .eq("id", id)
       .eq("status", "pending")
     if (updateError) throw updateError
+
+    // Qty reduced / wave emptied — IMS's reservation follows (shrinks or is released).
+    await syncWaveReservation(supabase, id)
 
     return NextResponse.json({ success: true, changed: true })
   } catch (err: any) {

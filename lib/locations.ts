@@ -28,3 +28,10 @@ export function imsCodeFor(label: string | null | undefined): string | null {
 export function subGodownFor(label: string | null | undefined): string | null {
   return find(label)?.subGodown ?? null
 }
+
+// IMS location code -> the label users know it by. Plain "CG" is stock that
+// predates the sub-godown split (it sits on the CG parent, not in any godown).
+export function labelForImsCode(code: string): string {
+  if (code === "CG") return "CG (unassigned)"
+  return ORDER_LOCATIONS.find((l) => l.imsCode === code)?.label ?? code
+}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { subGodownFor } from "@/lib/locations"
+import { syncWaveReservation } from "@/lib/ims-reservation"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -199,9 +200,13 @@ async function routeFreshShortage(
   supabase: Supa,
   orderId: string,
   inventoryId: string,
-  items: { item_code: string; item_name: string; shortage_qty: number }[]
+  items: { item_code: string; item_name: string; shortage_qty: number }[],
+  // Shortage being covered by a Stock Transfer from another godown. It goes to
+  // the ledger (the order stays in Packing List's own Pending, to be scanned
+  // again once the transferred stock lands) — never to Indent Creation.
+  transferItems: { item_code: string; item_name: string; shortage_qty: number }[] = []
 ) {
-  if (items.length === 0) return
+  if (items.length === 0 && transferItems.length === 0) return
 
   const { data: pastIndentRows, error: pastIndentError } = await supabase
     .from("otp_indent_creation")
@@ -228,9 +233,10 @@ async function routeFreshShortage(
     if (error) throw error
   }
 
-  if (indentedBefore.length > 0) {
+  const toLedger = [...indentedBefore, ...transferItems]
+  if (toLedger.length > 0) {
     const { error } = await supabase.from("otp_check_inventory_shortage").insert(
-      indentedBefore.map((it) => ({
+      toLedger.map((it) => ({
         order_id: orderId,
         check_inventory_id: inventoryId,
         item_code: it.item_code || "",
@@ -589,6 +595,10 @@ interface ScanItemPayload {
   scanned_qty: number
   serials?: string[]
   shortageLedgerId?: string // present only for scanType "repeat" items
+  // How much of this item's shortage is being covered by a Stock Transfer
+  // from another godown instead of an Indent (fresh shortage only) — see
+  // routeFreshShortage's transferItems.
+  transfer_qty?: number
 }
 
 interface AccessoryPayload {
@@ -632,6 +642,7 @@ export async function POST(request: Request) {
         shortage_qty: shortage,
         serials: it.serials || [],
         shortageLedgerId: it.shortageLedgerId || null,
+        transfer_qty: Math.max(0, Math.floor(Number(it.transfer_qty) || 0)),
       }
     })
 
@@ -764,8 +775,17 @@ export async function POST(request: Request) {
       }
     }
 
-    // Per-ITEM eligibility, not per-order — see routeFreshShortage.
-    await routeFreshShortage(supabase, orderId, inventoryRow.id, freshShortageItems)
+    // Per-ITEM eligibility, not per-order — see routeFreshShortage. The part of
+    // a shortage the packer is covering with a Stock Transfer stays in Packing
+    // List (ledger); only the rest becomes an Indent.
+    const toIndent: typeof freshShortageItems = []
+    const toTransfer: typeof freshShortageItems = []
+    for (const it of freshShortageItems) {
+      const transferQty = Math.min(it.transfer_qty, it.shortage_qty)
+      if (transferQty > 0) toTransfer.push({ ...it, shortage_qty: transferQty })
+      if (it.shortage_qty - transferQty > 0) toIndent.push({ ...it, shortage_qty: it.shortage_qty - transferQty })
+    }
+    await routeFreshShortage(supabase, orderId, inventoryRow.id, toIndent, toTransfer)
 
     // 3. Available portion -> otp_pre_invoice_queue (one wave for this submission)
     // `serials` rides along so Pre-Invoice can prefill one row per
@@ -775,17 +795,23 @@ export async function POST(request: Request) {
       .map((it) => ({ item_code: it.item_code, item_name: it.item_name, qty: it.scanned_qty, serials: it.serials }))
 
     if (availableItems.length > 0) {
-      const { error: queueError } = await supabase.from("otp_pre_invoice_queue").insert({
-        order_id: orderId,
-        quotation_number: order.quotation_number || null,
-        source_stage: "packing_list",
-        source_id: inventoryRow.id,
-        items: availableItems,
-        // Derived from the order's own location whenever it has one (the
-        // client's pick is only used for pre-Database/63 orders with none).
-        sub_godown: order.order_location ? subGodownFor(order.order_location) : subGodown || null,
-      })
+      const { data: newQueue, error: queueError } = await supabase
+        .from("otp_pre_invoice_queue")
+        .insert({
+          order_id: orderId,
+          quotation_number: order.quotation_number || null,
+          source_stage: "packing_list",
+          source_id: inventoryRow.id,
+          items: availableItems,
+          // Derived from the order's own location whenever it has one (the
+          // client's pick is only used for pre-Database/63 orders with none).
+          sub_godown: order.order_location ? subGodownFor(order.order_location) : subGodown || null,
+        })
+        .select("id")
+        .single()
       if (queueError) throw queueError
+      // Hold this wave's stock at the order's location in IMS until Pre-Invoice.
+      await syncWaveReservation(supabase, newQueue.id)
     }
 
     return NextResponse.json({ success: true, availabilityStatus })
@@ -928,7 +954,23 @@ export async function PATCH(request: Request) {
 
       const indentRow = link.indents.find((r) => (r.items || []).some((x: any) => nameKey(x.item_name) === key))
       const freshLedger = link.ledgers.find((l) => !l.parent_id && nameKey(l.item_name) === key)
-      if (indentRow) {
+      if (indentRow && freshLedger) {
+        // Split shortage: part is waiting on a Stock Transfer (ledger), the
+        // rest is on the Indent. The ledger part is the packer's own commitment
+        // and stays unless the whole shortage drops below it.
+        const ledgerQty = Number(freshLedger.shortage_qty) || 0
+        indentRow.items = indentRow.items.map((x: any) =>
+          nameKey(x.item_name) === key ? { ...x, qty: Math.max(0, newShortage - ledgerQty) } : x
+        )
+        dirtyIndents.add(indentRow)
+        if (newShortage < ledgerQty) {
+          const { error } =
+            newShortage > 0
+              ? await supabase.from("otp_check_inventory_shortage").update({ shortage_qty: newShortage }).eq("id", freshLedger.id)
+              : await supabase.from("otp_check_inventory_shortage").delete().eq("id", freshLedger.id)
+          if (error) throw error
+        }
+      } else if (indentRow) {
         indentRow.items = indentRow.items.map((x: any) => (nameKey(x.item_name) === key ? { ...x, qty: newShortage } : x))
         dirtyIndents.add(indentRow)
       } else if (freshLedger) {
@@ -951,6 +993,7 @@ export async function PATCH(request: Request) {
     }
     await routeFreshShortage(supabase, inv.order_id, inventoryId, freshToRoute)
 
+    let waveToSync: string | null = null
     if (queue && queueItems) {
       // Never delete — see isEmptiedQueue. Emptied -> cancelled placeholder;
       // refilled (scanned raised again) -> back to pending.
@@ -960,16 +1003,24 @@ export async function PATCH(request: Request) {
         .eq("id", queue.id)
         .in("status", ["pending", "cancelled"])
       if (error) throw error
+      waveToSync = queue.id
     } else if (newQueueItems.length > 0) {
-      const { error } = await supabase.from("otp_pre_invoice_queue").insert({
-        order_id: inv.order_id,
-        quotation_number: order?.quotation_number || null,
-        source_stage: "packing_list",
-        source_id: inventoryId,
-        items: newQueueItems,
-      })
+      const { data: newQueue, error } = await supabase
+        .from("otp_pre_invoice_queue")
+        .insert({
+          order_id: inv.order_id,
+          quotation_number: order?.quotation_number || null,
+          source_stage: "packing_list",
+          source_id: inventoryId,
+          items: newQueueItems,
+        })
+        .select("id")
+        .single()
       if (error) throw error
+      waveToSync = newQueue.id
     }
+    // The edit changed what this wave holds — keep IMS's reservation in step.
+    if (waveToSync) await syncWaveReservation(supabase, waveToSync)
 
     const totalShortage = newInvItems.reduce((s, it) => s + it.shortage_qty, 0)
     const totalScanned = newInvItems.reduce((s, it) => s + it.scanned_qty, 0)

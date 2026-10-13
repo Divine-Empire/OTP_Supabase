@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { releaseWaveReservations } from "@/lib/ims-reservation"
 
 // Order Cancel — pulls an order out of whichever stage(s) it is
 // CURRENTLY pending in. Reuses the "planned date IS NOT NULL + no
@@ -287,7 +288,10 @@ export async function POST(request: Request) {
           break
         }
         case "pre_invoice": {
+          const { data: cancelling } = await supabase.from("otp_pre_invoice_queue").select("id").eq("order_id", order.id).eq("status", "pending")
           await supabase.from("otp_pre_invoice_queue").update({ status: "cancelled" }).eq("order_id", order.id).eq("status", "pending")
+          // The cancelled waves' reserved stock goes back to free in IMS.
+          await releaseWaveReservations((cancelling || []).map((w: any) => w.id))
           break
         }
         case "debit_note_for_invoice": {

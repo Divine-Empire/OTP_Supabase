@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { Fragment, useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,7 +25,6 @@ import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
-import { checkSerialWithIms } from "@/lib/ims"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
@@ -82,6 +81,28 @@ interface CompareItem {
   // item name (see Database/55_otp_released_stock.sql) — informational only,
   // never auto-added to scannedQty or subtracted from shortageQty.
   releasedStockAvailable?: { qty: number; fromOrderNo: string }[]
+  // Part of this item's (fresh) shortage the packer covers with a Stock
+  // Transfer from another godown instead of an Indent. Stays in Packing List
+  // pending until the transferred stock lands. 0 = whole shortage -> Indent.
+  transferQty: number
+}
+
+// What IMS says about one order item at the order's own location.
+interface StockRow {
+  itemName: string
+  availableQty: number | null // free (on hand - reserved); null = IMS doesn't know this item
+  serials: { serialNo: string; itemCode: string; inDate: string | null }[]
+  elsewhere: { locationCode: string; label: string; availableQty: number }[]
+}
+
+interface StockInfo {
+  available: boolean // false = stock unknown (IMS unreachable, or the order has no location yet)
+  reason?: string
+  location: string | null
+  locationCode: string | null
+  orderNo: string | null
+  imsUrl: string | null
+  byName: Record<string, StockRow>
 }
 
 // Shared key for matching a scanned item against an order's item list.
@@ -217,6 +238,8 @@ export default function CheckInventoryPage() {
   const [accessoryScanRows, setAccessoryScanRows] = useState<AccessoryScanRow[]>([])
   const [accessoryScannerError, setAccessoryScannerError] = useState<string | null>(null)
   const [compareItems, setCompareItems] = useState<CompareItem[]>([])
+  const [stockInfo, setStockInfo] = useState<StockInfo | null>(null)
+  const [stockLoading, setStockLoading] = useState(false)
 
   // Manual Entry States
   const [manualEntryMode, setManualEntryMode] = useState<"item" | "accessory" | null>(null)
@@ -561,9 +584,75 @@ export default function CheckInventoryPage() {
     setManualSerials([""])
     setSubGodown("")
     setIsDialogOpen(true)
+    fetchStock(order)
   }
 
-  const handleAddManualItem = () => {
+  // Free qty / serials at this order's location, and where else each item is
+  // free. Best-effort: any failure just leaves stock "unknown" and the flow
+  // works exactly as before.
+  const fetchStock = async (order: any) => {
+    setStockInfo(null)
+    setStockLoading(true)
+    try {
+      const res = await fetch("/api/otp-supabase/stock-availability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: order.orderId || order.id,
+          items: (order.rawItems || []).map((it: any) => ({ item_name: it.item_name, quantity: it.quantity })),
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) return
+      setStockInfo({
+        available: !!json.available,
+        reason: json.reason,
+        location: json.location,
+        locationCode: json.locationCode,
+        orderNo: json.orderNo,
+        imsUrl: json.imsUrl,
+        byName: Object.fromEntries((json.items || []).map((r: StockRow) => [itemMatchKey(r.itemName), r])),
+      })
+    } catch (err) {
+      console.warn("Stock availability lookup failed (non-blocking):", err)
+    } finally {
+      setStockLoading(false)
+    }
+  }
+
+  // Scan-time check against IMS. Only a CLEAR conflict blocks (the serial is
+  // in another godown, already dispatched, or held by another order); a serial
+  // IMS has never seen, or IMS being unreachable, never blocks.
+  const checkSerialsWithIms = async (serialNos: string[]): Promise<{ blockedReason: string | null; unknown: string[] }> => {
+    const order = selectedOrder
+    if (!order || serialNos.length === 0 || !stockInfo?.locationCode) return { blockedReason: null, unknown: [] }
+    try {
+      const res = await fetch("/api/otp-supabase/stock-serial-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.orderId || order.id, serialNos }),
+      })
+      const json = await res.json()
+      if (!json.success || !json.checked) return { blockedReason: null, unknown: [] }
+      for (const r of json.results as any[]) {
+        if (r.conflict === "OTHER_LOCATION") {
+          return { blockedReason: `Serial ${r.serialNo} is in ${r.currentLocation || "another godown"}, not in ${stockInfo.location}.`, unknown: [] }
+        }
+        if (r.conflict === "ALREADY_OUT") {
+          return { blockedReason: `Serial ${r.serialNo} was already dispatched/returned (status: ${r.status}).`, unknown: [] }
+        }
+        if (r.conflict === "RESERVED_ELSEWHERE") {
+          return { blockedReason: `Serial ${r.serialNo} is already reserved for another order.`, unknown: [] }
+        }
+      }
+      return { blockedReason: null, unknown: (json.results as any[]).filter((r) => r.checked && !r.known).map((r) => r.serialNo) }
+    } catch (err) {
+      console.warn("Serial check failed (non-blocking):", err)
+      return { blockedReason: null, unknown: [] }
+    }
+  }
+
+  const handleAddManualItem = async () => {
     if (!manualSelectedName.trim()) {
       toast({ title: "Error", description: "Item name is required", variant: "destructive" })
       return
@@ -581,6 +670,16 @@ export default function CheckInventoryPage() {
       if (!matchedOrderItem) {
         toast({ title: "Item not in order", description: `"${manualSelectedName}" is not part of this order's item list.`, variant: "destructive" })
         return
+      }
+
+      const typedSerials = manualHasSerial ? manualSerials.map((s) => s.trim()).filter(Boolean) : []
+      const manualCheck = await checkSerialsWithIms(typedSerials)
+      if (manualCheck.blockedReason) {
+        toast({ title: "Serial not usable here", description: manualCheck.blockedReason, variant: "destructive" })
+        return
+      }
+      if (manualCheck.unknown.length > 0) {
+        toast({ title: "Not in IMS stock records", description: `${manualCheck.unknown.join(", ")} — added, but IMS has no record of it.` })
       }
 
       setScanRows(prev => {
@@ -635,7 +734,7 @@ export default function CheckInventoryPage() {
   // serial scanned twice is ignored rather than double-counted. Qty per row
   // is filled in by hand afterwards — scan count itself is not the qty.
   // Rejects anything not on this order's own item list (see itemMatchKey).
-  const handleQrScan = (raw: string) => {
+  const handleQrScan = async (raw: string) => {
     const parsed = parseItemQr(raw)
     if (!parsed) {
       setScannerError(`Unrecognized QR: "${raw.slice(0, 60)}"`)
@@ -657,17 +756,25 @@ export default function CheckInventoryPage() {
     const key = itemMatchKey(parsed.itemName)
     const numbered = isNumberedSerial(parsed.serialNo)
 
-    // Set from inside the updater (only on an actual new-serial addition,
-    // never on a duplicate-scan ignore) so the IMS check below only fires
-    // once per physical unit.
-    let isNewSerialScan = false
+    // Ask IMS whether this unit can really be packed from this order's godown
+    // — before it joins the list. Skipped for a unit that's already scanned.
+    if (numbered && !scanRows.some((g) => g.serials.includes(parsed.serialNo))) {
+      const check = await checkSerialsWithIms([parsed.serialNo])
+      if (check.blockedReason) {
+        setScannerError(check.blockedReason)
+        toast({ title: "Serial not usable here — scan rejected", description: check.blockedReason, variant: "destructive" })
+        return
+      }
+      if (check.unknown.length > 0) {
+        toast({ title: "Not in IMS stock records", description: `${parsed.serialNo} — added, but IMS has no record of it.` })
+      }
+    }
 
     setScanRows((prev) => {
       const groupIndex = prev.findIndex((g) => itemMatchKey(g.itemName) === key)
 
       if (groupIndex === -1) {
         // First scan of this item.
-        isNewSerialScan = numbered
         const newGroup: ScanRow = {
           itemName: parsed.itemName,
           itemCode: parsed.itemCode,
@@ -682,30 +789,12 @@ export default function CheckInventoryPage() {
 
       if (group.serials.includes(parsed.serialNo)) return prev // same physical unit scanned twice — ignore
 
-      isNewSerialScan = true
       const serials = [...group.serials, parsed.serialNo]
       const next = [...prev]
       next[groupIndex] = { ...group, serials, qty: String(serials.length) }
       return next
     })
 
-    // Best-effort, non-blocking: ask IMS whether older warranty/invoice-dated
-    // stock of this item is still available, and let it record the OUT
-    // event on its side. Never blocks or fails this scan either way.
-    if (isNewSerialScan) {
-      checkSerialWithIms({
-        serialNo: parsed.serialNo,
-        locationLabel: null,
-        itemCode: parsed.itemCode,
-        itemName: parsed.itemName,
-        source: "otp-check-inventory",
-        referenceNo: selectedOrder?.orderNo,
-      }).then((result) => {
-        if (result?.alert) {
-          toast({ title: "IMS Stock Alert", description: result.alert, variant: "destructive" })
-        }
-      })
-    }
   }
 
   // Accessories aren't checked against the order's item list (there's no
@@ -805,6 +894,7 @@ export default function CheckInventoryPage() {
         serials: matched?.serials || [],
         shortageLedgerId: it.shortageLedgerId,
         releasedStockAvailable: it.releasedStockAvailable || [],
+        transferQty: 0,
       }
     })
 
@@ -824,13 +914,66 @@ export default function CheckInventoryPage() {
       const updated = prev.map((it, i) => {
         if (i !== index) return it
         const scanned = Math.max(Number(scannedQty) || 0, 0)
-        return { ...it, scannedQty: scanned, shortageQty: Math.max(it.orderedQty - scanned, 0) }
+        const shortageQty = Math.max(it.orderedQty - scanned, 0)
+        return { ...it, scannedQty: scanned, shortageQty, transferQty: Math.min(it.transferQty, shortageQty) }
       })
       const totalShortage = updated.reduce((s, it) => s + it.shortageQty, 0)
       const totalScanned = updated.reduce((s, it) => s + it.scannedQty, 0)
       setComputedStatus(totalShortage === 0 ? "Available" : totalScanned === 0 ? "Not Available" : "Partial")
       return updated
     })
+  }
+
+  // How much of an item's shortage could be covered by a Stock Transfer: only
+  // a fresh shortage (a repeat scan's shortage already stays in Packing List),
+  // and no more than is free in other godowns.
+  const transferableQty = (it: CompareItem) => {
+    if (it.shortageLedgerId || it.shortageQty <= 0) return 0
+    const row = stockInfo?.byName[itemMatchKey(it.itemName)]
+    const elsewhereFree = (row?.elsewhere || []).reduce((sum, e) => sum + e.availableQty, 0)
+    return Math.min(it.shortageQty, elsewhereFree)
+  }
+
+  const updateTransferQty = (index: number, value: string) => {
+    setCompareItems((prev) =>
+      prev.map((it, i) =>
+        i === index ? { ...it, transferQty: Math.min(Math.max(Math.floor(Number(value) || 0), 0), transferableQty(it)) } : it
+      )
+    )
+  }
+
+  // One Stock Transfer per source godown: each item's transfer qty is drawn
+  // from the godowns that have it free, biggest stock first.
+  const transferPlans = () => {
+    const bySource = new Map<string, { label: string; items: { itemName: string; qty: number }[] }>()
+    for (const it of compareItems) {
+      let remaining = it.transferQty
+      const row = stockInfo?.byName[itemMatchKey(it.itemName)]
+      for (const e of [...(row?.elsewhere || [])].sort((a, b) => b.availableQty - a.availableQty)) {
+        if (remaining <= 0) break
+        const take = Math.min(remaining, e.availableQty)
+        const plan = bySource.get(e.locationCode) || { label: e.label, items: [] }
+        plan.items.push({ itemName: it.itemName, qty: take })
+        bySource.set(e.locationCode, plan)
+        remaining -= take
+      }
+    }
+    return Array.from(bySource.entries()).map(([from, plan]) => ({ from, ...plan }))
+  }
+
+  // Opens IMS's Stock Transfer form with destination, items and quantities
+  // already filled in, tied to this order — the transfer record then shows up
+  // in IMS's movement analysis as "for order X".
+  const openStockTransfer = (plan: { from: string; items: { itemName: string; qty: number }[] }) => {
+    if (!stockInfo?.imsUrl || !stockInfo.locationCode) return
+    const params = new URLSearchParams({
+      from: plan.from,
+      to: stockInfo.locationCode,
+      refType: "OTP Packing List",
+      ref: stockInfo.orderNo || selectedOrder?.orderNo || "",
+      items: JSON.stringify(plan.items),
+    })
+    window.open(`${stockInfo.imsUrl}/stock-transfer?${params.toString()}`, "_blank", "noopener")
   }
 
   const handleSubmit = async () => {
@@ -860,6 +1003,7 @@ export default function CheckInventoryPage() {
             scanned_qty: it.scannedQty,
             serials: it.serials,
             shortageLedgerId: it.shortageLedgerId,
+            transfer_qty: it.transferQty,
           })),
           accessories: accessoryScanRows.map((r) => ({ item_name: r.itemName, quantity: r.qty })),
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
@@ -1414,6 +1558,9 @@ export default function CheckInventoryPage() {
                           <TableRow>
                             <TableHead className="font-semibold">Item Name</TableHead>
                             <TableHead className="font-semibold text-right">Ordered Qty</TableHead>
+                            <TableHead className="font-semibold text-right whitespace-nowrap">
+                              {stockInfo?.location ? `Free in ${stockInfo.location}` : "Free stock"}
+                            </TableHead>
                             <TableHead className="font-semibold">Description</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1422,12 +1569,34 @@ export default function CheckInventoryPage() {
                             <TableRow key={idx}>
                               <TableCell>{it.item_name}</TableCell>
                               <TableCell className="text-right">{it.quantity}</TableCell>
+                              <TableCell className="text-right">
+                                {stockLoading ? (
+                                  <span className="text-xs text-muted-foreground">…</span>
+                                ) : (() => {
+                                    const row = stockInfo?.available ? stockInfo.byName[itemMatchKey(it.item_name)] : undefined
+                                    if (!row || row.availableQty === null) {
+                                      return <span className="text-xs text-muted-foreground">unknown</span>
+                                    }
+                                    const enough = row.availableQty >= (Number(it.quantity) || 0)
+                                    return (
+                                      <div>
+                                        <Badge variant={enough ? "default" : row.availableQty > 0 ? "secondary" : "destructive"}>{row.availableQty}</Badge>
+                                        {row.serials[0] && (
+                                          <p className="text-[11px] text-muted-foreground mt-1 whitespace-nowrap">
+                                            oldest: {row.serials[0].serialNo}
+                                            {row.serials[0].inDate ? ` (${row.serials[0].inDate})` : ""}
+                                          </p>
+                                        )}
+                                      </div>
+                                    )
+                                  })()}
+                              </TableCell>
                               <TableCell className="text-sm text-muted-foreground whitespace-pre-wrap">{it.description || ""}</TableCell>
                             </TableRow>
                           ))}
                           {(selectedOrder?.rawItems || []).length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={3} className="text-center text-muted-foreground">
+                              <TableCell colSpan={4} className="text-center text-muted-foreground">
                                 No items on this order
                               </TableCell>
                             </TableRow>
@@ -1755,7 +1924,8 @@ export default function CheckInventoryPage() {
                       </TableHeader>
                       <TableBody>
                         {compareItems.map((it, index) => (
-                          <TableRow key={it.itemCode || it.itemName}>
+                          <Fragment key={it.itemCode || it.itemName}>
+                          <TableRow>
                             <TableCell>
                               <p className="font-medium">{it.itemName}</p>
                               <p className="text-xs text-muted-foreground">{it.itemCode || "no code"}</p>
@@ -1783,10 +1953,67 @@ export default function CheckInventoryPage() {
                               )}
                             </TableCell>
                           </TableRow>
+                          {it.shortageQty > 0 && !it.shortageLedgerId && (() => {
+                            const row = stockInfo?.available ? stockInfo.byName[itemMatchKey(it.itemName)] : undefined
+                            const maxTransfer = transferableQty(it)
+                            return (
+                              <TableRow className="bg-muted/30">
+                                <TableCell colSpan={4} className="py-2 text-xs">
+                                  {maxTransfer > 0 && row ? (
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                      <span className="text-muted-foreground">
+                                        Free in other godowns: {row.elsewhere.map((e) => `${e.label} (${e.availableQty})`).join(", ")}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        Cover by Stock Transfer:
+                                        <Input
+                                          type="number"
+                                          min={0}
+                                          max={maxTransfer}
+                                          className="h-7 w-16 text-right"
+                                          value={it.transferQty}
+                                          onChange={(e) => updateTransferQty(index, e.target.value)}
+                                        />
+                                        <span className="text-muted-foreground">(max {maxTransfer})</span>
+                                      </span>
+                                      <span className="font-medium">
+                                        {it.shortageQty - it.transferQty > 0
+                                          ? `${it.shortageQty - it.transferQty} → Indent`
+                                          : "nothing left for Indent"}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      {stockInfo?.available
+                                        ? "Not free in any other godown — the whole shortage goes to Indent."
+                                        : "Stock elsewhere unknown — the whole shortage goes to Indent."}
+                                    </span>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })()}
+                          </Fragment>
                         ))}
                       </TableBody>
                     </Table>
                   </div>
+                  {transferPlans().length > 0 && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2">
+                      <p className="text-xs text-amber-900">
+                        Stock is being moved in from other godowns. Create the transfer in IMS (form opens pre-filled), then submit here —
+                        the transferred qty stays in this Pending list so you can scan it once it arrives.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {transferPlans().map((plan) => (
+                          <Button key={plan.from} size="sm" variant="outline" onClick={() => openStockTransfer(plan)}>
+                            <ArrowLeftRight className="h-4 w-4 mr-2" />
+                            Create Stock Transfer from {plan.label} ({plan.items.reduce((sum, i) => sum + i.qty, 0)} unit(s))
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {compareItems.some((it) => it.shortageQty > 0) && (
                     <p className="text-xs text-muted-foreground">
                       {selectedOrder?.scanType === "repeat"
