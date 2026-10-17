@@ -92,7 +92,7 @@ function csvCell(value: string, isText = false): string {
 }
 
 function buildDelayCsv(rows: DelayRow[]): string {
-  const header = ["Order No.", "Order Acceptable", ...STAGE_COLUMNS.map((c) => c.label), "Total Delay", "Total Delay (minutes)"]
+  const header = ["Order No.", "Order Acceptable", ...STAGE_COLUMNS.map((c) => c.label), "Packaging and Dispatch At", "Total Delay", "Total Delay (minutes)"]
   const lines = [header.map((h) => csvCell(h)).join(",")]
   for (const row of rows) {
     const cells = [
@@ -102,6 +102,7 @@ function buildDelayCsv(rows: DelayRow[]): string {
         const v = row[c.key] as number | null
         return csvCell(v === null || v === undefined ? "-" : formatDelay(v))
       }),
+      csvCell(formatStamp(row.processedAt)),
       csvCell(formatDelay(row.totalDelay)),
       String(row.totalDelay),
     ]
@@ -239,6 +240,11 @@ export function DelayReportCard() {
                     {STAGE_COLUMNS.map((col) => (
                       <TableCell key={col.key} className="whitespace-nowrap px-2 py-2 text-right text-sm tabular-nums">
                         <Delay value={row[col.key] as number | null} />
+                        {col.key === "packagingDispatch" && (
+                          <div className="text-[11px] font-normal leading-tight text-muted-foreground" title={row.processedAt}>
+                            {formatStamp(row.processedAt)}
+                          </div>
+                        )}
                       </TableCell>
                     ))}
                     <TableCell className="sticky right-0 z-10 whitespace-nowrap border-l bg-slate-50 px-2 py-2 text-right text-sm font-semibold tabular-nums">
