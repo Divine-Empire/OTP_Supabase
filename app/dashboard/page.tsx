@@ -8,6 +8,7 @@ import { ShoppingCart, CalendarDays, Hourglass, IndianRupee, Receipt } from "luc
 import { DashboardHeader } from "@/components/dashboard/dashboard-header"
 import { MonthlyTrendChart } from "@/components/dashboard/charts/monthly-trend-chart"
 import { LoadingSpinner } from "@/components/dashboard/loading-spinner"
+import { DelayReportCard } from "@/components/dashboard/delay-report-card"
 import { ErrorDisplay } from "@/components/dashboard/error-display"
 import { useDashboardData } from "@/hooks/use-dashboard-data"
 import { MainLayout } from "@/components/layout/main-layout"
@@ -29,7 +30,6 @@ export default function OrderDispatchDashboard() {
     return <ErrorDisplay error={error} onRetry={fetchAllData} />
   }
 
-  const maxPending = Math.max(1, ...dashboardData.pipelineStages.map((s) => s.pending))
 
   return (
     <MainLayout>
@@ -95,33 +95,7 @@ export default function OrderDispatchDashboard() {
             </Card>
           </div>
 
-          {/* Pipeline Overview */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Pipeline Overview</CardTitle>
-              <CardDescription>Pending count at each stage, live from the database</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {dashboardData.pipelineStages.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No pipeline data yet.</p>
-              ) : (
-                <div className="space-y-3">
-                  {dashboardData.pipelineStages.map((stage) => (
-                    <div key={stage.key} className="flex items-center gap-3">
-                      <div className="w-44 shrink-0 text-sm font-medium text-slate-700">{stage.label}</div>
-                      <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full"
-                          style={{ width: `${(stage.pending / maxPending) * 100}%` }}
-                        />
-                      </div>
-                      <div className="w-10 text-right text-sm font-semibold text-slate-900">{stage.pending}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <DelayReportCard />
 
           {/* Charts row */}
           <div className="grid gap-6 md:grid-cols-2">
