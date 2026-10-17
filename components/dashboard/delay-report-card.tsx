@@ -15,12 +15,10 @@ interface DelayRow {
   orderNo: string
   companyName: string
   processedAt: string
-  orderAcceptable: number | null
-  proformaInvoice: number | null
+  orderAcceptableAt: string | null
   packingList: number | null
-  deliveryNoteInv: number | null
+  preInvoice: number | null
   makeInvoice: number | null
-  calibration: number | null
   packagingDispatch: number | null
   totalDelay: number
 }
@@ -32,15 +30,14 @@ interface DelayReportData {
   summary: { orders: number; totalDelay: number; averageDelay: number }
 }
 
-// Indent Creation and Pre-Invoice have no planned date, so they have no
-// delay and no column (see Database/69_delay_report_function.sql).
+// Every column after Order Acceptable is the time that stage took after the
+// previous shown stage of the same order, in minutes (see
+// Database/70_delay_report_stage_durations.sql and 71_delay_report_drop_stages.sql).
+// Indent Creation is a shortage side-branch, not part of this chain.
 const STAGE_COLUMNS: { key: keyof DelayRow; label: string }[] = [
-  { key: "orderAcceptable", label: "Order Acceptable" },
-  { key: "proformaInvoice", label: "Pro-Forma Invoice" },
   { key: "packingList", label: "Packing List" },
-  { key: "deliveryNoteInv", label: "Delivery Note (Inv.)" },
+  { key: "preInvoice", label: "Pre-Invoice" },
   { key: "makeInvoice", label: "Make Invoice" },
-  { key: "calibration", label: "Calibration Certificate" },
   { key: "packagingDispatch", label: "Packaging and Dispatch" },
 ]
 
@@ -50,6 +47,22 @@ function istDate(offsetDays = 0): string {
 }
 
 const num = (n: number) => n.toLocaleString("en-IN")
+
+// "13/10/2026 17:54" (DD/MM/YYYY HH:MM, IST) — the Order Acceptable column.
+function formatStamp(iso: string | null): string {
+  if (!iso) return "-"
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(iso))
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ""
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}`
+}
 
 // Minutes -> "3d 2h 5m". Leading zero units are dropped ("2h 5m", "45m",
 // "0m"); once there is a day, hours and minutes are always shown.
@@ -65,9 +78,7 @@ function formatDelay(total: number): string {
 function Delay({ value }: { value: number | null }) {
   if (value === null || value === undefined) return <span className="text-slate-300">-</span>
   return (
-    <span title={`${num(value)} minutes`} className={value > 0 ? "text-rose-600" : "text-slate-500"}>
-      {formatDelay(value)}
-    </span>
+    <span title={`${num(value)} minutes`}>{formatDelay(value)}</span>
   )
 }
 
@@ -81,11 +92,12 @@ function csvCell(value: string, isText = false): string {
 }
 
 function buildDelayCsv(rows: DelayRow[]): string {
-  const header = ["Order No.", ...STAGE_COLUMNS.map((c) => c.label), "Total Delay", "Total Delay (minutes)"]
+  const header = ["Order No.", "Order Acceptable", ...STAGE_COLUMNS.map((c) => c.label), "Total Delay", "Total Delay (minutes)"]
   const lines = [header.map((h) => csvCell(h)).join(",")]
   for (const row of rows) {
     const cells = [
       csvCell(row.orderNo, true),
+      csvCell(formatStamp(row.orderAcceptableAt)),
       ...STAGE_COLUMNS.map((c) => {
         const v = row[c.key] as number | null
         return csvCell(v === null || v === undefined ? "-" : formatDelay(v))
@@ -178,14 +190,14 @@ export function DelayReportCard() {
           </div>
           <div className="rounded-lg border bg-slate-50 p-3">
             <p className="text-xs text-muted-foreground">Total Summative Delay</p>
-            <p className="text-xl font-bold text-rose-600" data-testid="delay-total" title={data ? `${num(data.summary.totalDelay)} minutes` : undefined}>
+            <p className="text-xl font-bold text-slate-900" data-testid="delay-total" title={data ? `${num(data.summary.totalDelay)} minutes` : undefined}>
               {data ? formatDelay(data.summary.totalDelay) : "-"}
             </p>
             <p className="text-[11px] text-muted-foreground">sum of every order's total</p>
           </div>
           <div className="rounded-lg border bg-slate-50 p-3">
             <p className="text-xs text-muted-foreground">Average Delay</p>
-            <p className="text-xl font-bold text-amber-600" data-testid="delay-average" title={data ? `${num(data.summary.averageDelay)} minutes` : undefined}>
+            <p className="text-xl font-bold text-indigo-600" data-testid="delay-average" title={data ? `${num(data.summary.averageDelay)} minutes` : undefined}>
               {data ? formatDelay(data.summary.averageDelay) : "-"}
             </p>
             <p className="text-[11px] text-muted-foreground">per order</p>
@@ -203,13 +215,14 @@ export function DelayReportCard() {
             <Table>
               <TableHeader className="sticky top-0 z-10 bg-slate-50">
                 <TableRow>
-                  <TableHead className="sticky left-0 z-20 h-auto min-w-[6rem] bg-slate-50 px-3 py-2 text-xs">Order No.</TableHead>
+                  <TableHead className="sticky left-0 z-20 h-auto min-w-[5rem] bg-slate-50 px-2 py-2 text-xs">Order No.</TableHead>
+                  <TableHead className="h-auto min-w-[8.5rem] whitespace-nowrap px-2 py-2 text-right text-xs">Order Acceptable</TableHead>
                   {STAGE_COLUMNS.map((col) => (
-                    <TableHead key={col.key} className="h-auto whitespace-nowrap px-3 py-2 text-right text-xs">
+                    <TableHead key={col.key} className="h-auto min-w-[5.5rem] whitespace-normal px-2 py-2 text-right text-xs leading-tight">
                       {col.label}
                     </TableHead>
                   ))}
-                  <TableHead className="sticky right-0 z-20 h-auto min-w-[6.5rem] whitespace-nowrap border-l bg-slate-100 px-3 py-2 text-right text-xs font-bold text-slate-900">
+                  <TableHead className="sticky right-0 z-20 h-auto min-w-[6.5rem] whitespace-nowrap border-l bg-slate-100 px-2 py-2 text-right text-xs font-bold text-slate-900">
                     Total Delay
                   </TableHead>
                 </TableRow>
@@ -217,15 +230,18 @@ export function DelayReportCard() {
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={row.orderId}>
-                    <TableCell className="sticky left-0 z-10 bg-white px-3 py-2 text-sm font-medium whitespace-nowrap" title={row.companyName}>
+                    <TableCell className="sticky left-0 z-10 bg-white px-2 py-2 text-sm font-medium whitespace-nowrap" title={row.companyName}>
                       {row.orderNo}
                     </TableCell>
+                    <TableCell className="whitespace-nowrap px-2 py-2 text-right text-sm tabular-nums" title={row.orderAcceptableAt ?? undefined}>
+                      {formatStamp(row.orderAcceptableAt)}
+                    </TableCell>
                     {STAGE_COLUMNS.map((col) => (
-                      <TableCell key={col.key} className="whitespace-nowrap px-3 py-2 text-right text-sm tabular-nums">
+                      <TableCell key={col.key} className="whitespace-nowrap px-2 py-2 text-right text-sm tabular-nums">
                         <Delay value={row[col.key] as number | null} />
                       </TableCell>
                     ))}
-                    <TableCell className="sticky right-0 z-10 whitespace-nowrap border-l bg-slate-50 px-3 py-2 text-right text-sm font-semibold tabular-nums">
+                    <TableCell className="sticky right-0 z-10 whitespace-nowrap border-l bg-slate-50 px-2 py-2 text-right text-sm font-semibold tabular-nums">
                       <Delay value={row.totalDelay} />
                     </TableCell>
                   </TableRow>

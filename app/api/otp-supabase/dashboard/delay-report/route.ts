@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 
-// Dashboard Delay Report — see Database/69_delay_report_function.sql for
-// exactly what is counted. Orders processed through Packaging and Dispatch
-// in [from, to] (IST days), each with its per-stage delay in minutes, plus
-// the summative delay (sum of every order's total) and the average delay
-// (that sum divided by the number of orders).
+// Dashboard Delay Report — see Database/70_delay_report_stage_durations.sql
+// and 71_delay_report_drop_stages.sql for exactly what is counted. Orders whose last wave went through Packaging
+// and Dispatch in [from, to] (IST days): the Order Acceptable timestamp, then
+// for each later stage the minutes it took after the previous stage, plus the
+// order's total (Packaging - order created). The summary is the sum of every
+// order's total (summative delay) and that sum divided by the number of
+// orders (average delay).
 //
 // ?from=YYYY-MM-DD&to=YYYY-MM-DD   default: the last 7 days incl. today (IST)
 // ?location=<label>                same scoping rule as pending-counts/dashboard
@@ -45,14 +47,12 @@ export async function GET(request: Request) {
       orderNo: r.order_no || "",
       companyName: r.company_name || "",
       processedAt: r.processed_at,
-      orderAcceptable: r.order_acceptable_delay,
-      proformaInvoice: r.proforma_invoice_delay,
-      packingList: r.packing_list_delay,
-      deliveryNoteInv: r.delivery_note_inv_delay,
-      makeInvoice: r.make_invoice_delay,
-      calibration: r.calibration_delay,
-      packagingDispatch: r.packaging_dispatch_delay,
-      totalDelay: Number(r.total_delay) || 0,
+      orderAcceptableAt: r.order_acceptable_at,
+      packingList: r.packing_list_duration,
+      preInvoice: r.pre_invoice_duration,
+      makeInvoice: r.make_invoice_duration,
+      packagingDispatch: r.packaging_dispatch_duration,
+      totalDelay: Number(r.total_duration) || 0,
     }))
 
     const totalDelay = rows.reduce((sum: number, r: { totalDelay: number }) => sum + r.totalDelay, 0)
