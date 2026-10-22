@@ -19,11 +19,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Search, Settings, Eye, Loader2 } from "lucide-react"
+import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapCalibrationPendingRowToUI, mapCalibrationHistoryRowToUI } from "@/lib/otp-utils"
-import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -71,9 +73,7 @@ const DEFAULT_HIDDEN_COLUMNS = new Set([
 
 export default function CalibrationPage() {
   const [orders, setOrders] = useState<any[]>([])
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [certificateNumber, setCertificateNumber] = useState("")
@@ -83,18 +83,51 @@ export default function CalibrationPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [crmNameFilter, setCrmNameFilter] = useState("all")
-  const [calibrationTypeFilter, setCalibrationTypeFilter] = useState("")
-  const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
-  )
-  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
-  )
   const { user: currentUser } = useAuth()
+  const {
+    currentTab,
+    setCurrentTab,
+    tabs,
+    searchTerm,
+    setSearchTerm,
+    crmNameFilter,
+    setCrmNameFilter,
+    crmNameOptions,
+    extraValues,
+    setExtraFilter,
+    extraOptions,
+    activeChips,
+    handleClearAllFilters,
+    filteredPendingRows: filteredOrders,
+    filteredHistoryRows: filteredProcessedOrders,
+    historyPage,
+    setHistoryPage,
+    historyPageSize,
+    setHistoryPageSize,
+    columnPanel,
+    activeColumns,
+    activeRows,
+    historyPageRows,
+    historyTotal,
+    historyTotalPages,
+    history,
+  } = useStageList({
+    pendingRows: orders,
+    serverHistory: { url: "/api/otp-supabase/calibration?status=history", map: mapCalibrationHistoryRowToUI },
+    pendingColumns,
+    historyColumns,
+    currentUser,
+    defaultHiddenColumns: DEFAULT_HIDDEN_COLUMNS,
+    extraFilters: [{ key: "calibrationType", label: "Type", field: "calibrationType" }],
+  })
+  // History is fetched a page at a time by the hook; these keep the page's older names.
+  const processedOrders = history.rows
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
+  const calibrationTypeFilter = extraValues.calibrationType
+  const setCalibrationTypeFilter = (value: string) => setExtraFilter("calibrationType", value)
+  const calibrationTypeOptions = extraOptions.calibrationType
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -116,86 +149,9 @@ export default function CalibrationPage() {
     }
   }
 
-  const fetchProcessedOrders = async () => {
-    setProcessedLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/calibration?status=history")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapCalibrationHistoryRowToUI))
-      } else {
-        setProcessedOrders([])
-      }
-    } catch (err) {
-      console.error("Error fetching calibration history:", err)
-      setProcessedOrders([])
-    } finally {
-      setProcessedLoading(false)
-    }
-  }
-
   useEffect(() => {
     fetchOrders()
   }, [])
-
-  const handleProcessedTabClick = async () => {
-    await fetchProcessedOrders()
-  }
-
-  // Role-based access: 'user' role only sees rows matching their assigned
-  // CRM names and location (Settings > User Management) — see lib/access.ts.
-  const filteredOrders = useMemo(() => {
-    let filtered = filterByAccess(orders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (calibrationTypeFilter) filtered = filtered.filter((order) => order.calibrationType === calibrationTypeFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = pendingColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [orders, searchTerm, crmNameFilter, calibrationTypeFilter, currentUser])
-
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
-
-  const calibrationTypeOptions = useMemo(() => {
-    const options = new Set<string>()
-    ;[...orders, ...processedOrders].forEach((order) => {
-      if (order.calibrationType) options.add(order.calibrationType)
-    })
-    return Array.from(options).sort()
-  }, [orders, processedOrders])
-
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (calibrationTypeFilter) filtered = filtered.filter((order) => order.calibrationType === calibrationTypeFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [processedOrders, searchTerm, crmNameFilter, calibrationTypeFilter, currentUser])
-
-  const togglePendingColumn = (columnKey: string) =>
-    setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const toggleHistoryColumn = (columnKey: string) =>
-    setVisibleHistoryColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const showAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actions" }), {}))
-  const showAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: false }), {}))
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
@@ -247,13 +203,13 @@ export default function CalibrationPage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — calibration certificate recorded.`)
+        toast.success(`Order ${selectedOrder.orderNo} — calibration certificate recorded.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting calibration:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -264,7 +220,11 @@ export default function CalibrationPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
+          <Button
+            size="sm"
+            className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+            onClick={() => handleProcess(order)}
+          >
             Process
           </Button>
         )
@@ -273,31 +233,42 @@ export default function CalibrationPage() {
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            className="h-7 px-2 gap-1 text-xs border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
             onClick={() => handleViewItemList(order)}
           >
             <Eye className="h-3.5 w-3.5" />
-            View Items
+            <span>Items</span>
           </Button>
         )
       case "certificateUpload":
         return order.certificateUploadUrl ? (
           <a href={order.certificateUploadUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "invoiceCopy":
         return order.invoiceCopyUrl ? (
           <a href={order.invoiceCopyUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       default:
         return value || ""
+    }
+  }
+
+  const handleTabChange = (val: string) => {
+    setCurrentTab(val)
+  }
+
+  const handleRefresh = () => {
+    fetchOrders()
+    if (currentTab === "history" || processedOrders.length > 0) {
+      loadProcessedOrders()
     }
   }
 
@@ -317,7 +288,7 @@ export default function CalibrationPage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -330,316 +301,155 @@ export default function CalibrationPage() {
   }
 
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
-                </TabsList>
-
-                <div className="relative flex-1 min-w-[160px] max-w-[220px]">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={calibrationTypeFilter} onValueChange={setCalibrationTypeFilter}>
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue placeholder="All Types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {calibrationTypeOptions.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {type}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Columns
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-64 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
-                          Show All
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {filteredOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={tabs}
+            activeTab={currentTab}
+            onChange={handleTabChange}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation, certificate..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="w-[170px]">
+              <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                <SelectTrigger className="h-9 text-xs border-input bg-card">
+                  <SelectValue placeholder="All CRM Names" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    All CRM Names
+                  </SelectItem>
+                  {crmNameOptions.map((name) => (
+                    <SelectItem key={name} value={name} className="text-xs">
+                      {name}
+                    </SelectItem>
                   ))}
-                  {filteredOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending calibration certificates"}
-                    </p>
-                  )}
-                </div>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-[150px]">
+              <Select value={calibrationTypeFilter} onValueChange={setCalibrationTypeFilter}>
+                <SelectTrigger className="h-9 text-xs border-input bg-card">
+                  <SelectValue placeholder="All Types" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    All Types
+                  </SelectItem>
+                  {calibrationTypeOptions.map((type) => (
+                    <SelectItem key={type} value={type} className="text-xs">
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={columnPanel.columns}
+            visible={columnPanel.visible}
+            onToggle={columnPanel.toggle}
+            onSelectAll={columnPanel.showAll}
+            onHideAll={columnPanel.hideAll}
+          />
+        </div>
 
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'timestamp' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'invoiceNumber' ? '150px' :
-                                                  column.key === 'itemList' ? '130px' :
-                                                    '160px',
-                                }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredOrders.map((order, idx) => (
-                          <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'invoiceNumber' ? '150px' :
-                                                    column.key === 'itemList' ? '130px' :
-                                                      '160px',
-                                  }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
-                              ))}
-                          </TableRow>
-                        ))}
-                        {filteredOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm ? "No orders match your search criteria" : "No pending calibration certificates"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading history...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'invoiceNumber' ? '150px' :
-                                                    column.key === 'certificateNumber' ? '150px' :
-                                                      column.key === 'certificateType' ? '150px' :
-                                                        column.key === 'certificateUpload' ? '150px' :
-                                                          column.key === 'remarks' ? '200px' :
-                                                            column.key === 'createdBy' ? '150px' :
-                                                              '160px',
-                                    }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'invoiceNumber' ? '150px' :
-                                                      column.key === 'certificateNumber' ? '150px' :
-                                                        column.key === 'certificateType' ? '150px' :
-                                                          column.key === 'certificateUpload' ? '150px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              column.key === 'createdBy' ? '150px' :
-                                                                '160px',
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions"
+                  ? "90px"
+                  : col.key === "itemList"
+                  ? "75px"
+                  : col.key === "companyName"
+                  ? "220px"
+                  : col.key === "orderNo"
+                  ? "120px"
+                  : col.key === "quotationNo"
+                  ? "130px"
+                  : col.key === "contactPersonName"
+                  ? "160px"
+                  : col.key === "certificateNumber" || col.key === "invoiceNumber"
+                  ? "150px"
+                  : col.key === "remarks"
+                  ? "200px"
+                  : "140px",
+            }))}
+            data={activeRows}
+            keyExtractor={(order, idx) => order.id || order.queueId || order.orderId || order.orderNo || idx}
+            loading={currentTab === "history" ? processedLoading : false}
+            emptyTitle={
+              searchTerm
+                ? "No matching records found"
+                : currentTab === "pending"
+                ? "No pending calibration certificates"
+                : "No processed orders found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM/Type filters." : undefined
+            }
+            simpleFooter={currentTab === "pending"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "pending" ? undefined : historyTotal}
+            totalPages={historyTotalPages}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.queueId || order.orderId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
+                        </div>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={columnPanel.columns}
+                visibleColumns={columnPanel.visible}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

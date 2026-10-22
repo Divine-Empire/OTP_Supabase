@@ -3,8 +3,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -14,19 +12,15 @@ import { ORDER_LOCATIONS } from "@/lib/locations"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 
 import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
 import { filterByAccess } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -91,8 +85,8 @@ export default function OrderAcceptablePage() {
   const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [pendingCreFilter, setPendingCreFilter] = useState("all")
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
-  const [processedLoading, setProcessedLoading] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(50)
   // Offer Show / Conveyed For Registration Form are hidden by default (still
   // toggleable via Column Visibility) — everything else starts visible.
   const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
@@ -106,6 +100,22 @@ export default function OrderAcceptablePage() {
   const [creName, setCreName] = useState("")
   const [creFilter, setCreFilter] = useState("all")
   const { user: currentUser } = useAuth()
+
+  // History: one server page per request (search / CRM / access rules run in SQL).
+  const history = useServerHistory({
+    url: "/api/otp-supabase/order-acceptable?status=history",
+    map: mapOrderAcceptableRowToUI,
+    active: currentTab === "history",
+    page: historyPage,
+    pageSize: historyPageSize,
+    search: searchTerm,
+    crmName: historyCreFilter,
+    currentUser,
+  })
+  const processedOrders = history.rows
+  const processedTotal = history.total
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
 
   // Fetch pending orders from Supabase API
   const fetchOrders = async () => {
@@ -128,22 +138,6 @@ export default function OrderAcceptablePage() {
       setOrders([])
     } finally {
       setLoading(false)
-    }
-  }
-
-  // Fetch history orders from Supabase API
-  const fetchProcessedOrders = async () => {
-    try {
-      const response = await fetch("/api/otp-supabase/order-acceptable?status=history")
-      const result = await response.json()
-
-      if (result.success && Array.isArray(result.data)) {
-        return result.data.map(mapOrderAcceptableRowToUI)
-      }
-      return []
-    } catch (err) {
-      console.error("Error fetching processed orders data:", err)
-      return []
     }
   }
 
@@ -186,32 +180,18 @@ export default function OrderAcceptablePage() {
     return Array.from(options)
   }, [orders, currentUser])
 
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser);
+  // Already filtered and paged by the server.
+  const filteredProcessedOrders = processedOrders
 
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase());
-
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()));
-      });
-    }
-
-    if (historyCreFilter && historyCreFilter !== "all") {
-      filtered = filtered.filter((order) => order.crmName === historyCreFilter);
-    }
-
-    return filtered;
-  }, [processedOrders, searchTerm, historyCreFilter, currentUser]);
-
-  const handleProcessedTabClick = async () => {
-    setProcessedLoading(true)
-    const processed = await fetchProcessedOrders()
-    setProcessedOrders(processed)
-    setProcessedLoading(false)
+  const handleProcessedTabClick = () => {
+    setHistoryPage(1)
+    loadProcessedOrders()
   }
+
+  // Any filter/search change can shrink the list under the current page.
+  useEffect(() => { setHistoryPage(1) }, [searchTerm, historyCreFilter])
+
+  const historyPageRows = processedOrders
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
@@ -256,11 +236,11 @@ export default function OrderAcceptablePage() {
   const handleSubmit = async () => {
     // Add proper validation
     if (!selectedOrder || !isAcceptable) {
-      alert("Please fill in all required fields");
-      return;
+      toast.error("Please fill in all required fields")
+      return
     }
 
-    setIsSubmitting(true);
+    setIsSubmitting(true)
 
     try {
       const acceptanceData = {
@@ -270,26 +250,26 @@ export default function OrderAcceptablePage() {
         creName, // Make sure this is included
         processedAt: new Date().toISOString(),
         processedBy: currentUser?.fullName || currentUser?.username || "Admin",
-      };
+      }
 
-      const success = await updateOrderStatus(selectedOrder, acceptanceData);
+      const success = await updateOrderStatus(selectedOrder, acceptanceData)
 
       if (success) {
-        setIsDialogOpen(false);
-        setSelectedOrder(null);
+        setIsDialogOpen(false)
+        setSelectedOrder(null)
         // Reset form fields
-        setIsAcceptable("");
-        setCheckedItems([]);
-        setRemarks("");
-        setCreName("");
+        setIsAcceptable("")
+        setCheckedItems([])
+        setRemarks("")
+        setCreName("")
 
-        alert(`Order ${selectedOrder.orderNo} has been updated successfully as: ${isAcceptable}`);
+        toast.success(`Order ${selectedOrder.orderNo} has been updated successfully as: ${isAcceptable}`)
       }
     } catch (error) {
-      console.error("Error in handleSubmit:", error);
-      alert("Failed to update order. Please try again.");
+      console.error("Error in handleSubmit:", error)
+      toast.error("Failed to update order. Please try again.")
     } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(false)
     }
   };
 
@@ -335,9 +315,9 @@ export default function OrderAcceptablePage() {
       if (!json.success) throw new Error(json.error || "Update failed")
       const patch = (rows: any[]) => rows.map((r) => (r.orderId === orderId ? { ...r, orderLocation } : r))
       setOrders(patch)
-      setProcessedOrders(patch)
+      history.reload() // History is server-paged: refetch the current page instead of patching rows
     } catch (err: any) {
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     }
   }
 
@@ -348,49 +328,56 @@ export default function OrderAcceptablePage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
+          <Button
+            size="sm"
+            onClick={() => handleProcess(order)}
+            className="h-7 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             Process
           </Button>
         )
       case "billingAddress":
       case "shippingAddress":
-        return <div className="address-cell">{value}</div>
+        return <div className="max-w-[200px] truncate" title={value}>{value}</div>
       case "quotationCopy":
-      // return <Badge variant={value === "Available" ? "default" : "secondary"}>{value || "N/A"}</Badge>
       case "acceptanceCopy":
         return value && (value.startsWith("http") || value.startsWith("https")) ? (
           <a href={value} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">View Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">{value || "N/A"}</Badge>
+          <span className="text-muted-foreground text-xs">{value || "N/A"}</span>
         )
       case "itemList":
         return (
-          <Button size="icon" variant="ghost" onClick={() => handleViewItemList(order)} title="View item list">
-            <Eye className="h-4 w-4" />
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => handleViewItemList(order)}
+            title="View item list"
+            className="h-7 w-7 text-brand-700 hover:bg-accent"
+          >
+            <Eye className="h-3.5 w-3.5" />
           </Button>
         )
       case "status":
-        return <Badge variant="outline">{value}</Badge>
+        return <StatusBadge tone="neutral">{value}</StatusBadge>
       case "isOrderAcceptable":
-        return <Badge variant={value === "Yes" ? "default" : "destructive"}>{value || "N/A"}</Badge>
+        return <StatusBadge tone={value === "Yes" ? "success" : "danger"}>{value || "N/A"}</StatusBadge>
       case "crmName":
-        return <Badge variant="outline">{value || "N/A"}</Badge>
+        return value ? <StatusBadge tone="neutral">{value}</StatusBadge> : <span className="text-muted-foreground text-xs">-</span>
       case "orderLocation":
-        // Admin-only: orders converted before Database/63 have no location
-        // (visible to every user until set here).
         if (currentUser?.role !== "admin") {
-          return value ? <Badge variant="outline">{value}</Badge> : <Badge variant="secondary">Not set</Badge>
+          return value ? <StatusBadge tone="info">{value}</StatusBadge> : <span className="text-muted-foreground text-xs">Not set</span>
         }
         return (
           <Select value={value || undefined} onValueChange={(loc) => handleSetLocation(order.orderId, loc)}>
-            <SelectTrigger className={`h-8 w-[170px] ${value ? "" : "border-amber-400 text-amber-700"}`}>
+            <SelectTrigger className={`h-7 w-[150px] text-xs ${value ? "" : "border-warning/50 text-warning-foreground"}`}>
               <SelectValue placeholder="Set location" />
             </SelectTrigger>
             <SelectContent>
               {ORDER_LOCATIONS.map((loc) => (
-                <SelectItem key={loc.label} value={loc.label}>
+                <SelectItem key={loc.label} value={loc.label} className="text-xs">
                   {loc.label}
                 </SelectItem>
               ))}
@@ -399,7 +386,7 @@ export default function OrderAcceptablePage() {
         )
       case "orderAcceptanceChecklist":
       case "remarks":
-        return <div className="max-w-[150px] truncate">{value}</div>
+        return <div className="max-w-[150px] truncate" title={value}>{value}</div>
       default:
         return value || ""
     }
@@ -431,7 +418,7 @@ export default function OrderAcceptablePage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -443,338 +430,162 @@ export default function OrderAcceptablePage() {
     )
   }
 
+  const activeColumns = (currentTab === "pending" ? pendingColumns : historyColumns).filter(
+    (col) => (currentTab === "pending" ? visiblePendingColumns[col.key] : visibleHistoryColumns[col.key])
+  )
+  const activeCrmFilter = currentTab === "pending" ? pendingCreFilter : historyCreFilter
+  const setActiveCrmFilter = currentTab === "pending" ? setPendingCreFilter : setHistoryCreFilter
+
+  const activeChips = []
+  if (searchTerm) {
+    activeChips.push({
+      key: "search",
+      label: `Search: "${searchTerm}"`,
+      onRemove: () => setSearchTerm(""),
+    })
+  }
+  if (activeCrmFilter && activeCrmFilter !== "all") {
+    activeChips.push({
+      key: "crm",
+      label: `CRM: ${activeCrmFilter}`,
+      onRemove: () => setActiveCrmFilter("all"),
+    })
+  }
+
+  const handleClearAllFilters = () => {
+    setSearchTerm("")
+    setActiveCrmFilter("all")
+  }
+
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({pendingOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
-                </TabsList>
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={[
+              { id: "pending", label: "Pending", count: pendingOrders.length },
+              { id: "history", label: "History", count: processedTotal },
+            ]}
+            activeTab={currentTab}
+            onChange={(tab) => {
+              setCurrentTab(tab)
+              if (tab === "history") handleProcessedTabClick()
+            }}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="w-[180px]">
+            <Select value={activeCrmFilter} onValueChange={setActiveCrmFilter}>
+              <SelectTrigger className="h-9 text-xs border-input bg-card">
+                <SelectValue placeholder="All CRM Names" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  All CRM Names
+                </SelectItem>
+                {creOptions.map((cre) => (
+                  <SelectItem key={cre} value={cre} className="text-xs">
+                    {cre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            onClick={fetchOrders}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={currentTab === "pending" ? pendingColumns : historyColumns}
+            visible={currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns}
+            onToggle={currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn}
+            onSelectAll={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
+            onHideAll={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
+          />
+        </div>
 
-                <div className="flex items-center gap-4 flex-1 max-w-2xl">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      placeholder="Search across all columns..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  {currentTab === "pending" && (
-                    <div className="w-[200px]">
-                      <Select value={pendingCreFilter} onValueChange={setPendingCreFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="All CRM Names" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All CRM Names</SelectItem>
-                          {creOptions.map((cre) => (
-                            <SelectItem key={cre} value={cre}>
-                              {cre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  {currentTab === "history" && (
-                    <div className="w-[200px]">
-                      <Select value={historyCreFilter} onValueChange={setHistoryCreFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="All CRM Names" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All CRM Names</SelectItem>
-                          {creOptions.map((cre) => (
-                            <SelectItem key={cre} value={cre}>
-                              {cre}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                </div>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-                <div className="flex items-center gap-2">
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
-                          Show All
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {/* Mobile: one card per record */}
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {pendingOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || order.orderId || order.orderNo || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
-                  ))}
-                  {pendingOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending orders found"}
-                    </p>
-                  )}
-                </div>
-
-                {/* Desktop: synchronized table with flex-1 */}
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'itemList' ? '90px' :
-                                      column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'crmName' ? '150px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        '160px',
-                                }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {pendingOrders.map((order, idx) => (
-                          <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
-                                        column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'crmName' ? '150px' :
-                                              column.key === 'quotationNo' ? '150px' :
-                                                column.key === 'companyName' ? '250px' :
-                                                  column.key === 'contactPersonName' ? '180px' :
-                                                    column.key === 'contactNumber' ? '140px' :
-                                                      column.key === 'billingAddress' ? '200px' :
-                                                        column.key === 'shippingAddress' ? '200px' :
-                                                          '160px',
-                                  }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
-                              ))}
-                          </TableRow>
-                        ))}
-                        {pendingOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm
-                                ? "No orders match your search criteria"
-                                : "No pending orders found"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading processed orders...</span>
-                  </div>
-                ) : (
-                  <>
-                    {/* Mobile */}
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || order.orderId || order.orderNo || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No history orders found"}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Desktop: synchronized table with flex-1 */}
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'actions' ? '120px' :
-                                        column.key === 'itemList' ? '90px' :
-                                          column.key === 'timestamp' ? '130px' :
-                                            column.key === 'orderNo' ? '120px' :
-                                              column.key === 'crmName' ? '150px' :
-                                                column.key === 'quotationNo' ? '150px' :
-                                                  column.key === 'companyName' ? '250px' :
-                                                    column.key === 'contactPersonName' ? '180px' :
-                                                      column.key === 'contactNumber' ? '140px' :
-                                                        column.key === 'billingAddress' ? '200px' :
-                                                          column.key === 'shippingAddress' ? '200px' :
-                                                            '160px',
-                                    }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'actions' ? '120px' :
-                                          column.key === 'itemList' ? '90px' :
-                                            column.key === 'timestamp' ? '130px' :
-                                              column.key === 'orderNo' ? '120px' :
-                                                column.key === 'crmName' ? '150px' :
-                                                  column.key === 'quotationNo' ? '150px' :
-                                                    column.key === 'companyName' ? '250px' :
-                                                      column.key === 'contactPersonName' ? '180px' :
-                                                        column.key === 'contactNumber' ? '140px' :
-                                                          column.key === 'billingAddress' ? '200px' :
-                                                            column.key === 'shippingAddress' ? '200px' :
-                                                              '160px',
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm
-                                    ? "No orders match your search criteria"
-                                    : "No history orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions"
+                  ? "90px"
+                  : col.key === "itemList"
+                  ? "70px"
+                  : col.key === "companyName"
+                  ? "220px"
+                  : col.key === "billingAddress" || col.key === "shippingAddress"
+                  ? "180px"
+                  : "140px",
+            }))}
+            data={currentTab === "pending" ? pendingOrders : historyPageRows}
+            keyExtractor={(order, idx) => order.id || order.orderId || order.orderNo || idx}
+            loading={currentTab === "history" && processedLoading}
+            emptyTitle={
+              searchTerm
+                ? "No matching orders found"
+                : currentTab === "pending"
+                ? "No pending orders"
+                : "No history orders"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={currentTab === "pending"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "pending" ? undefined : processedTotal}
+            totalPages={Math.ceil(processedTotal / historyPageSize) || 1}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.orderId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
+                        </div>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={currentTab === "pending" ? pendingColumns : historyColumns}
+                visibleColumns={currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

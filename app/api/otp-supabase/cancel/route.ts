@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 import { releaseWaveReservations } from "@/lib/ims-reservation"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
 // Order Cancel — pulls an order out of whichever stage(s) it is
 // CURRENTLY pending in. Reuses the "planned date IS NOT NULL + no
@@ -41,15 +43,32 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseAdmin()
 
+    if (!orderNo && searchParams.has("page")) {
+      // Server-paged History (hooks/use-server-history.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_order_cancel_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_order_cancel_history").select("*", { count: "exact" }),
+        p, { skipCrmAccess: true }
+      )
+        .order("cancelled_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
     if (!orderNo) {
       // No order given — behave like the old route's plain log listing.
-      const { data, error } = await supabase
+      const { offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
         .from("otp_order_cancel")
-        .select("*, order:otp_orders(order_location)")
+        .select("*, order:otp_orders(order_location)", { count: "exact" })
         .order("cancelled_at", { ascending: false })
-        .limit(200)
+        .order("id")
+        .range(offset, to)
       if (error) throw error
-      return NextResponse.json({ success: true, data: data || [] })
+      return chunkJson(data, count, offset)
     }
 
     const { data: order, error: orderError } = await supabase

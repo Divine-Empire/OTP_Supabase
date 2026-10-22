@@ -10,10 +10,11 @@ import { MonthlyTrendChart } from "@/components/dashboard/charts/monthly-trend-c
 import { LoadingSpinner } from "@/components/dashboard/loading-spinner"
 import { DelayReportCard } from "@/components/dashboard/delay-report-card"
 import { ErrorDisplay } from "@/components/dashboard/error-display"
+import { MetricCard } from "@/components/dashboard/metrics-cards"
 import { useDashboardData } from "@/hooks/use-dashboard-data"
 import { MainLayout } from "@/components/layout/main-layout"
 
-const PIE_COLORS = ["#6366f1", "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"]
+const PIE_COLORS = ["#2274B8", "#E8702A", "#6C5CC9", "#6A9E0A", "#D6578C", "#B07D00", "#8A9BB0"]
 
 function formatCurrency(value: number) {
   return `₹${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
@@ -23,76 +24,64 @@ export default function OrderDispatchDashboard() {
   const { dashboardData, loading, error, fetchAllData } = useDashboardData()
 
   if (loading) {
-    return <LoadingSpinner />
+    return (
+      <MainLayout>
+        <LoadingSpinner />
+      </MainLayout>
+    )
   }
 
   if (error) {
-    return <ErrorDisplay error={error} onRetry={fetchAllData} />
+    return (
+      <MainLayout>
+        <ErrorDisplay error={error} onRetry={fetchAllData} />
+      </MainLayout>
+    )
   }
-
 
   return (
     <MainLayout>
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
+      <div className="bg-background p-6">
         <div className="max-w-7xl mx-auto space-y-6">
           <DashboardHeader onRefresh={fetchAllData} />
 
           {/* KPI Cards */}
-          <div className="grid gap-4 md:grid-cols-5">
-            <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                <ShoppingCart className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData.totalOrders}</div>
-                <p className="text-xs opacity-80">All orders</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-violet-500 to-violet-600 text-white border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Orders This Month</CardTitle>
-                <CalendarDays className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData.ordersThisMonth}</div>
-                <p className="text-xs opacity-80">Converted this calendar month</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-orange-500 to-orange-600 text-white border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pending Across Pipeline</CardTitle>
-                <Hourglass className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{dashboardData.totalPending}</div>
-                <p className="text-xs opacity-80">Sum of every stage's pending queue</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-indigo-500 to-indigo-600 text-white border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Order Value</CardTitle>
-                <IndianRupee className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(dashboardData.totalOrderValue)}</div>
-                <p className="text-xs opacity-80">Sum of order amounts</p>
-              </CardContent>
-            </Card>
-
-            <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white border-0 shadow-lg">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Invoiced Revenue</CardTitle>
-                <Receipt className="h-4 w-4" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(dashboardData.totalInvoicedRevenue)}</div>
-                <p className="text-xs opacity-80">From Make Invoice</p>
-              </CardContent>
-            </Card>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <MetricCard
+              title="Total Orders"
+              value={dashboardData.totalOrders}
+              subtitle="All orders"
+              tone="brand"
+              icon={<ShoppingCart className="h-5 w-5" />}
+            />
+            <MetricCard
+              title="Orders This Month"
+              value={dashboardData.ordersThisMonth}
+              subtitle="Converted this month"
+              tone="info"
+              icon={<CalendarDays className="h-5 w-5" />}
+            />
+            <MetricCard
+              title="Pending Across Pipeline"
+              value={dashboardData.totalPending}
+              subtitle="Sum of stage pending queues"
+              tone="warning"
+              icon={<Hourglass className="h-5 w-5" />}
+            />
+            <MetricCard
+              title="Total Order Value"
+              value={formatCurrency(dashboardData.totalOrderValue)}
+              subtitle="Sum of order amounts"
+              tone="brand"
+              icon={<IndianRupee className="h-5 w-5" />}
+            />
+            <MetricCard
+              title="Invoiced Revenue"
+              value={formatCurrency(dashboardData.totalInvoicedRevenue)}
+              subtitle="From Make Invoice"
+              tone="lime"
+              icon={<Receipt className="h-5 w-5" />}
+            />
           </div>
 
           <DelayReportCard />
@@ -104,6 +93,7 @@ export default function OrderDispatchDashboard() {
             <Card>
               <CardHeader>
                 <CardTitle>Payment Mode Breakdown</CardTitle>
+                <CardDescription>Distribution across payment channels</CardDescription>
               </CardHeader>
               <CardContent>
                 {dashboardData.paymentModeData.length === 0 ? (
@@ -121,10 +111,10 @@ export default function OrderDispatchDashboard() {
                         dataKey="value"
                       >
                         {dashboardData.paymentModeData.map((_, index) => (
-                          <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                          <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} aria-label={`${dashboardData.paymentModeData[index].name}: ${dashboardData.paymentModeData[index].value}`} />
                         ))}
                       </Pie>
-                      <Tooltip />
+                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "hsl(var(--foreground))", borderRadius: "0.5rem" }} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -145,11 +135,14 @@ export default function OrderDispatchDashboard() {
                 ) : (
                   <ResponsiveContainer width="100%" height={280}>
                     <BarChart data={dashboardData.topCustomers} layout="vertical" margin={{ left: 24 }}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} />
-                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                      <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis type="number" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                      <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "hsl(var(--foreground))", borderRadius: "0.5rem" }}
+                        formatter={(value: number) => formatCurrency(value)}
+                      />
+                      <Bar dataKey="value" fill="#2274B8" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -175,12 +168,12 @@ export default function OrderDispatchDashboard() {
                     <TableBody>
                       {dashboardData.recentOrders.map((order) => (
                         <TableRow key={order.orderNo}>
-                          <TableCell className="font-medium">{order.orderNo}</TableCell>
-                          <TableCell className="max-w-[160px] truncate">{order.companyName}</TableCell>
+                          <TableCell className="font-medium text-foreground">{order.orderNo}</TableCell>
+                          <TableCell className="max-w-[160px] truncate text-foreground">{order.companyName}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="text-xs">{order.paymentMode || "N/A"}</Badge>
                           </TableCell>
-                          <TableCell className="text-right">{formatCurrency(order.amount)}</TableCell>
+                          <TableCell className="text-right tabular-nums font-medium text-foreground">{formatCurrency(order.amount)}</TableCell>
                         </TableRow>
                       ))}
                       {dashboardData.recentOrders.length === 0 && (

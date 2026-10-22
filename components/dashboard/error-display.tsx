@@ -10,11 +10,11 @@ interface ErrorDisplayProps {
 
 export function ErrorDisplay({ error, onRetry }: ErrorDisplayProps) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-6">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-red-600">Error Loading Dashboard</h1>
-        <p className="text-muted-foreground mt-2">{error}</p>
-        <Button onClick={onRetry} className="mt-4">
+    <div className="flex min-h-[400px] items-center justify-center p-6">
+      <div className="max-w-md rounded-lg border border-destructive/30 bg-card p-6 text-center shadow-xs">
+        <h2 className="text-lg font-semibold text-destructive">Error Loading Dashboard</h2>
+        <p className="text-sm text-muted-foreground mt-2" role="alert">{error}</p>
+        <Button onClick={onRetry} variant="outline" size="sm" className="mt-4 h-9">
           <RefreshCw className="h-4 w-4 mr-2" />
           Retry
         </Button>

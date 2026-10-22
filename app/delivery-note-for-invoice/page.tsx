@@ -19,11 +19,13 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Search, Settings, Eye, Loader2 } from "lucide-react"
+import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapDeliveryNoteForInvoicePendingRowToUI, mapDeliveryNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
-import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -53,9 +55,7 @@ const historyColumns = [
 
 export default function DeliveryNoteForInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [amount, setAmount] = useState("")
@@ -64,17 +64,42 @@ export default function DeliveryNoteForInvoicePage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [crmNameFilter, setCrmNameFilter] = useState("all")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending")
-  const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
-  )
-  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {})
-  )
   const { user: currentUser } = useAuth()
+  const {
+    currentTab: activeTab,
+    setCurrentTab: setActiveTab,
+    tabs,
+    searchTerm,
+    setSearchTerm,
+    crmNameFilter,
+    setCrmNameFilter,
+    crmNameOptions,
+    activeChips,
+    handleClearAllFilters,
+    filteredPendingRows: filteredOrders,
+    filteredHistoryRows: filteredProcessedOrders,
+    historyPage,
+    setHistoryPage,
+    historyPageSize,
+    setHistoryPageSize,
+    columnPanel,
+    activeColumns,
+    historyPageRows,
+    historyTotal,
+    historyTotalPages,
+    history,
+  } = useStageList({
+    pendingRows: orders,
+    serverHistory: { url: "/api/otp-supabase/delivery-note-for-invoice?status=history", map: mapDeliveryNoteForInvoiceHistoryRowToUI },
+    pendingColumns,
+    historyColumns,
+    currentUser,
+  })
+  // History is fetched a page at a time by the hook; these keep the page's older names.
+  const processedOrders = history.rows
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -96,22 +121,9 @@ export default function DeliveryNoteForInvoicePage() {
     }
   }
 
-  const fetchProcessedOrders = async () => {
-    setProcessedLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/delivery-note-for-invoice?status=history")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapDeliveryNoteForInvoiceHistoryRowToUI))
-      } else {
-        setProcessedOrders([])
-      }
-    } catch (err) {
-      console.error("Error fetching delivery-note-for-invoice history:", err)
-      setProcessedOrders([])
-    } finally {
-      setProcessedLoading(false)
-    }
+  const fetchProcessedOrders = () => {
+    setHistoryPage(1)
+    return loadProcessedOrders()
   }
 
   useEffect(() => {
@@ -131,51 +143,6 @@ export default function DeliveryNoteForInvoicePage() {
     if (activeTab === "history") fetchProcessedOrders()
     else fetchOrders()
   }
-
-  // Role-based access: 'user' role only sees rows matching their assigned
-  // CRM names and location (Settings > User Management) — see lib/access.ts.
-  const filteredOrders = useMemo(() => {
-    let filtered = filterByAccess(orders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = pendingColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [orders, searchTerm, crmNameFilter, currentUser])
-
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
-
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
-
-  const togglePendingColumn = (columnKey: string) =>
-    setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const toggleHistoryColumn = (columnKey: string) =>
-    setVisibleHistoryColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const showAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actions" }), {}))
-  const showAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: false }), {}))
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
@@ -197,7 +164,7 @@ export default function DeliveryNoteForInvoicePage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
     if (!amount || !dnNumber.trim() || !dnAttachmentFile) {
-      alert("Amount, DN Number and DN Attachment are required")
+      toast.error("Amount, DN Number and DN Attachment are required")
       return
     }
 
@@ -230,13 +197,13 @@ export default function DeliveryNoteForInvoicePage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — Delivery Note (Inv.) recorded. Make Invoice is now scheduled.`)
+        toast.success(`Order ${selectedOrder.orderNo} — Delivery Note (Inv.) recorded. Make Invoice is now scheduled.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting delivery-note-for-invoice:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -247,7 +214,11 @@ export default function DeliveryNoteForInvoicePage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
+          <Button
+            size="sm"
+            className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+            onClick={() => handleProcess(order)}
+          >
             Process
           </Button>
         )
@@ -256,23 +227,25 @@ export default function DeliveryNoteForInvoicePage() {
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            className="h-7 px-2 gap-1 text-xs border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
             onClick={() => handleViewItemList(order)}
           >
             <Eye className="h-3.5 w-3.5" />
-            View Items
+            <span>Items</span>
           </Button>
         )
       case "dnAttachment":
         return order.dnAttachmentUrl ? (
           <a href={order.dnAttachmentUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">
+              Link
+            </StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "sourceStage":
-        return <Badge variant="outline">{value || "N/A"}</Badge>
+        return <StatusBadge tone="neutral">{value || "N/A"}</StatusBadge>
       case "amount":
         return value !== "" && value !== null && value !== undefined ? `₹${Number(value).toLocaleString()}` : ""
       default:
@@ -296,7 +269,7 @@ export default function DeliveryNoteForInvoicePage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -308,251 +281,135 @@ export default function DeliveryNoteForInvoicePage() {
     )
   }
 
-  const activeColumns = activeTab === "pending" ? pendingColumns : historyColumns
-  const searchPlaceholder = `Search by ${activeColumns
-    .filter((col) => col.searchable)
-    .map((col) => col.label)
-    .join(", ")}`
-
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col min-h-0">
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history">History ({filteredProcessedOrders.length})</TabsTrigger>
-                </TabsList>
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={tabs}
+            activeTab={activeTab}
+            onChange={(val) => handleTabChange(val as "pending" | "history")}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="w-[180px]">
+            <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+              <SelectTrigger className="h-9 text-xs border-input bg-card">
+                <SelectValue placeholder="All CRM Names" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  All CRM Names
+                </SelectItem>
+                {crmNameOptions.map((name) => (
+                  <SelectItem key={name} value={name} className="text-xs">
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={columnPanel.columns}
+            visible={columnPanel.visible}
+            onToggle={columnPanel.toggle}
+            onSelectAll={columnPanel.showAll}
+            onHideAll={columnPanel.hideAll}
+          />
+        </div>
 
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder={searchPlaceholder}
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-                <div className="flex items-center gap-2">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={handleRefresh} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={activeTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
-                          Show All
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={activeTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {(activeTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleColumns = activeTab === "pending" ? visiblePendingColumns : visibleHistoryColumns
-                          const toggleColumn = activeTab === "pending" ? togglePendingColumn : toggleHistoryColumn
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleColumns[column.key]}
-                                onCheckedChange={() => toggleColumn(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {filteredOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
-                  ))}
-                  {filteredOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending Delivery Note (inv.) records"}
-                    </p>
-                  )}
-                </div>
-
-                <div className="hidden md:flex md:flex-col flex-1 min-h-0 border rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto flex-1 min-h-0 flex flex-col">
-                    <div style={{ minWidth: "max-content" }} className="flex flex-col flex-1 min-h-0">
-                      <Table>
-                        <TableHeader className="sticky top-0 z-10 bg-gray-50">
-                          <TableRow>
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
-                                  <div className="break-words">{column.label}</div>
-                                </TableHead>
-                              ))}
-                          </TableRow>
-                        </TableHeader>
-                      </Table>
-                      <div className="overflow-y-auto flex-1">
-                        <Table>
-                          <TableBody>
-                            {filteredOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {pendingColumns
-                                  .filter((col) => visiblePendingColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top">
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No pending Delivery Note (inv.) records"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading history...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed records found"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex md:flex-col flex-1 min-h-0 border rounded-lg overflow-hidden">
-                      <div className="overflow-x-auto flex-1 min-h-0 flex flex-col">
-                        <div style={{ minWidth: "max-content" }} className="flex flex-col flex-1 min-h-0">
-                          <Table>
-                            <TableHeader className="sticky top-0 z-10 bg-gray-50">
-                              <TableRow>
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 border-b-2 border-gray-200 px-4 py-3">
-                                      <div className="break-words">{column.label}</div>
-                                    </TableHead>
-                                  ))}
-                              </TableRow>
-                            </TableHeader>
-                          </Table>
-                          <div className="overflow-y-auto flex-1">
-                            <Table>
-                              <TableBody>
-                                {filteredProcessedOrders.map((order, idx) => (
-                                  <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                    {historyColumns
-                                      .filter((col) => visibleHistoryColumns[col.key])
-                                      .map((column) => (
-                                        <TableCell key={column.key} className="border-b px-4 py-3 align-top">
-                                          <div className="break-words whitespace-normal leading-relaxed">
-                                            {renderCellContent(order, column.key)}
-                                          </div>
-                                        </TableCell>
-                                      ))}
-                                  </TableRow>
-                                ))}
-                                {filteredProcessedOrders.length === 0 && (
-                                  <TableRow>
-                                    <TableCell
-                                      colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                      className="text-center text-muted-foreground h-32"
-                                    >
-                                      {searchTerm ? "No orders match your search criteria" : "No processed records found"}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                              </TableBody>
-                            </Table>
-                          </div>
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions"
+                  ? "90px"
+                  : col.key === "itemList"
+                  ? "75px"
+                  : col.key === "companyName"
+                  ? "220px"
+                  : col.key === "orderNo"
+                  ? "120px"
+                  : col.key === "quotationNo"
+                  ? "130px"
+                  : col.key === "contactPersonName"
+                  ? "160px"
+                  : col.key === "amount"
+                  ? "120px"
+                  : "140px",
+            }))}
+            data={activeTab === "pending" ? filteredOrders : historyPageRows}
+            keyExtractor={(order, idx) => order.id || order.queueId || order.orderId || order.orderNo || idx}
+            loading={activeTab === "history" ? processedLoading : false}
+            emptyTitle={
+              searchTerm
+                ? "No matching records found"
+                : activeTab === "pending"
+                ? "No pending Delivery Note (inv.) records"
+                : "No processed records found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={activeTab === "pending"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={activeTab === "pending" ? undefined : historyTotal}
+            totalPages={historyTotalPages}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.queueId || order.orderId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
                         </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={columnPanel.columns}
+                visibleColumns={columnPanel.visible}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

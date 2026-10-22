@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 import {
   getSectionForMode,
   isBiltyRequired,
@@ -48,52 +51,58 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const supabase = getSupabaseAdmin()
 
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_packaging_transport_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_packaging_transport_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
     if (status === "history") {
-      const { data, error } = await supabase
+      const { limit, offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
         .from("otp_packaging_transport")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)")
+        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)", { count: "exact" })
         .eq("status", "submitted")
         .order("created_at", { ascending: false })
-        .limit(200)
+        .order("id")
+        .range(offset, to)
       if (error) throw error
 
-      return NextResponse.json({ success: true, data: data || [] })
+      return chunkJson(data, count, offset)
     }
 
-    const { data: ptRows, error: ptError } = await supabase
-      .from("otp_packaging_transport")
-      .select("make_invoice_id, status")
-    if (ptError) throw ptError
+    // Fresh rows come from the anti-join view (Database/72): Make Invoice rows
+    // with packaging_transport_planned set and NO packaging row yet (draft or
+    // submitted). Drafts stay Pending and are read separately below.
+    const freshRows = await fetchAllRows((from, to) =>
+      supabase
+        .from("otp_v_packaging_transport_fresh_pending")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to)
+    )
 
-    const submittedIds = (ptRows || []).filter((r: any) => r.status === "submitted").map((r: any) => r.make_invoice_id)
-    const draftIds = (ptRows || []).filter((r: any) => r.status === "draft").map((r: any) => r.make_invoice_id)
-    const excludeIds = [...submittedIds, ...draftIds]
-
-    let freshQuery = supabase
-      .from("otp_make_invoice")
-      .select("*, order:otp_orders(*)")
-      .not("packaging_transport_planned", "is", null)
-      .order("created_at", { ascending: false })
-
-    if (excludeIds.length > 0) {
-      freshQuery = freshQuery.not("id", "in", `(${excludeIds.join(",")})`)
-    }
-
-    const { data: freshRows, error: freshError } = await freshQuery
-    if (freshError) throw freshError
-
-    let draftRows: any[] = []
-    if (draftIds.length > 0) {
-      const { data, error: draftError } = await supabase
+    const draftRows = await fetchAllRows((from, to) =>
+      supabase
         .from("otp_packaging_transport")
         .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)")
         .eq("status", "draft")
         .order("created_at", { ascending: false })
-      if (draftError) throw draftError
-      draftRows = data || []
-    }
+        .order("id")
+        .range(from, to)
+    )
 
-    return NextResponse.json({ success: true, data: [...draftRows, ...(freshRows || [])] })
+    return NextResponse.json({ success: true, data: [...draftRows, ...freshRows] })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/packaging-transport exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

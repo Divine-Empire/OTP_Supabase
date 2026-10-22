@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { fetchAllRows } from "@/lib/fetch-all"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 
 // Stage — Calibration Certificate.
 //
@@ -21,35 +24,52 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const supabase = getSupabaseAdmin()
 
-    if (status === "history") {
-      const { data, error } = await supabase
-        .from("otp_calibration_certificate")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, queue:otp_pre_invoice_queue(calibration_type))")
-        .order("created_at", { ascending: false })
-        .limit(200)
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request,
+      // search / CRM / calibration-type filters and access rules applied in SQL.
+      const p = parseHistoryParams(searchParams, ["calibrationType"])
+      const query = applyHistoryFilters(
+        supabase.from("otp_v_calibration_history").select("*", { count: "exact" }),
+        p,
+        { extraEq: { calibrationType: "calibration_type" } }
+      )
+      const { data, error, count } = await query.order("created_at", { ascending: false }).order("id").range(p.offset, p.to)
       if (error) throw error
 
-      return NextResponse.json({ success: true, data: data || [] })
+      // Filter dropdown options must cover the whole History, not just this page.
+      const types = await fetchAllRows((from, to) =>
+        supabase.from("otp_pre_invoice_queue").select("calibration_type").not("calibration_type", "is", null).order("id").range(from, to)
+      )
+      const calibrationType = Array.from(new Set(types.map((r: any) => r.calibration_type).filter(Boolean))).sort()
+      return pageJson(data, count, p, { facets: { calibrationType } })
     }
 
-    const { data: doneRows, error: doneError } = await supabase.from("otp_calibration_certificate").select("make_invoice_id")
-    if (doneError) throw doneError
-    const doneIds = (doneRows || []).map((r: any) => r.make_invoice_id).filter(Boolean)
+    if (status === "history") {
+      const { limit, offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
+        .from("otp_calibration_certificate")
+        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, queue:otp_pre_invoice_queue(calibration_type))", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(offset, to)
+      if (error) throw error
 
-    let query = supabase
-      .from("otp_make_invoice")
-      .select("*, order:otp_orders(*), queue:otp_pre_invoice_queue(calibration_type)")
-      .not("calibration_planned", "is", null)
-      .order("created_at", { ascending: false })
-
-    if (doneIds.length > 0) {
-      query = query.not("id", "in", `(${doneIds.join(",")})`)
+      return chunkJson(data, count, offset)
     }
 
-    const { data, error } = await query
-    if (error) throw error
+    // Anti-join view (Database/72): no done-id list in the URL, paged past
+    // PostgREST's 1000-row cap. No fallback to the old NOT IN query -- if the
+    // view is missing this should fail loudly, not silently regress.
+    const data = await fetchAllRows((from, to) =>
+      supabase
+        .from("otp_v_calibration_pending")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to)
+    )
 
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/calibration exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

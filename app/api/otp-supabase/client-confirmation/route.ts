@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 
 // Stage — Client Confirmation, the final stage.
 //
@@ -16,17 +18,35 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const supabase = getSupabaseAdmin()
 
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_client_confirmation_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_client_confirmation_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
     if (status === "history") {
-      const { data, error } = await supabase
+      const { limit, offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
         .from("otp_client_confirmation")
         .select(
-          "*, order:otp_orders(*), packagingTransport:otp_packaging_transport(transport_mode, receiving_copy_url, client_confirmation_planned, transporter_name, reference_no, freight_charge, hamali_charge, parking_charge, bilty_upload_urls, makeInvoice:otp_make_invoice(invoice_number, items))"
+          "*, order:otp_orders(*), packagingTransport:otp_packaging_transport(transport_mode, receiving_copy_url, client_confirmation_planned, transporter_name, reference_no, freight_charge, hamali_charge, parking_charge, bilty_upload_urls, makeInvoice:otp_make_invoice(invoice_number, items))",
+          { count: "exact" }
         )
         .order("created_at", { ascending: false })
-        .limit(200)
+        .order("id")
+        .range(offset, to)
       if (error) throw error
 
-      return NextResponse.json({ success: true, data: data || [] })
+      return chunkJson(data, count, offset)
     }
 
     const [doneRes, packagingRes] = await Promise.all([

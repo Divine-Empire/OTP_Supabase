@@ -3,30 +3,23 @@
 import { useEffect, useMemo, useState } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { RefreshCw, Search, XCircle, AlertTriangle, Eye } from "lucide-react"
+import { RefreshCw, XCircle, AlertTriangle, Eye } from "lucide-react"
+import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 import { canSeeLocation } from "@/lib/access"
 import { formatDateTime } from "@/lib/otp-utils"
-
-const logColumns = [
-  { key: "order_no", label: "Order No.", searchable: true },
-  { key: "stage_label", label: "Stage Cancelled", searchable: true },
-  { key: "cancel_reason", label: "Reason", searchable: true },
-  { key: "cancelled_by", label: "Cancelled By", searchable: true },
-  { key: "cancelled_at", label: "Cancelled At", searchable: false },
-]
+import { FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 export default function OrderCancelPage() {
-  const [logs, setLogs] = useState<any[]>([])
-  const [logsLoading, setLogsLoading] = useState(true)
+  const [logPage, setLogPage] = useState(1)
+  const [logPageSize, setLogPageSize] = useState(50)
   const [searchTerm, setSearchTerm] = useState("")
 
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -43,38 +36,21 @@ export default function OrderCancelPage() {
 
   const { user: currentUser } = useAuth()
 
-  const fetchLogs = async () => {
-    setLogsLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/cancel")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setLogs(result.data)
-      } else {
-        setLogs([])
-      }
-    } catch (err) {
-      console.error("Error fetching cancel logs:", err)
-      setLogs([])
-    } finally {
-      setLogsLoading(false)
-    }
-  }
+  // Cancel log: one server page per request (search + location access run in SQL).
+  const history = useServerHistory({
+    url: "/api/otp-supabase/cancel",
+    active: true,
+    page: logPage,
+    pageSize: logPageSize,
+    search: searchTerm,
+    currentUser,
+  })
+  const logs = history.rows
+  const logsTotal = history.total
+  const logsLoading = history.loading
+  const fetchLogs = history.reload
 
-  useEffect(() => {
-    fetchLogs()
-  }, [])
-
-  const filteredLogs = useMemo(() => {
-    const visible = logs.filter((log) => canSeeLocation(log.order?.order_location, currentUser))
-    if (!searchTerm) return visible
-    return visible.filter((log) => {
-      const searchableFields = logColumns
-        .filter((col) => col.searchable)
-        .map((col) => String(log[col.key] || "").toLowerCase())
-      return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-    })
-  }, [logs, searchTerm, currentUser])
+  useEffect(() => { setLogPage(1) }, [searchTerm])
 
   const resetForm = () => {
     setOrderNoInput("")
@@ -137,11 +113,11 @@ export default function OrderCancelPage() {
 
   const handleSubmit = async () => {
     if (!order || selectedStages.size === 0) {
-      alert("Please select at least one stage to cancel.")
+      toast.error("Please select at least one stage to cancel.")
       return
     }
     if (!cancelReason.trim()) {
-      alert("Please enter a cancel reason.")
+      toast.error("Please enter a cancel reason.")
       return
     }
 
@@ -160,7 +136,7 @@ export default function OrderCancelPage() {
       const result = await response.json()
 
       if (result.success) {
-        alert(`Order ${order.order_no} — selected stage(s) cancelled.`)
+        toast.success(`Order ${order.order_no} — selected stage(s) cancelled.`)
         setIsFormOpen(false)
         resetForm()
         await fetchLogs()
@@ -169,119 +145,122 @@ export default function OrderCancelPage() {
       }
     } catch (err: any) {
       console.error("Error cancelling order stage(s):", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
   }
 
+  const activeChips = useMemo(() => {
+    if (!searchTerm) return []
+    return [
+      {
+        key: "search",
+        label: `Search: ${searchTerm}`,
+        onRemove: () => setSearchTerm(""),
+      },
+    ]
+  }, [searchTerm])
+
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Card className="flex-1 flex flex-col min-h-0">
-          <CardHeader className="border-b py-3 shrink-0">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="relative flex-1 min-w-[200px] max-w-md">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  placeholder="Search cancel log..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the log table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, stage, reason, user..."
+            className="min-w-[220px] flex-1"
+          />
+          <Button
+            onClick={fetchLogs}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${logsLoading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </Button>
+          <Button
+            onClick={openForm}
+            variant="destructive"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium shadow-xs"
+          >
+            <XCircle className="h-4 w-4" />
+            <span>Cancel Order</span>
+          </Button>
+        </div>
 
-              <div className="flex items-center gap-2">
-                <Button onClick={fetchLogs} variant="outline" size="sm">
-                  <RefreshCw className={`h-4 w-4 mr-2 ${logsLoading ? "animate-spin" : ""}`} />
-                  Refresh
-                </Button>
-                <Button onClick={openForm} variant="destructive" size="sm">
-                  <XCircle className="h-4 w-4 mr-2" />
-                  Cancel Order
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
+        <FilterChips chips={activeChips} onClearAll={() => setSearchTerm("")} className="-mt-1" />
 
-          <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-            <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-              <div className="overflow-auto flex-1 min-h-0">
-                <Table className="w-full relative">
-                  <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                    <TableRow>
-                      {logColumns.map((column) => (
-                        <TableHead key={column.key} className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap">
-                          {column.label}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {logsLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={logColumns.length} className="h-32 text-center">
-                          <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                            <RefreshCw className="h-5 w-5 animate-spin" />
-                            Loading cancel log...
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : filteredLogs.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={logColumns.length} className="text-center text-muted-foreground h-32">
-                          {searchTerm ? "No cancellations match your search" : "No cancellations recorded yet."}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredLogs.map((log) => (
-                        <TableRow key={log.id} className="hover:bg-gray-50">
-                          <TableCell className="border-b px-4 py-3 font-medium">{log.order_no}</TableCell>
-                          <TableCell className="border-b px-4 py-3">
-                            <Badge variant="outline">{log.stage_label}</Badge>
-                          </TableCell>
-                          <TableCell className="border-b px-4 py-3 max-w-[300px]">
-                            <div className="break-words whitespace-normal leading-relaxed">{log.cancel_reason}</div>
-                          </TableCell>
-                          <TableCell className="border-b px-4 py-3">{log.cancelled_by || "-"}</TableCell>
-                          <TableCell className="border-b px-4 py-3">{formatDateTime(log.cancelled_at)}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-
-            <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-              {filteredLogs.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">
-                  {searchTerm ? "No cancellations match your search" : "No cancellations recorded yet."}
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={[
+              { key: "order_no", label: "Order No.", minWidth: "130px" },
+              { key: "stage_label", label: "Stage Cancelled", minWidth: "160px" },
+              { key: "cancel_reason", label: "Reason", minWidth: "260px" },
+              { key: "cancelled_by", label: "Cancelled By", minWidth: "140px" },
+              { key: "cancelled_at", label: "Cancelled At", minWidth: "160px" },
+            ]}
+            data={logs}
+            keyExtractor={(log) => log.id}
+            loading={logsLoading}
+            emptyTitle={
+              searchTerm ? "No cancellations match your search" : "No cancellations recorded yet."
+            }
+            emptyDescription={
+              searchTerm ? "Try searching for a different order number or reason." : undefined
+            }
+            currentPage={logPage}
+            itemsPerPage={logPageSize}
+            totalResults={logsTotal}
+            totalPages={Math.ceil(logsTotal / logPageSize) || 1}
+            onPageChange={setLogPage}
+            onItemsPerPageChange={(n) => { setLogPageSize(n); setLogPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(log) => (
+              <TableRow key={log.id} className="hover:bg-secondary/50 transition-colors">
+                <TableCell className="px-3.5 py-2 text-xs font-semibold text-foreground align-middle">
+                  {log.order_no}
+                </TableCell>
+                <TableCell className="px-3.5 py-2 text-xs align-middle">
+                  <StatusBadge tone="danger">{log.stage_label}</StatusBadge>
+                </TableCell>
+                <TableCell className="px-3.5 py-2 text-xs text-foreground align-middle max-w-[340px]">
+                  <div className="truncate" title={log.cancel_reason}>{log.cancel_reason}</div>
+                </TableCell>
+                <TableCell className="px-3.5 py-2 text-xs text-muted-foreground align-middle">
+                  {log.cancelled_by || "-"}
+                </TableCell>
+                <TableCell className="px-3.5 py-2 text-xs text-muted-foreground align-middle whitespace-nowrap">
+                  {formatDateTime(log.cancelled_at)}
+                </TableCell>
+              </TableRow>
+            )}
+            renderCard={(log) => (
+              <div className="rounded-xl border border-border bg-card p-4 space-y-2 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-sm text-foreground">{log.order_no}</span>
+                  <StatusBadge tone="danger">{log.stage_label}</StatusBadge>
+                </div>
+                <p className="text-xs text-foreground leading-relaxed">{log.cancel_reason}</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {log.cancelled_by || "-"} · {formatDateTime(log.cancelled_at)}
                 </p>
-              ) : (
-                filteredLogs.map((log) => (
-                  <div key={log.id} className="border rounded-lg p-3 space-y-1 bg-white">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold">{log.order_no}</span>
-                      <Badge variant="outline">{log.stage_label}</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{log.cancel_reason}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {log.cancelled_by || "-"} · {formatDateTime(log.cancelled_at)}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            )}
+          />
+        </div>
 
         {/* Cancel Order Form Modal */}
         <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Cancel Order</DialogTitle>
-              <DialogDescription>Search an order and cancel whichever stage it's currently pending in</DialogDescription>
+              <DialogDescription>Search an order and cancel whichever stage it&apos;s currently pending in</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="flex items-end gap-3">
@@ -301,14 +280,14 @@ export default function OrderCancelPage() {
               </div>
 
               {searchError && (
-                <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-3">
+                <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-md p-3">
                   <AlertTriangle className="h-4 w-4 shrink-0" />
                   {searchError}
                 </div>
               )}
 
               {order && (
-                <div className="border rounded-lg p-4 space-y-4 bg-slate-50/50">
+                <div className="border rounded-lg p-4 space-y-4 bg-secondary/50">
                   <div>
                     <p className="font-semibold">{order.order_no}</p>
                     <p className="text-sm text-muted-foreground">
@@ -318,7 +297,7 @@ export default function OrderCancelPage() {
 
                   {pendingStages.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      This order isn't currently pending in any cancellable stage.
+                      This order isn&apos;t currently pending in any cancellable stage.
                     </p>
                   ) : (
                     <>
@@ -326,7 +305,7 @@ export default function OrderCancelPage() {
                         <Label>Select stage(s) to cancel</Label>
                         <div className="border rounded-md overflow-hidden bg-white">
                           <Table>
-                            <TableHeader className="bg-slate-50">
+                            <TableHeader className="bg-secondary">
                               <TableRow>
                                 <TableHead className="w-10"></TableHead>
                                 <TableHead>Stage Name</TableHead>
@@ -353,7 +332,7 @@ export default function OrderCancelPage() {
                                       type="button"
                                       size="sm"
                                       variant="outline"
-                                      className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+                                      className="gap-1.5 border-primary/30 bg-accent text-accent-foreground hover:bg-primary/15"
                                       onClick={() => handleViewItemList(stage.items)}
                                     >
                                       <Eye className="h-3.5 w-3.5" />

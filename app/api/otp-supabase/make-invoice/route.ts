@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 
 // Stage — Make Invoice.
 //
@@ -16,35 +19,46 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const supabase = getSupabaseAdmin()
 
-    if (status === "history") {
-      const { data, error } = await supabase
-        .from("otp_make_invoice")
-        .select("*, order:otp_orders(*), queue:otp_pre_invoice_queue(quotation_number, calibration_required, calibration_type, dispatch_location, direct_dispatch_details, invoiced_at, make_invoice_planned)")
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_make_invoice_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_make_invoice_history").select("*", { count: "exact" }),
+        p
+      )
         .order("created_at", { ascending: false })
-        .limit(200)
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
+    if (status === "history") {
+      const { limit, offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
+        .from("otp_make_invoice")
+        .select("*, order:otp_orders(*), queue:otp_pre_invoice_queue(quotation_number, calibration_required, calibration_type, dispatch_location, direct_dispatch_details, invoiced_at, make_invoice_planned)", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(offset, to)
       if (error) throw error
 
-      return NextResponse.json({ success: true, data: data || [] })
+      return chunkJson(data, count, offset)
     }
 
-    const { data: doneRows, error: doneError } = await supabase.from("otp_make_invoice").select("pre_invoice_queue_id")
-    if (doneError) throw doneError
-    const doneIds = (doneRows || []).map((r: any) => r.pre_invoice_queue_id).filter(Boolean)
+    // Anti-join view (Database/72, 73): no done-id list in the URL, and paged
+    // past PostgREST's 1000-row cap.
+    const data = await fetchAllRows((from, to) =>
+      supabase
+        .from("otp_v_make_invoice_pending")
+        .select("*")
+        .order("make_invoice_planned", { ascending: false })
+        .order("id")
+        .range(from, to)
+    )
 
-    let query = supabase
-      .from("otp_pre_invoice_queue")
-      .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))")
-      .not("make_invoice_planned", "is", null)
-      .order("make_invoice_planned", { ascending: false })
-
-    if (doneIds.length > 0) {
-      query = query.not("id", "in", `(${doneIds.join(",")})`)
-    }
-
-    const { data, error } = await query
-    if (error) throw error
-
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/make-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

@@ -18,21 +18,20 @@ export function DispatchCharts({ data }: DispatchChartsProps) {
             <PieChart>
               <Pie
                 data={[
-                  { name: "Complete", value: data.completedDispatches, color: "#10b981" },
-                  { name: "Pending", value: data.pendingDispatches, color: "#f59e0b" },
+                  { name: "Complete", value: data.completedDispatches, color: "#6A9E0A" },
+                  { name: "Pending", value: data.pendingDispatches, color: "#E8702A" },
                 ]}
                 cx="50%"
                 cy="50%"
                 labelLine={false}
                 label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                 outerRadius={80}
-                fill="#8884d8"
                 dataKey="value"
               >
-                <Cell fill="#10b981" />
-                <Cell fill="#f59e0b" />
+                <Cell fill="#6A9E0A" aria-label={`Complete: ${data.completedDispatches}`} />
+                <Cell fill="#E8702A" aria-label={`Pending: ${data.pendingDispatches}`} />
               </Pie>
-              <Tooltip />
+              <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "hsl(var(--foreground))", borderRadius: "0.5rem" }} />
             </PieChart>
           </ResponsiveContainer>
         </CardContent>
@@ -46,11 +45,11 @@ export function DispatchCharts({ data }: DispatchChartsProps) {
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={data.monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Bar dataKey="orders" fill="#8b5cf6" />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+              <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "hsl(var(--foreground))", borderRadius: "0.5rem" }} />
+              <Bar dataKey="orders" fill="#2274B8" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </CardContent>

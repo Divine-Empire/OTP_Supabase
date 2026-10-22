@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { fetchAllRows } from "@/lib/fetch-all"
 import { tryCreatePfmsIndent } from "@/lib/pfms"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
 // Stage — Indent Creation. Replaces the old "Material Received" stage —
 // see Database/52_indent_creation_stage.sql. One table backs all 3 tabs:
@@ -19,22 +22,47 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") // "pending" | "material-received" | "history"
     const supabase = getSupabaseAdmin()
 
-    let query = supabase.from("otp_indent_creation").select("*, order:otp_orders(*)")
-
-    if (status === "material-received") {
-      query = query.not("indent_created_at", "is", null).is("material_received", null)
-    } else if (status === "history") {
-      query = query.not("material_received", "is", null).limit(200)
-    } else {
-      // material_received IS NULL too — a 'Rejected' row never gets
-      // indent_created_at, so this alone would keep it in Pending.
-      query = query.is("indent_created_at", null).is("material_received", null)
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-server-history.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_indent_creation_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_indent_creation_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false })
-    if (error) throw error
+    if (status === "history") {
+      // Legacy chunked mode (?offset=&limit=); the page uses the server-paged branch above.
+      const { offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
+        .from("otp_indent_creation")
+        .select("*, order:otp_orders(*)", { count: "exact" })
+        .not("material_received", "is", null)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(offset, to)
+      if (error) throw error
+      return chunkJson(data, count, offset)
+    }
 
-    return NextResponse.json({ success: true, data: data || [] })
+    // material_received IS NULL too on Pending: a 'Rejected' row never gets
+    // indent_created_at, so indent_created_at IS NULL alone would keep it here.
+    const data = await fetchAllRows((from, to) => {
+      const q = supabase.from("otp_indent_creation").select("*, order:otp_orders(*)")
+      const filtered =
+        status === "material-received"
+          ? q.not("indent_created_at", "is", null).is("material_received", null)
+          : q.is("indent_created_at", null).is("material_received", null)
+      return filtered.order("created_at", { ascending: false }).order("id").range(from, to)
+    })
+
+    return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/indent-creation exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

@@ -3,8 +3,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,19 +11,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { useServerHistory } from "@/hooks/use-server-history"
 import { toast } from "sonner"
 import { useAuth } from "@/components/auth-provider"
 import { mapIndentCreationRowToUI } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge, useConfirmDialog } from "@/components/shared"
 
 // Base columns shared across all 3 tabs.
 const baseColumns = [
@@ -71,10 +64,10 @@ const historyColumns = [
 export default function IndentCreationPage() {
   const [pendingOrders, setPendingOrders] = useState<any[]>([])
   const [materialReceivedOrders, setMaterialReceivedOrders] = useState<any[]>([])
-  const [historyOrders, setHistoryOrders] = useState<any[]>([])
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [materialReceivedLoading, setMaterialReceivedLoading] = useState(false)
-  const [historyLoading, setHistoryLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Pending tab — Indent Creation process form
@@ -115,6 +108,23 @@ export default function IndentCreationPage() {
 
   const { user: currentUser } = useAuth()
 
+  // History: one server page per request (search / CRM / access rules run in SQL).
+  const history = useServerHistory({
+    url: "/api/otp-supabase/indent-creation?status=history",
+    map: mapIndentCreationRowToUI,
+    active: currentTab === "history",
+    page: historyPage,
+    pageSize: historyPageSize,
+    search: searchTerm,
+    crmName: crmNameFilter,
+    currentUser,
+  })
+  const historyOrders = history.rows
+  const historyTotal = history.total
+  const historyLoading = history.loading
+  const fetchHistoryOrders = history.reload
+  const { askConfirm, confirmDialog } = useConfirmDialog()
+
   const fetchPendingOrders = async () => {
     setLoading(true)
     setError(null)
@@ -153,24 +163,6 @@ export default function IndentCreationPage() {
     }
   }
 
-  const fetchHistoryOrders = async () => {
-    setHistoryLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/indent-creation?status=history")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setHistoryOrders(result.data.map(mapIndentCreationRowToUI))
-      } else {
-        setHistoryOrders([])
-      }
-    } catch (err) {
-      console.error("Error fetching indent-creation history:", err)
-      setHistoryOrders([])
-    } finally {
-      setHistoryLoading(false)
-    }
-  }
-
   useEffect(() => {
     fetchPendingOrders()
     fetchMaterialReceivedOrders()
@@ -206,19 +198,13 @@ export default function IndentCreationPage() {
     return filtered
   }, [materialReceivedOrders, searchTerm, crmNameFilter, currentUser])
 
-  const filteredHistoryOrders = useMemo(() => {
-    let filtered = filterByAccess(historyOrders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [historyOrders, searchTerm, crmNameFilter, currentUser])
+  // Already filtered and paged by the server.
+  const filteredHistoryOrders = historyOrders
+
+  // Any filter/search change can shrink the list under the current page.
+  useEffect(() => { setHistoryPage(1) }, [searchTerm, crmNameFilter])
+
+  const historyPageRows = historyOrders
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -312,13 +298,13 @@ export default function IndentCreationPage() {
           })
         }
 
-        alert(`Order ${selectedOrder.orderNo} — indent created, moved to Material Received.`)
+        toast.success(`Order ${selectedOrder.orderNo} — indent created, moved to Material Received.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting indent-creation:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -347,13 +333,13 @@ export default function IndentCreationPage() {
         setIsMRDialogOpen(false)
         setSelectedMROrder(null)
         await fetchMaterialReceivedOrders()
-        alert(`Order ${selectedMROrder.orderNo} — Material Received recorded. Packing List will show it again for a re-check.`)
+        toast.success(`Order ${selectedMROrder.orderNo} — Material Received recorded. Packing List will show it again for a re-check.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting material-received:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -378,7 +364,7 @@ export default function IndentCreationPage() {
       if (!result.success) throw new Error(result.error || "Update failed")
       return true
     } catch (err: any) {
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
       return false
     } finally {
       setIsSubmitting(false)
@@ -398,14 +384,23 @@ export default function IndentCreationPage() {
     }
   }
 
-  const handleReject = async (order: any) => {
-    if (!confirm(`Reject indent for ${order.orderNo}? It moves to History and will not go back to Packing List.`)) return
-    const ok = await patchIndent({
-      indentId: order.indentId || order.id,
-      action: "reject",
-      by: currentUser?.fullName || currentUser?.username || "Admin",
-    })
-    if (ok) await fetchPendingOrders()
+  const handleReject = (order: any) => {
+    askConfirm(
+      {
+        title: "Reject Indent",
+        message: `Reject indent for ${order.orderNo}? It moves to History and will not go back to Packing List.`,
+        confirmText: "Reject",
+        destructive: true,
+      },
+      async () => {
+        const ok = await patchIndent({
+          indentId: order.indentId || order.id,
+          action: "reject",
+          by: currentUser?.fullName || currentUser?.username || "Admin",
+        })
+        if (ok) await fetchPendingOrders()
+      }
+    )
   }
 
   const renderCellContent = (order: any, columnKey: string) => {
@@ -417,63 +412,142 @@ export default function IndentCreationPage() {
         const allZero = items.length > 0 && zeroCount === items.length
         return (
           <div className="flex flex-col gap-1.5">
-            <div className="flex gap-1.5">
+            <div className="flex items-center gap-1.5">
               {!allZero && (
-                <Button size="sm" onClick={() => handleProcess(order)}>
+                <Button
+                  size="sm"
+                  onClick={() => handleProcess(order)}
+                  className="h-7 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+                >
                   Process
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={() => openEditQty(order)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openEditQty(order)}
+                className="h-7 px-2 text-xs font-medium border-input bg-card hover:bg-accent"
+              >
                 Edit Qty
               </Button>
               {allZero && (
-                <Button size="sm" variant="destructive" onClick={() => handleReject(order)} disabled={isSubmitting}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => handleReject(order)}
+                  disabled={isSubmitting}
+                  className="h-7 px-2 text-xs font-medium"
+                >
                   Reject
                 </Button>
               )}
             </div>
             {zeroCount > 0 && (
-              <Badge variant="destructive" className="w-fit">
-                {allZero ? "All items 0 qty" : `${zeroCount} item(s) 0 qty — skipped on Process`}
-              </Badge>
+              <StatusBadge tone="danger" className="w-fit text-[11px]">
+                {allZero ? "All items 0 qty" : `${zeroCount} item(s) 0 qty`}
+              </StatusBadge>
             )}
           </div>
         )
       }
       case "actionsMR":
         return (
-          <Button size="sm" onClick={() => handleProcessMR(order)}>
+          <Button
+            size="sm"
+            onClick={() => handleProcessMR(order)}
+            className="h-7 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             Process
           </Button>
         )
       case "itemList":
         return (
           <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-brand-700 hover:bg-accent"
             onClick={() => handleViewItemList(order)}
+            title="View item list"
           >
             <Eye className="h-3.5 w-3.5" />
-            View Items
           </Button>
         )
       case "inventoryPhoto":
         return order.inventoryPhotoUrl ? (
           <a href={order.inventoryPhotoUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">View Photo</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-muted-foreground text-xs">N/A</span>
         )
       case "materialReceived":
         return value ? (
-          <Badge variant={value === "Yes" ? "default" : value === "Rejected" ? "destructive" : "secondary"}>{value}</Badge>
+          <StatusBadge tone={value === "Yes" ? "success" : value === "Rejected" ? "danger" : "warning"}>
+            {value}
+          </StatusBadge>
         ) : (
           ""
         )
+      case "crmName":
+        return value ? <StatusBadge tone="neutral">{value}</StatusBadge> : <span className="text-muted-foreground text-xs">-</span>
       default:
         return value ?? ""
+    }
+  }
+
+  const columnPanel =
+    currentTab === "pending"
+      ? { columns: pendingColumns, visible: visiblePendingColumns, toggle: togglePendingColumn, showAll: showAllPendingColumns, hideAll: hideAllPendingColumns }
+      : currentTab === "material-received"
+        ? {
+            columns: materialReceivedColumns,
+            visible: visibleMaterialReceivedColumns,
+            toggle: toggleMaterialReceivedColumn,
+            showAll: showAllMaterialReceivedColumns,
+            hideAll: hideAllMaterialReceivedColumns,
+          }
+        : { columns: historyColumns, visible: visibleHistoryColumns, toggle: toggleHistoryColumn, showAll: showAllHistoryColumns, hideAll: hideAllHistoryColumns }
+
+  const activeRows =
+    currentTab === "pending" ? filteredPendingOrders : currentTab === "material-received" ? filteredMaterialReceivedOrders : filteredHistoryOrders
+
+  const tabs = useMemo(
+    () => [
+      { id: "pending", label: "Pending", count: filteredPendingOrders.length },
+      { id: "material-received", label: "Material Received", count: filteredMaterialReceivedOrders.length },
+      { id: "history", label: "History", count: historyTotal },
+    ],
+    [filteredPendingOrders.length, filteredMaterialReceivedOrders.length, historyTotal]
+  )
+
+  const activeColumns = useMemo(() => {
+    return columnPanel.columns.filter((c) => columnPanel.visible[c.key])
+  }, [columnPanel.columns, columnPanel.visible])
+
+  const activeChips = useMemo(() => {
+    const chips = []
+    if (crmNameFilter && crmNameFilter !== "all") {
+      chips.push({
+        key: "crm",
+        label: `CRM: ${crmNameFilter}`,
+        onRemove: () => setCrmNameFilter("all"),
+      })
+    }
+    return chips
+  }, [crmNameFilter])
+
+  const handleClearAllFilters = () => {
+    setSearchTerm("")
+    setCrmNameFilter("all")
+  }
+
+  const handleTabChange = (val: string) => {
+    setCurrentTab(val)
+    if (val === "material-received") {
+      fetchMaterialReceivedOrders()
+    } else if (val === "history") {
+      setHistoryPage(1)
+      fetchHistoryOrders()
     }
   }
 
@@ -493,7 +567,7 @@ export default function IndentCreationPage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchPendingOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -505,196 +579,139 @@ export default function IndentCreationPage() {
     )
   }
 
-  const columnPanel =
-    currentTab === "pending"
-      ? { columns: pendingColumns, visible: visiblePendingColumns, toggle: togglePendingColumn, showAll: showAllPendingColumns, hideAll: hideAllPendingColumns }
-      : currentTab === "material-received"
-        ? {
-            columns: materialReceivedColumns,
-            visible: visibleMaterialReceivedColumns,
-            toggle: toggleMaterialReceivedColumn,
-            showAll: showAllMaterialReceivedColumns,
-            hideAll: hideAllMaterialReceivedColumns,
-          }
-        : { columns: historyColumns, visible: visibleHistoryColumns, toggle: toggleHistoryColumn, showAll: showAllHistoryColumns, hideAll: hideAllHistoryColumns }
-
-  const activeRows =
-    currentTab === "pending" ? filteredPendingOrders : currentTab === "material-received" ? filteredMaterialReceivedOrders : filteredHistoryOrders
-
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs value={currentTab} onValueChange={(value) => setCurrentTab(value)} className="flex-1 flex flex-col min-h-0">
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({filteredPendingOrders.length})</TabsTrigger>
-                  <TabsTrigger value="material-received" onClick={fetchMaterialReceivedOrders}>
-                    Material Received ({filteredMaterialReceivedOrders.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="history" onClick={fetchHistoryOrders}>
-                    History ({filteredHistoryOrders.length})
-                  </TabsTrigger>
-                </TabsList>
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={tabs}
+            activeTab={currentTab}
+            onChange={handleTabChange}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="w-[180px]">
+            <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+              <SelectTrigger className="h-9 text-xs border-input bg-card">
+                <SelectValue placeholder="All CRM Names" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  All CRM Names
+                </SelectItem>
+                {crmNameOptions.map((name) => (
+                  <SelectItem key={name} value={name} className="text-xs">
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            onClick={() => {
+              fetchPendingOrders()
+              fetchMaterialReceivedOrders()
+              fetchHistoryOrders()
+            }}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={columnPanel.columns}
+            visible={columnPanel.visible}
+            onToggle={columnPanel.toggle}
+            onSelectAll={columnPanel.showAll}
+            onHideAll={columnPanel.hideAll}
+          />
+        </div>
 
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
-                </div>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-                <div className="flex items-center gap-2">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={() => {
-                      fetchPendingOrders()
-                      fetchMaterialReceivedOrders()
-                      fetchHistoryOrders()
-                    }}
-                    variant="outline"
-                    size="sm"
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Columns
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button size="sm" variant="outline" onClick={columnPanel.showAll}>
-                          Show All
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={columnPanel.hideAll}>
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {columnPanel.columns.map((column) => (
-                          <div key={column.key} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`col-${column.key}`}
-                              checked={columnPanel.visible[column.key]}
-                              onCheckedChange={() => columnPanel.toggle(column.key)}
-                            />
-                            <Label htmlFor={`col-${column.key}`} className="text-sm">
-                              {column.label}
-                            </Label>
-                          </div>
-                        ))}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              {(["pending", "material-received", "history"] as const).map((tabKey) => {
-                const columns = tabKey === "pending" ? pendingColumns : tabKey === "material-received" ? materialReceivedColumns : historyColumns
-                const visible =
-                  tabKey === "pending" ? visiblePendingColumns : tabKey === "material-received" ? visibleMaterialReceivedColumns : visibleHistoryColumns
-                const rows = tabKey === currentTab ? activeRows : []
-                const isLoadingTab = tabKey === "material-received" ? materialReceivedLoading : tabKey === "history" ? historyLoading : false
-                const emptyMessage =
-                  tabKey === "pending" ? "No pending indents" : tabKey === "material-received" ? "No indents awaiting material" : "No processed indents found"
-
-                return (
-                  <TabsContent key={tabKey} value={tabKey} className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                    {isLoadingTab ? (
-                      <div className="flex items-center justify-center h-32">
-                        <RefreshCw className="h-6 w-6 animate-spin" />
-                        <span className="ml-2">Loading...</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                          {rows.map((order, idx) => (
-                            <MobileRecordCard
-                              key={order.id || idx}
-                              columns={columns}
-                              visibleColumns={visible}
-                              record={order}
-                              renderCellContent={renderCellContent}
-                            />
-                          ))}
-                          {rows.length === 0 && (
-                            <p className="text-center text-muted-foreground py-8">{searchTerm ? "No orders match your search criteria" : emptyMessage}</p>
-                          )}
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions" || col.key === "actionsMR"
+                  ? "110px"
+                  : col.key === "itemList"
+                  ? "70px"
+                  : col.key === "companyName"
+                  ? "200px"
+                  : "140px",
+            }))}
+            data={currentTab === "history" ? historyPageRows : activeRows}
+            keyExtractor={(order, idx) => order.id || order.indentId || order.orderNo || idx}
+            loading={
+              currentTab === "material-received"
+                ? materialReceivedLoading
+                : currentTab === "history"
+                ? historyLoading
+                : false
+            }
+            emptyTitle={
+              searchTerm
+                ? "No matching indents found"
+                : currentTab === "pending"
+                ? "No pending indents"
+                : currentTab === "material-received"
+                ? "No indents awaiting material"
+                : "No processed indents found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={currentTab !== "history"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "history" ? filteredHistoryOrders.length : undefined}
+            totalPages={Math.ceil(historyTotal / historyPageSize) || 1}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.indentId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
                         </div>
-
-                        <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                          <div className="overflow-auto flex-1 min-h-0">
-                            <Table className="w-full relative">
-                              <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                                <TableRow>
-                                  {columns
-                                    .filter((col) => visible[col.key])
-                                    .map((column) => (
-                                      <TableHead
-                                        key={column.key}
-                                        className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                        style={{ minWidth: column.key.startsWith("actions") ? "120px" : "160px" }}
-                                      >
-                                        {column.label}
-                                      </TableHead>
-                                    ))}
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {rows.map((order, idx) => (
-                                  <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                    {columns
-                                      .filter((col) => visible[col.key])
-                                      .map((column) => (
-                                        <TableCell
-                                          key={column.key}
-                                          className="border-b px-4 py-3 align-top"
-                                          style={{ minWidth: column.key.startsWith("actions") ? "120px" : "160px" }}
-                                        >
-                                          <div className="break-words whitespace-normal leading-relaxed">{renderCellContent(order, column.key)}</div>
-                                        </TableCell>
-                                      ))}
-                                  </TableRow>
-                                ))}
-                                {rows.length === 0 && (
-                                  <TableRow>
-                                    <TableCell colSpan={columns.filter((col) => visible[col.key]).length} className="text-center text-muted-foreground h-32">
-                                      {searchTerm ? "No orders match your search criteria" : emptyMessage}
-                                    </TableCell>
-                                  </TableRow>
-                                )}
-                              </TableBody>
-                            </Table>
-                          </div>
-                        </div>
-                      </>
-                    )}
-                  </TabsContent>
-                )
-              })}
-            </CardContent>
-          </Card>
-        </Tabs>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={columnPanel.columns}
+                visibleColumns={columnPanel.visible}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Pending -> Material Received: Indent Creation process form */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -852,7 +869,7 @@ export default function IndentCreationPage() {
             <DialogHeader>
               <DialogTitle>Edit Qty — {editQtyOrder?.orderNo}</DialogTitle>
               <DialogDescription>
-                Set 0 for an item that's no longer needed. 0-qty items are skipped on Process; if every item is 0 you can
+                Set 0 for an item that&apos;s no longer needed. 0-qty items are skipped on Process; if every item is 0 you can
                 Reject the indent instead.
               </DialogDescription>
             </DialogHeader>
@@ -920,6 +937,7 @@ export default function IndentCreationPage() {
             </div>
           </DialogContent>
         </Dialog>
+        {confirmDialog}
       </div>
     </MainLayout>
   )

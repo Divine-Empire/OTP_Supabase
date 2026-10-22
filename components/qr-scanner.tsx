@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Camera, X } from "lucide-react"
 
@@ -53,7 +53,7 @@ export function QrScanner({
   onError?: (message: string) => void
   label?: string
 }) {
-  const containerId = useRef(`qr-scanner-${Math.random().toString(36).slice(2)}`)
+  const containerId = `qr-scanner-${useId().replace(/:/g, "")}`
   const scannerRef = useRef<any>(null)
   const capturedRef = useRef(false) // guards against duplicate decode callbacks firing before stop() finishes
   const [active, setActive] = useState(false)
@@ -85,7 +85,7 @@ export function QrScanner({
     setActive(true)
     try {
       const { Html5Qrcode } = await import("html5-qrcode")
-      const instance = new Html5Qrcode(containerId.current)
+      const instance = new Html5Qrcode(containerId)
       scannerRef.current = instance
       await instance.start(
         { facingMode: "environment" },
@@ -114,13 +114,12 @@ export function QrScanner({
     return () => {
       stop()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
     <div className="space-y-2">
       <div
-        id={containerId.current}
+        id={containerId}
         className={active ? "rounded-lg overflow-hidden border bg-black [&_video]:!w-full [&_video]:!h-auto" : "hidden"}
         style={{ width: "100%", maxWidth: 480 }}
       />

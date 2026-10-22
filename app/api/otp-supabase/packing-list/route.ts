@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { subGodownFor } from "@/lib/locations"
 import { syncWaveReservation } from "@/lib/ims-reservation"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -258,30 +260,38 @@ async function loadWaveLinks(supabase: Supa, inventoryIds: string[]) {
   for (const id of inventoryIds) links.set(id, { queues: [], indents: [], ledgers: [] })
   if (inventoryIds.length === 0) return links
 
-  const idList = inventoryIds.join(",")
-  const [queueRes, indentRes, ledgerRes] = await Promise.all([
-    supabase
-      .from("otp_pre_invoice_queue")
-      .select("id, status, items, source_id, merged_source_ids")
-      .or(`source_id.in.(${idList}),merged_source_ids.ov.{${idList}}`),
-    supabase
-      .from("otp_indent_creation")
-      .select("id, items, check_inventory_id, indent_created_at, material_received")
-      .in("check_inventory_id", inventoryIds),
-    supabase
-      .from("otp_check_inventory_shortage")
-      .select("id, item_name, item_code, shortage_qty, status, parent_id, check_inventory_id")
-      .in("check_inventory_id", inventoryIds),
-  ])
-  if (queueRes.error) throw queueRes.error
-  if (indentRes.error) throw indentRes.error
-  if (ledgerRes.error) throw ledgerRes.error
+  // Chunked: the id list appears twice in the queue filter, so 200 ids made a
+  // ~15KB URL and the request failed outright (History 500). A queue row can
+  // match several chunks via merged_source_ids — dedupe by id.
+  const queueById = new Map<string, any>()
+  for (let i = 0; i < inventoryIds.length; i += 40) {
+    const chunk = inventoryIds.slice(i, i + 40)
+    const idList = chunk.join(",")
+    const [queueRes, indentRes, ledgerRes] = await Promise.all([
+      supabase
+        .from("otp_pre_invoice_queue")
+        .select("id, status, items, source_id, merged_source_ids")
+        .or(`source_id.in.(${idList}),merged_source_ids.ov.{${idList}}`),
+      supabase
+        .from("otp_indent_creation")
+        .select("id, items, check_inventory_id, indent_created_at, material_received")
+        .in("check_inventory_id", chunk),
+      supabase
+        .from("otp_check_inventory_shortage")
+        .select("id, item_name, item_code, shortage_qty, status, parent_id, check_inventory_id")
+        .in("check_inventory_id", chunk),
+    ])
+    if (queueRes.error) throw queueRes.error
+    if (indentRes.error) throw indentRes.error
+    if (ledgerRes.error) throw ledgerRes.error
 
-  for (const q of queueRes.data || []) {
+    for (const q of queueRes.data || []) queueById.set(q.id, q)
+    for (const i of indentRes.data || []) links.get(i.check_inventory_id)?.indents.push(i)
+    for (const l of ledgerRes.data || []) links.get(l.check_inventory_id)?.ledgers.push(l)
+  }
+  for (const q of queueById.values()) {
     for (const id of new Set([q.source_id, ...(q.merged_source_ids || [])])) links.get(id)?.queues.push(q)
   }
-  for (const i of indentRes.data || []) links.get(i.check_inventory_id)?.indents.push(i)
-  for (const l of ledgerRes.data || []) links.get(l.check_inventory_id)?.ledgers.push(l)
   return links
 }
 
@@ -359,11 +369,28 @@ export async function GET(request: Request) {
     const supabase = getSupabaseAdmin()
 
     if (status === "history") {
-      const { data: inventoryRows, error } = await supabase
-        .from("otp_check_inventory")
-        .select("*, order:otp_orders(*)")
-        .order("created_at", { ascending: false })
-        .limit(200)
+      // One chunk per request (see lib/history-chunk.ts): all the per-chunk
+      // lookups below (acceptance, reconciliation, wave links) are keyed by
+      // this chunk's own rows, so they stay small however large History grows.
+      // Server-paged mode (?page=): search / CRM / availability / only-editable / access rules
+      // run in SQL on otp_v_check_inventory_history (Database/78), then the same per-page
+      // shaping below. Legacy ?offset&limit chunk mode is kept for older callers.
+      const paged = searchParams.has("page")
+      const hp = parseHistoryParams(searchParams, ["availability", "editable"])
+      const { offset, to } = paged ? { offset: hp.offset, to: hp.to } : chunkParams(searchParams)
+      const { data: inventoryRows, error, count } = (paged
+        ? await applyHistoryFilters(supabase.from("otp_v_check_inventory_history").select("*", { count: "exact" }), hp, {
+            extraEq: { availability: "availability_status", editable: "is_editable" },
+          })
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(offset, to)
+        : await supabase
+            .from("otp_check_inventory")
+            .select("*, order:otp_orders(*)", { count: "exact" })
+            .order("created_at", { ascending: false })
+            .order("id")
+            .range(offset, to)) as { data: any[] | null; error: { message: string } | null; count: number | null }
 
       if (error) throw error
 
@@ -399,7 +426,8 @@ export async function GET(request: Request) {
       }
 
       const shaped = (inventoryRows || []).map((r: any) => {
-        const { order, ...inventory } = r
+        // The view's flat filter columns are not part of the inventory row the page expects.
+        const { order, search_text: _s, crm_name: _c, order_location: _l, is_editable: _e, ...inventory } = r
         const link = waveLinks.get(r.id)!
         const deltas = deltaByOrder.get(r.order_id)
         return {
@@ -419,7 +447,7 @@ export async function GET(request: Request) {
       })
       await enrichOrderItemsWithCode(supabase, shaped)
 
-      return NextResponse.json({ success: true, data: shaped })
+      return paged ? pageJson(shaped, count, hp) : chunkJson(shaped, count, offset)
     }
 
     // Cross-order released-stock hints — one query, reused across all three

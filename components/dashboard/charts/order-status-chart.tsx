@@ -7,9 +7,9 @@ interface OrderStatusChartProps {
 
 export function OrderStatusChart({ data }: OrderStatusChartProps) {
   const orderStatusData = [
-    { name: "Completed", value: data.completedOrders, color: "#10b981" },
-    { name: "Pending", value: data.pendingOrders, color: "#f59e0b" },
-    { name: "Cancelled", value: data.cancelOrders, color: "#ef4444" },
+    { name: "Completed", value: data.completedOrders, color: "#6A9E0A" },
+    { name: "Pending", value: data.pendingOrders, color: "#E8702A" },
+    { name: "Cancelled", value: data.cancelOrders, color: "#D6578C" },
   ]
 
   return (
@@ -27,14 +27,13 @@ export function OrderStatusChart({ data }: OrderStatusChartProps) {
               labelLine={false}
               label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
               outerRadius={80}
-              fill="#8884d8"
               dataKey="value"
             >
               {orderStatusData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
+                <Cell key={`cell-${index}`} fill={entry.color} aria-label={`${entry.name}: ${entry.value}`} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "hsl(var(--foreground))", borderRadius: "0.5rem" }} />
           </PieChart>
         </ResponsiveContainer>
       </CardContent>

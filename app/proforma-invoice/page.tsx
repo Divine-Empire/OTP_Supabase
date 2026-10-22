@@ -3,8 +3,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -12,14 +10,8 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 import {
   mapProformaInvoicePendingRowToUI,
@@ -28,6 +20,8 @@ import {
 } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -85,10 +79,10 @@ const historyColumns = [
 export default function ProformaInvoicePage() {
   const [orders, setOrders] = useState<any[]>([])
   const [paymentAgainstPiOrders, setPaymentAgainstPiOrders] = useState<any[]>([])
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [paymentAgainstPiLoading, setPaymentAgainstPiLoading] = useState(false)
-  const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [piNumber, setPiNumber] = useState("")
@@ -117,6 +111,22 @@ export default function ProformaInvoicePage() {
     historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
   )
   const { user: currentUser } = useAuth()
+
+  // History: one server page per request (search / CRM / access rules run in SQL).
+  const history = useServerHistory({
+    url: "/api/otp-supabase/proforma-invoice?status=history",
+    map: mapProformaInvoiceHistoryRowToUI,
+    active: currentTab === "history",
+    page: historyPage,
+    pageSize: historyPageSize,
+    search: searchTerm,
+    crmName: crmNameFilter,
+    currentUser,
+  })
+  const processedOrders = history.rows
+  const processedTotal = history.total
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -156,32 +166,18 @@ export default function ProformaInvoicePage() {
     }
   }
 
-  const fetchProcessedOrders = async () => {
-    setProcessedLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/proforma-invoice?status=history")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapProformaInvoiceHistoryRowToUI))
-      } else {
-        setProcessedOrders([])
-      }
-    } catch (err) {
-      console.error("Error fetching proforma-invoice history:", err)
-      setProcessedOrders([])
-    } finally {
-      setProcessedLoading(false)
-    }
-  }
-
   useEffect(() => {
     fetchOrders()
     fetchPaymentAgainstPiOrders()
   }, [])
 
-  const handleProcessedTabClick = async () => {
-    await fetchProcessedOrders()
+  const handleProcessedTabClick = () => {
+    setHistoryPage(1)
+    loadProcessedOrders()
   }
+
+  // Any filter/search change can shrink the list under the current page.
+  useEffect(() => { setHistoryPage(1) }, [searchTerm, crmNameFilter])
 
   // Role-based access: 'user' role only sees rows matching their assigned
   // CRM names and location (Settings > User Management) — see lib/access.ts.
@@ -215,19 +211,10 @@ export default function ProformaInvoicePage() {
     return filtered
   }, [paymentAgainstPiOrders, searchTerm, crmNameFilter, currentUser])
 
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
+  // Already filtered and paged by the server.
+  const filteredProcessedOrders = processedOrders
+
+  const historyPageRows = processedOrders
 
   const togglePendingColumn = (columnKey: string) =>
     setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
@@ -260,7 +247,7 @@ export default function ProformaInvoicePage() {
   const handleSubmitPayment = async () => {
     if (!selectedPaymentOrder || !paymentReceived) return
     if (paymentReceived === "No" && !paymentRemark.trim()) {
-      alert("Please enter a remark since payment was not received.")
+      toast.error("Please enter a remark since payment was not received.")
       return
     }
 
@@ -281,13 +268,13 @@ export default function ProformaInvoicePage() {
         setIsPaymentDialogOpen(false)
         setSelectedPaymentOrder(null)
         await fetchPaymentAgainstPiOrders()
-        alert(`Order ${selectedPaymentOrder.orderNo} — Payment Against PI recorded. Packing List is now scheduled.`)
+        toast.success(`Order ${selectedPaymentOrder.orderNo} — Payment Against PI recorded. Packing List is now scheduled.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting payment-against-pi:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -316,7 +303,7 @@ export default function ProformaInvoicePage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
     if (!piNumber.trim() || !piAmount || !piUploadFile) {
-      alert("PI Number, PI Amount and PI Upload are required")
+      toast.error("PI Number, PI Amount and PI Upload are required")
       return
     }
 
@@ -351,13 +338,13 @@ export default function ProformaInvoicePage() {
         setSelectedOrder(null)
         await fetchOrders()
         await fetchPaymentAgainstPiOrders()
-        alert(`Order ${selectedOrder.orderNo} — Pro-Forma Invoice recorded. Awaiting Payment Against PI confirmation.`)
+        toast.success(`Order ${selectedOrder.orderNo} — Pro-Forma Invoice recorded. Awaiting Payment Against PI confirmation.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting proforma-invoice:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -368,47 +355,57 @@ export default function ProformaInvoicePage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
+          <Button
+            size="sm"
+            onClick={() => handleProcess(order)}
+            className="h-7 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             Process
           </Button>
         )
       case "actionsPayment":
         return (
-          <Button size="sm" onClick={() => handleProcessPayment(order)}>
+          <Button
+            size="sm"
+            onClick={() => handleProcessPayment(order)}
+            className="h-7 px-2.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             Process
           </Button>
         )
       case "paymentReceived":
-        return value ? <Badge variant={value === "Yes" ? "default" : "secondary"}>{value}</Badge> : ""
+        return value ? <StatusBadge tone={value === "Yes" ? "success" : "warning"}>{value}</StatusBadge> : ""
       case "itemList":
         return (
           <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7 text-brand-700 hover:bg-accent"
             onClick={() => handleViewItemList(order)}
+            title="View item list"
           >
             <Eye className="h-3.5 w-3.5" />
-            View Items
           </Button>
         )
       case "piUpload":
         return order.piUploadUrl ? (
           <a href={order.piUploadUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">View PI</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-muted-foreground text-xs">N/A</span>
         )
       case "quotationCopy":
       case "acceptanceCopy":
         return value && (value.startsWith("http") || value.startsWith("https")) ? (
           <a href={value} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">View Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">{value || "N/A"}</Badge>
+          <span className="text-muted-foreground text-xs">{value || "N/A"}</span>
         )
+      case "crmName":
+        return value ? <StatusBadge tone="neutral">{value}</StatusBadge> : <span className="text-muted-foreground text-xs">-</span>
       case "amount":
       case "piAmount":
         return value ? `₹${Number(value).toLocaleString()}` : ""
@@ -433,7 +430,7 @@ export default function ProformaInvoicePage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -458,385 +455,177 @@ export default function ProformaInvoicePage() {
           }
         : { columns: historyColumns, visible: visibleHistoryColumns, toggle: toggleHistoryColumn, showAll: showAllHistoryColumns, hideAll: hideAllHistoryColumns }
 
+  const activeColumns = columnPanel.columns.filter((col) => columnPanel.visible[col.key])
+  const currentData =
+    currentTab === "pending"
+      ? filteredOrders
+      : currentTab === "payment-against-pi"
+      ? filteredPaymentAgainstPiOrders
+      : historyPageRows
+
+  const activeChips = []
+  if (searchTerm) {
+    activeChips.push({
+      key: "search",
+      label: `Search: "${searchTerm}"`,
+      onRemove: () => setSearchTerm(""),
+    })
+  }
+  if (crmNameFilter && crmNameFilter !== "all") {
+    activeChips.push({
+      key: "crm",
+      label: `CRM: ${crmNameFilter}`,
+      onRemove: () => setCrmNameFilter("all"),
+    })
+  }
+
+  const handleClearAllFilters = () => {
+    setSearchTerm("")
+    setCrmNameFilter("all")
+  }
+
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-                  <TabsTrigger value="payment-against-pi">
-                    Payment Against PI ({filteredPaymentAgainstPiOrders.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
-                </TabsList>
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={[
+              { id: "pending", label: "Pending", count: filteredOrders.length },
+              {
+                id: "payment-against-pi",
+                label: "Payment Against PI",
+                count: filteredPaymentAgainstPiOrders.length,
+              },
+              { id: "history", label: "History", count: processedTotal },
+            ]}
+            activeTab={currentTab}
+            onChange={(tab) => {
+              setCurrentTab(tab)
+              if (tab === "history") handleProcessedTabClick()
+            }}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="w-[180px]">
+            <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+              <SelectTrigger className="h-9 text-xs border-input bg-card">
+                <SelectValue placeholder="All CRM Names" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-xs">
+                  All CRM Names
+                </SelectItem>
+                {crmNameOptions.map((name) => (
+                  <SelectItem key={name} value={name} className="text-xs">
+                    {name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            onClick={fetchOrders}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={columnPanel.columns}
+            visible={columnPanel.visible}
+            onToggle={columnPanel.toggle}
+            onSelectAll={columnPanel.showAll}
+            onHideAll={columnPanel.hideAll}
+          />
+        </div>
 
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-                <div className="flex items-center gap-2">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button size="sm" variant="outline" onClick={columnPanel.showAll}>
-                          Show All
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={columnPanel.hideAll}>
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {columnPanel.columns.map((column) => {
-                          const visibleCols = columnPanel.visible
-                          const toggleCol = columnPanel.toggle
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {filteredOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
-                  ))}
-                  {filteredOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending pro-forma invoices"}
-                    </p>
-                  )}
-                </div>
-
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'itemList' ? '90px' :
-                                      column.key === 'timestamp' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'paymentMode' ? '140px' :
-                                                    column.key === 'amount' ? '120px' :
-                                                      '160px',
-                                }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredOrders.map((order, idx) => (
-                          <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '90px' :
-                                        column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'paymentMode' ? '140px' :
-                                                      column.key === 'amount' ? '120px' :
-                                                        '160px',
-                                  }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
-                              ))}
-                          </TableRow>
-                        ))}
-                        {filteredOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm ? "No orders match your search criteria" : "No pending pro-forma invoices"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="payment-against-pi" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {paymentAgainstPiLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading payment against PI queue...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredPaymentAgainstPiOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || idx}
-                          columns={paymentAgainstPiColumns}
-                          visibleColumns={visiblePaymentAgainstPiColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredPaymentAgainstPiOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No orders awaiting Payment Against PI"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {paymentAgainstPiColumns
-                                .filter((col) => visiblePaymentAgainstPiColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{ minWidth: column.key === "actionsPayment" ? "120px" : "160px" }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredPaymentAgainstPiOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {paymentAgainstPiColumns
-                                  .filter((col) => visiblePaymentAgainstPiColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{ minWidth: column.key === "actionsPayment" ? "120px" : "160px" }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredPaymentAgainstPiOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={paymentAgainstPiColumns.filter((col) => visiblePaymentAgainstPiColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No orders awaiting Payment Against PI"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading history...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'itemList' ? '90px' :
-                                        column.key === 'timestamp' ? '130px' :
-                                          column.key === 'orderNo' ? '120px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'paymentMode' ? '140px' :
-                                                      column.key === 'amount' ? '120px' :
-                                                        column.key === 'piNumber' ? '140px' :
-                                                          column.key === 'piAmount' ? '120px' :
-                                                            column.key === 'piUpload' ? '100px' :
-                                                              column.key === 'remark' ? '200px' :
-                                                                column.key === 'createdBy' ? '150px' :
-                                                                  '160px',
-                                    }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'itemList' ? '90px' :
-                                          column.key === 'timestamp' ? '130px' :
-                                            column.key === 'orderNo' ? '120px' :
-                                              column.key === 'quotationNo' ? '150px' :
-                                                column.key === 'companyName' ? '250px' :
-                                                  column.key === 'contactPersonName' ? '180px' :
-                                                    column.key === 'contactNumber' ? '140px' :
-                                                      column.key === 'paymentMode' ? '140px' :
-                                                        column.key === 'amount' ? '120px' :
-                                                          column.key === 'piNumber' ? '140px' :
-                                                            column.key === 'piAmount' ? '120px' :
-                                                              column.key === 'piUpload' ? '100px' :
-                                                                column.key === 'remark' ? '200px' :
-                                                                  column.key === 'createdBy' ? '150px' :
-                                                                    '160px',
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions" || col.key === "actionsPayment"
+                  ? "90px"
+                  : col.key === "itemList"
+                  ? "70px"
+                  : col.key === "companyName"
+                  ? "220px"
+                  : col.key === "billingAddress" || col.key === "shippingAddress"
+                  ? "180px"
+                  : "140px",
+            }))}
+            data={currentData}
+            keyExtractor={(order, idx) => order.id || order.orderId || order.orderNo || idx}
+            loading={
+              currentTab === "payment-against-pi"
+                ? paymentAgainstPiLoading
+                : currentTab === "history"
+                ? processedLoading
+                : false
+            }
+            emptyTitle={
+              searchTerm
+                ? "No matching orders found"
+                : currentTab === "pending"
+                ? "No pending pro-forma invoices"
+                : currentTab === "payment-against-pi"
+                ? "No orders awaiting Payment Against PI"
+                : "No processed history found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={currentTab !== "history"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "history" ? filteredProcessedOrders.length : undefined}
+            totalPages={Math.ceil(processedTotal / historyPageSize) || 1}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.orderId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
+                        </div>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={columnPanel.columns}
+                visibleColumns={columnPanel.visible}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>

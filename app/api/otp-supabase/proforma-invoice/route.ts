@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { fetchAllRows } from "@/lib/fetch-all"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
 // Stage — Pro-Forma Invoice (only reached when otp_orders.payment_mode =
 // 'pi against advance' — see order-acceptable/route.ts).
@@ -18,16 +21,33 @@ export async function GET(request: Request) {
     const status = searchParams.get("status")
     const supabase = getSupabaseAdmin()
 
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-server-history.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_proforma_invoice_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_proforma_invoice_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("updated_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
     if (status === "history") {
-      const { data, error } = await supabase
+      const { offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
         .from("otp_proforma_invoice")
-        .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))")
+        .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(proforma_invoice_planned))", { count: "exact" })
         .not("payment_against_pi", "is", null)
         .order("updated_at", { ascending: false })
-        .limit(200)
+        .order("id")
+        .range(offset, to)
       if (error) throw error
 
-      return NextResponse.json({ success: true, data: data || [] })
+      return chunkJson(data, count, offset)
     }
 
     if (status === "payment-against-pi") {
@@ -41,24 +61,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: data || [] })
     }
 
-    const { data: doneRows, error: doneError } = await supabase.from("otp_proforma_invoice").select("order_id")
-    if (doneError) throw doneError
-    const doneIds = (doneRows || []).map((r: any) => r.order_id).filter(Boolean)
+    // Anti-join view (Database/72, 73): no done-id list in the URL, and paged
+    // past PostgREST's 1000-row cap.
+    const data = await fetchAllRows((from, to) =>
+      supabase
+        .from("otp_v_proforma_invoice_pending")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to)
+    )
 
-    let query = supabase
-      .from("otp_orders_acceptable")
-      .select("*, order:otp_orders(*)")
-      .not("proforma_invoice_planned", "is", null)
-      .order("created_at", { ascending: false })
-
-    if (doneIds.length > 0) {
-      query = query.not("order_id", "in", `(${doneIds.join(",")})`)
-    }
-
-    const { data, error } = await query
-    if (error) throw error
-
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/proforma-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

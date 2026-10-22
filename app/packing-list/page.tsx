@@ -4,7 +4,6 @@ import { Fragment, useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -19,13 +18,15 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { Trash2, RefreshCw, Search, Settings, Eye, ScanLine, ArrowLeftRight, Bell } from "lucide-react"
+import { Trash2, RefreshCw, Search, Eye, ScanLine, ArrowLeftRight, Bell, Loader2 } from "lucide-react"
+import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
 
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
 // Purchase-FMS-Supabase's serial format is "SN-<vendorCode>/<encodedDate>/<seq>"
@@ -224,8 +225,8 @@ const historyColumns = [
 
 export default function CheckInventoryPage() {
   const [orders, setOrders] = useState<any[]>([])
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
-  const [processedLoading, setProcessedLoading] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize, setHistoryPageSize] = useState(50)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
@@ -310,6 +311,23 @@ export default function CheckInventoryPage() {
   )
 
   const { user: currentUser } = useAuth()
+
+  // History: one server page per request (search / CRM / access rules run in SQL).
+  const history = useServerHistory({
+    url: "/api/otp-supabase/packing-list?status=history",
+    map: mapCheckInventoryRowToUI,
+    active: currentTab === "history",
+    page: historyPage,
+    pageSize: historyPageSize,
+    search: searchTerm,
+    crmName: crmNameFilter,
+    extra: { availability: availabilityFilter, editable: onlyEditable ? "true" : "all" },
+    currentUser,
+  })
+  const processedOrders = history.rows
+  const processedTotal = history.total
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
   const [subGodown, setSubGodown] = useState("")
   const [subGodownOptions, setSubGodownOptions] = useState<string[]>([])
 
@@ -345,22 +363,6 @@ export default function CheckInventoryPage() {
       setOrders([])
     } finally {
       setLoading(false)
-    }
-  }
-
-  // Fetch processed history orders from Supabase API
-  const fetchProcessedOrders = async () => {
-    try {
-      const response = await fetch("/api/otp-supabase/packing-list?status=history")
-      const result = await response.json()
-
-      if (result.success && Array.isArray(result.data)) {
-        return result.data.map(mapCheckInventoryRowToUI)
-      }
-      return []
-    } catch (err) {
-      console.error("Error fetching processed orders data:", err)
-      return []
     }
   }
 
@@ -418,45 +420,93 @@ export default function CheckInventoryPage() {
 
   // Filter processed orders based on search term
   // Update the filteredProcessedOrders useMemo
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser);
+  // Already filtered and paged by the server.
+  const filteredProcessedOrders = processedOrders
 
+  // History is server-paged (hooks/use-server-history.ts): this just asks for a refetch.
+  const handleProcessedTabClick = () => {
+    setHistoryPage(1)
+    loadProcessedOrders()
+  }
+
+  const historyTotalPages = Math.ceil(processedTotal / historyPageSize) || 1
+  // Filters can shrink the list under the current page.
+  useEffect(() => { setHistoryPage(1) }, [searchTerm, selectedColumn, availabilityFilter, crmNameFilter, onlyEditable])
+  const historyPageRows = processedOrders
+
+  const activeColumns = useMemo(() => {
+    const cols = currentTab === "pending" ? pendingColumns : historyColumns
+    const visibleMap = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns
+    return cols.filter((col) => visibleMap[col.key])
+  }, [currentTab, visiblePendingColumns, visibleHistoryColumns])
+
+  const handleTabChange = (tab: string) => {
+    setCurrentTab(tab)
+    if (tab === "history") {
+      setHistoryPage(1)
+      loadProcessedOrders()
+    }
+  }
+
+  const tabs = useMemo(
+    () => [
+      { id: "pending", label: "Pending", count: pendingOrders.length },
+      { id: "history", label: "History", count: processedTotal },
+    ],
+    [pendingOrders.length, processedTotal]
+  )
+
+  const activeChips = useMemo(() => {
+    const chips: { key: string; label: string; onRemove: () => void }[] = []
     if (crmNameFilter !== "all") {
-      filtered = filtered.filter((order) => order.crmName === crmNameFilter)
+      chips.push({
+        key: "crm",
+        label: `CRM: ${crmNameFilter}`,
+        onRemove: () => setCrmNameFilter("all"),
+      })
     }
-
-    // Apply availability filter if not "all"
-    if (availabilityFilter !== "all") {
-      filtered = filtered.filter(order =>
-        (order.availabilityStatus || order.inventoryStatus) === availabilityFilter
-      );
+    if (currentTab === "history" && availabilityFilter !== "all") {
+      chips.push({
+        key: "availability",
+        label: `Status: ${availabilityFilter}`,
+        onRemove: () => setAvailabilityFilter("all"),
+      })
     }
-
-    if (onlyEditable) filtered = filtered.filter((order) => order.editable)
-
-    // Apply search filter
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        if (selectedColumn === "all") {
-          const searchableFields = historyColumns
-            .filter((col) => col.searchable)
-            .map((col) => String(order[col.key] || "").toLowerCase());
-          return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()));
-        } else {
-          const fieldValue = String(order[selectedColumn] || "").toLowerCase();
-          return fieldValue.includes(searchTerm.toLowerCase());
-        }
-      });
+    if (currentTab === "history" && onlyEditable) {
+      chips.push({
+        key: "editable",
+        label: "Editable Only",
+        onRemove: () => setOnlyEditable(false),
+      })
     }
+    return chips
+  }, [crmNameFilter, availabilityFilter, onlyEditable, currentTab])
 
-    return filtered;
-  }, [processedOrders, searchTerm, selectedColumn, availabilityFilter, currentUser, crmNameFilter, onlyEditable]);
+  const handleClearAllFilters = () => {
+    setSearchTerm("")
+    setCrmNameFilter("all")
+    setAvailabilityFilter("all")
+    setOnlyEditable(false)
+  }
 
-  const handleProcessedTabClick = async () => {
-    setProcessedLoading(true)
-    const processed = await fetchProcessedOrders()
-    setProcessedOrders(processed)
-    setProcessedLoading(false)
+  const getColumnMinWidth = (key: string) => {
+    switch (key) {
+      case "actions": return "120px"
+      case "itemList": return "130px"
+      case "orderNo": return "120px"
+      case "quotationNo": return "150px"
+      case "companyName": return "250px"
+      case "contactPersonName": return "180px"
+      case "contactNumber": return "140px"
+      case "billingAddress":
+      case "shippingAddress": return "200px"
+      case "isOrderAcceptable": return "150px"
+      case "orderAcceptanceChecklist": return "250px"
+      case "remarks": return "200px"
+      case "availabilityStatus": return "150px"
+      case "inventoryRemarks": return "200px"
+      default: return "160px"
+    }
   }
 
   const notificationUser = currentUser?.username || ""
@@ -477,6 +527,8 @@ export default function CheckInventoryPage() {
 
   useEffect(() => {
     fetchNotifications()
+    // Keyed on the user only: fetchNotifications is re-created every render, listing it would refetch on each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notificationUser])
 
   const handleOpenNotification = async (n: any) => {
@@ -514,9 +566,12 @@ export default function CheckInventoryPage() {
       if (!json.success) throw new Error(json.error || "Update failed")
       setEditWave(null)
       await Promise.all([handleProcessedTabClick(), fetchNotifications()])
-      alert(json.changes?.length ? `Saved — ${json.changes.length} item(s) changed.` : "No changes to save.")
+      toast({
+        title: "Saved",
+        description: json.changes?.length ? `Saved — ${json.changes.length} item(s) changed.` : "No changes to save.",
+      })
     } catch (err: any) {
-      alert(`Error: ${err.message}`)
+      toast({ title: "Error", description: err.message, variant: "destructive" })
     } finally {
       setIsSubmitting(false)
     }
@@ -1020,10 +1075,13 @@ export default function CheckInventoryPage() {
 
       await fetchOrders()
 
-      alert(`Inventory check for order ${orderNo} updated successfully — ${result.availabilityStatus}`)
+      toast({
+        title: "Inventory Check Updated",
+        description: `Order ${orderNo} updated successfully — ${result.availabilityStatus}`,
+      })
     } catch (err: any) {
       console.error("Submission error:", err)
-      alert(`Error: ${err.message}`)
+      toast({ title: "Error", description: err.message, variant: "destructive" })
     } finally {
       setIsSubmitting(false)
     }
@@ -1064,7 +1122,7 @@ export default function CheckInventoryPage() {
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            className="gap-1.5 border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
             onClick={() => handleViewItemList(order)}
           >
             <Eye className="h-3.5 w-3.5" />
@@ -1086,7 +1144,7 @@ export default function CheckInventoryPage() {
       case "billingAddress":
       case "shippingAddress":
       case "inventoryRemarks":
-        return <div className="max-w-[200px] whitespace-normal break-words">{value}</div>
+        return <div className="max-w-[200px] truncate" title={typeof value === "string" ? value : undefined}>{value}</div>
       case "historyEdit":
         return order.editable ? (
           <Button size="sm" variant="outline" onClick={() => handleOpenHistoryEdit(order)}>
@@ -1112,7 +1170,7 @@ export default function CheckInventoryPage() {
               ⚠ Quotation changed
             </Badge>
             <p className="text-xs text-muted-foreground whitespace-normal break-words">
-              {items.join(", ")} — now wants less than what's already been processed. Can't auto-reconcile; manual
+              {items.join(", ")} — now wants less than what&apos;s already been processed. Can&apos;t auto-reconcile; manual
               review needed.
             </p>
           </div>
@@ -1139,7 +1197,7 @@ export default function CheckInventoryPage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -1152,371 +1210,177 @@ export default function CheckInventoryPage() {
   }
 
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({pendingOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
-                </TabsList>
-
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-full sm:w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {currentTab === "history" && (
-                    <Select
-                      value={availabilityFilter}
-                      onValueChange={setAvailabilityFilter}
-                    >
-                      <SelectTrigger className="w-full sm:w-[180px]">
-                        <SelectValue placeholder="Filter by status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Statuses</SelectItem>
-                        <SelectItem value="Available">Available</SelectItem>
-                        <SelectItem value="Not Available">Not Available</SelectItem>
-                        <SelectItem value="Partial">Partial</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {currentTab === "history" && (
-                    <label className="flex items-center gap-2 text-sm whitespace-nowrap">
-                      <Checkbox checked={onlyEditable} onCheckedChange={(c) => setOnlyEditable(c === true)} />
-                      Not yet processed in Pre-Invoice
-                    </label>
-                  )}
-                  <DropdownMenu onOpenChange={(open) => open && fetchNotifications()}>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="relative" aria-label="Notifications">
-                        <Bell className="h-4 w-4" />
-                        {unreadCount > 0 && (
-                          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold flex items-center justify-center">
-                            {unreadCount}
-                          </span>
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>History edits</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      {notifications.length === 0 ? (
-                        <p className="px-2 py-3 text-sm text-muted-foreground">No notifications</p>
-                      ) : (
-                        notifications.map((n) => (
-                          <button
-                            key={n.id}
-                            type="button"
-                            onClick={() => handleOpenNotification(n)}
-                            className={`w-full text-left px-2 py-2 rounded-sm hover:bg-muted ${n.read ? "" : "bg-blue-50"}`}
-                          >
-                            <p className={`text-sm ${n.read ? "" : "font-semibold"}`}>{n.message}</p>
-                            <p className="text-xs text-muted-foreground">{new Date(n.created_at).toLocaleString()}</p>
-                          </button>
-                        ))
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <Button onClick={fetchOrders} variant="outline" size="sm" className="flex-1 sm:flex-initial">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="flex-1 sm:flex-initial">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
-                          Show All
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {pendingOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || order.orderId || order.orderNo || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                      previewCount={6}
-                    />
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={tabs}
+            activeTab={currentTab}
+            onChange={handleTabChange}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="w-[180px]">
+              <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                <SelectTrigger className="h-9 text-xs border-input bg-card">
+                  <SelectValue placeholder="All CRM Names" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    All CRM Names
+                  </SelectItem>
+                  {crmNameOptions.map((name) => (
+                    <SelectItem key={name} value={name} className="text-xs">
+                      {name}
+                    </SelectItem>
                   ))}
-                  {pendingOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm
-                        ? "No orders match your search criteria"
-                        : "No pending orders found"}
-                    </p>
-                  )}
-                </div>
-
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{
-                                  minWidth: column.key === 'actions' ? '120px' :
-                                    column.key === 'itemList' ? '130px' :
-                                      column.key === 'orderNo' ? '120px' :
-                                        column.key === 'quotationNo' ? '150px' :
-                                          column.key === 'companyName' ? '250px' :
-                                            column.key === 'contactPersonName' ? '180px' :
-                                              column.key === 'contactNumber' ? '140px' :
-                                                column.key === 'billingAddress' ? '200px' :
-                                                  column.key === 'shippingAddress' ? '200px' :
-                                                    column.key === 'isOrderAcceptable' ? '150px' :
-                                                      column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                        column.key === 'remarks' ? '200px' :
-                                                          '160px',
-                                }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {pendingOrders.map((order, idx) => (
-                          <TableRow key={order.id || order.orderId || order.orderNo || idx} className="hover:bg-gray-50">
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{
-                                    minWidth: column.key === 'actions' ? '120px' :
-                                      column.key === 'itemList' ? '130px' :
-                                        column.key === 'orderNo' ? '120px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'billingAddress' ? '200px' :
-                                                    column.key === 'shippingAddress' ? '200px' :
-                                                      column.key === 'isOrderAcceptable' ? '150px' :
-                                                        column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                          column.key === 'remarks' ? '200px' :
-                                                            '160px',
-                                  }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
-                              ))}
-                          </TableRow>
-                        ))}
-                        {pendingOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm
-                                ? "No orders match your search criteria"
-                                : "No pending orders found"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading processed orders...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.inventoryId || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                          previewCount={6}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{
-                                      minWidth: column.key === 'orderNo' ? '120px' :
-                                        column.key === 'itemList' ? '130px' :
-                                          column.key === 'quotationNo' ? '150px' :
-                                            column.key === 'companyName' ? '250px' :
-                                              column.key === 'contactPersonName' ? '180px' :
-                                                column.key === 'contactNumber' ? '140px' :
-                                                  column.key === 'billingAddress' ? '200px' :
-                                                    column.key === 'shippingAddress' ? '200px' :
-                                                      column.key === 'isOrderAcceptable' ? '150px' :
-                                                        column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                          column.key === 'remarks' ? '200px' :
-                                                            column.key === 'availabilityStatus' ? '150px' :
-                                                              column.key === 'inventoryRemarks' ? '200px' :
-                                                                '160px',
-                                    }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.inventoryId || idx} className="hover:bg-gray-50">
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell
-                                      key={column.key}
-                                      className="border-b px-4 py-3 align-top"
-                                      style={{
-                                        minWidth: column.key === 'orderNo' ? '120px' :
-                                          column.key === 'itemList' ? '130px' :
-                                            column.key === 'quotationNo' ? '150px' :
-                                              column.key === 'companyName' ? '250px' :
-                                                column.key === 'contactPersonName' ? '180px' :
-                                                  column.key === 'contactNumber' ? '140px' :
-                                                    column.key === 'billingAddress' ? '200px' :
-                                                      column.key === 'shippingAddress' ? '200px' :
-                                                        column.key === 'isOrderAcceptable' ? '150px' :
-                                                          column.key === 'orderAcceptanceChecklist' ? '250px' :
-                                                            column.key === 'remarks' ? '200px' :
-                                                              column.key === 'availabilityStatus' ? '150px' :
-                                                                column.key === 'inventoryRemarks' ? '200px' :
-                                                                  '160px',
-                                      }}
-                                    >
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
+                </SelectContent>
+              </Select>
+            </div>
+            {currentTab === "history" && (
+              <div className="w-[180px]">
+                <Select value={availabilityFilter} onValueChange={setAvailabilityFilter}>
+                  <SelectTrigger className="h-9 text-xs border-input bg-card">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                    <SelectItem value="Available" className="text-xs">Available</SelectItem>
+                    <SelectItem value="Not Available" className="text-xs">Not Available</SelectItem>
+                    <SelectItem value="Partial" className="text-xs">Partial</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {currentTab === "history" && (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap cursor-pointer select-none">
+                <Checkbox checked={onlyEditable} onCheckedChange={(c) => setOnlyEditable(c === true)} />
+                <span>Not yet processed in Pre-Invoice</span>
+              </label>
+            )}
+          </div>
+          <DropdownMenu onOpenChange={(open) => open && fetchNotifications()}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="relative h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent" aria-label="Notifications">
+                <Bell className="h-3.5 w-3.5" />
+                <span>Edits</span>
+                {unreadCount > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center">
+                    {unreadCount}
+                  </span>
                 )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80 max-h-96 overflow-y-auto">
+              <DropdownMenuLabel>History edits</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {notifications.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-muted-foreground">No notifications</p>
+              ) : (
+                notifications.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => handleOpenNotification(n)}
+                    className={`w-full text-left px-2 py-2 rounded-sm hover:bg-muted ${n.read ? "" : "bg-muted/60 font-medium"}`}
+                  >
+                    <p className={`text-sm ${n.read ? "" : "font-semibold"}`}>{n.message}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(n.created_at).toLocaleString()}</p>
+                  </button>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Button
+            onClick={fetchOrders}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+
+          <ColumnSelector
+            options={currentTab === "pending" ? pendingColumns : historyColumns}
+            visible={currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns}
+            onToggle={currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn}
+            onSelectAll={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
+            onHideAll={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
+          />
+        </div>
+
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
+
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth: getColumnMinWidth(col.key),
+            }))}
+            data={currentTab === "pending" ? pendingOrders : historyPageRows}
+            keyExtractor={(order, idx) => order.inventoryId || `${order.orderId}-${order.scanType ?? ""}-${idx}`}
+            loading={currentTab === "history" ? processedLoading : false}
+            emptyTitle={
+              searchTerm
+                ? "No orders match your search criteria"
+                : currentTab === "pending"
+                ? "No pending orders found"
+                : "No processed orders found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={currentTab === "pending"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "pending" ? undefined : processedTotal}
+            totalPages={historyTotalPages}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order, index) => (
+              <TableRow
+                key={order.inventoryId || `${order.orderId}-${order.scanType ?? ""}-${index}`}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
+                        </div>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={currentTab === "pending" ? pendingColumns : historyColumns}
+                visibleColumns={currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns}
+                record={order}
+                renderCellContent={renderCellContent}
+                previewCount={6}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog — Scan -> Compare -> Preview/Edit -> Submit */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -1645,11 +1509,11 @@ export default function CheckInventoryPage() {
                           onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
                         />
                         {manualSearchOpen && manualSearchResults.length > 0 && (
-                          <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                          <div className="absolute z-10 w-full mt-1 bg-popover border border-border rounded-md shadow-md max-h-60 overflow-auto">
                             {manualSearchResults.map((res, i) => (
                               <div
                                 key={i}
-                                className="p-2 hover:bg-gray-100 cursor-pointer text-sm flex justify-between gap-2"
+                                className="p-2 hover:bg-accent cursor-pointer text-sm flex justify-between gap-2"
                                 onMouseDown={() => {
                                   setManualSearchQuery(res.item_name)
                                   setManualSelectedName(res.item_name)
@@ -1728,7 +1592,7 @@ export default function CheckInventoryPage() {
                     <Label>Scanned Items ({scanRows.length})</Label>
                     {scanRows.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        No items scanned yet. Point the camera at each item's QR label.
+                        No items scanned yet. Point the camera at each item&apos;s QR label.
                       </p>
                     ) : (
                       <div className="border rounded-lg divide-y">
@@ -1779,7 +1643,7 @@ export default function CheckInventoryPage() {
                   <div className="space-y-2 border-t pt-4">
                     <Label>Accessories (optional)</Label>
                     <p className="text-xs text-muted-foreground">
-                      Scan each accessory's QR label -- these aren't part of the order's item list, just a
+                      Scan each accessory&apos;s QR label -- these aren&apos;t part of the order&apos;s item list, just a
                       running count carried forward to later stages.
                     </p>
                     <div className="flex items-center gap-2">
@@ -1821,11 +1685,11 @@ export default function CheckInventoryPage() {
                             onBlur={() => setTimeout(() => setManualSearchOpen(false), 200)}
                           />
                           {manualSearchOpen && manualSearchResults.length > 0 && (
-                            <div className="absolute z-10 w-full mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-auto">
+                            <div className="absolute z-10 w-full mt-1 bg-popover border border-border rounded-md shadow-md max-h-60 overflow-auto">
                               {manualSearchResults.map((res, i) => (
                                 <div
                                   key={i}
-                                  className="p-2 hover:bg-gray-100 cursor-pointer text-sm flex justify-between gap-2"
+                                  className="p-2 hover:bg-accent cursor-pointer text-sm flex justify-between gap-2"
                                   onMouseDown={() => {
                                     setManualSearchQuery(res.item_name)
                                     setManualSelectedName(res.item_name)
@@ -1860,7 +1724,7 @@ export default function CheckInventoryPage() {
                       <Label>Scanned Accessories ({accessoryScanRows.length})</Label>
                       {accessoryScanRows.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
-                          No accessories scanned yet. Point the camera at each accessory's QR label.
+                          No accessories scanned yet. Point the camera at each accessory&apos;s QR label.
                         </p>
                       ) : (
                         <div className="border rounded-lg divide-y">
@@ -1930,7 +1794,7 @@ export default function CheckInventoryPage() {
                               <p className="font-medium">{it.itemName}</p>
                               <p className="text-xs text-muted-foreground">{it.itemCode || "no code"}</p>
                               {it.releasedStockAvailable && it.releasedStockAvailable.length > 0 && (
-                                <p className="text-xs text-blue-700 mt-1">
+                                <p className="text-xs text-primary mt-1">
                                   {it.releasedStockAvailable.reduce((s, r) => s + r.qty, 0)} unit(s) released from
                                   order(s) {it.releasedStockAvailable.map((r) => r.fromOrderNo).filter(Boolean).join(", ")} — may be usable for this order.
                                 </p>
@@ -1999,8 +1863,8 @@ export default function CheckInventoryPage() {
                     </Table>
                   </div>
                   {transferPlans().length > 0 && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2">
-                      <p className="text-xs text-amber-900">
+                    <div className="rounded-md border border-warning/40 bg-warning/10 p-3 space-y-2">
+                      <p className="text-xs text-foreground">
                         Stock is being moved in from other godowns. Create the transfer in IMS (form opens pre-filled), then submit here —
                         the transferred qty stays in this Pending list so you can scan it once it arrives.
                       </p>
@@ -2171,7 +2035,7 @@ export default function CheckInventoryPage() {
                           {orderedChanged ? (
                             <span>
                               <span className="line-through text-muted-foreground mr-1">{it.ordered_qty}</span>
-                              <span className="font-semibold text-red-600">{ordered}</span>
+                              <span className="font-semibold text-destructive">{ordered}</span>
                             </span>
                           ) : (
                             ordered
@@ -2182,7 +2046,7 @@ export default function CheckInventoryPage() {
                             type="number"
                             min={0}
                             max={ordered}
-                            className={`w-20 ml-auto text-right ${invalid ? "border-red-500" : ""}`}
+                            className={`w-20 ml-auto text-right ${invalid ? "border-destructive text-destructive" : ""}`}
                             value={editScanned[it.item_name] ?? ""}
                             onChange={(e) => setEditScanned((prev) => ({ ...prev, [it.item_name]: e.target.value }))}
                           />
@@ -2243,7 +2107,7 @@ export default function CheckInventoryPage() {
                             ) : (
                               <>
                                 {before} → <span className="font-semibold">{after}</span>{" "}
-                                <span className={good ? "text-green-600" : "text-red-600"}>
+                                <span className={good ? "text-success" : "text-destructive"}>
                                   ({diff > 0 ? "+" : ""}
                                   {diff})
                                 </span>

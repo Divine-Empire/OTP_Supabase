@@ -11,13 +11,13 @@ export function DashboardHeader({ onRefresh }: DashboardHeaderProps) {
   return (
     <div className="flex justify-between items-center">
       <div>
-        <h1 className="text-4xl font-bold tracking-tight bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
+        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
           Order & Dispatch Dashboard
         </h1>
-        <p className="text-muted-foreground mt-2">Real-time overview across the order-to-payment pipeline</p>
+        <p className="text-muted-foreground mt-1 text-sm">Real-time overview across the order-to-payment pipeline</p>
       </div>
       <div className="flex gap-2">
-        <Button onClick={onRefresh} variant="outline">
+        <Button onClick={onRefresh} variant="outline" size="sm" className="h-9">
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh Data
         </Button>

@@ -3,29 +3,21 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye } from "lucide-react"
+import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
-import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { getSectionForMode, isReceivingSection, isBiltyRequired, FIELD_DEFS, type FieldKey } from "@/lib/dispatch-mode"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { toast } from "sonner"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -103,9 +95,7 @@ async function uploadFiles(files: File[], folder: string): Promise<string[]> {
 
 export default function PackagingTransportPage() {
   const [orders, setOrders] = useState<any[]>([])
-  const [processedOrders, setProcessedOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [processedLoading, setProcessedLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
 
@@ -150,17 +140,46 @@ export default function PackagingTransportPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [crmNameFilter, setCrmNameFilter] = useState("all")
-  const [currentTab, setCurrentTab] = useState("pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(
-    pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
-  )
-  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(
-    historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: !DEFAULT_HIDDEN_COLUMNS.has(col.key) }), {})
-  )
   const { user: currentUser } = useAuth()
+  const {
+    currentTab,
+    setCurrentTab,
+    tabs,
+    searchTerm,
+    setSearchTerm,
+    crmNameFilter,
+    setCrmNameFilter,
+    crmNameOptions,
+    activeChips,
+    handleClearAllFilters,
+    filteredPendingRows: filteredOrders,
+    filteredHistoryRows: filteredProcessedOrders,
+    historyPage,
+    setHistoryPage,
+    historyPageSize,
+    setHistoryPageSize,
+    columnPanel,
+    activeColumns,
+    activeRows,
+    historyPageRows,
+    historyTotal,
+    historyTotalPages,
+    history,
+  } = useStageList({
+    pendingRows: orders,
+    serverHistory: { url: "/api/otp-supabase/packaging-transport?status=history", map: mapPackagingTransportHistoryRowToUI },
+    pendingColumns,
+    historyColumns,
+    currentUser,
+    defaultHiddenColumns: DEFAULT_HIDDEN_COLUMNS,
+    searchChip: true,
+  })
+  // History is fetched a page at a time by the hook; these keep the page's older names.
+  const processedOrders = history.rows
+  const processedLoading = history.loading
+  const loadProcessedOrders = history.reload
+  const fetchProcessedOrders = history.reload
 
   const fetchOrders = async () => {
     setLoading(true)
@@ -182,24 +201,6 @@ export default function PackagingTransportPage() {
     }
   }
 
-  const fetchProcessedOrders = async () => {
-    setProcessedLoading(true)
-    try {
-      const response = await fetch("/api/otp-supabase/packaging-transport?status=history")
-      const result = await response.json()
-      if (result.success && Array.isArray(result.data)) {
-        setProcessedOrders(result.data.map(mapPackagingTransportHistoryRowToUI))
-      } else {
-        setProcessedOrders([])
-      }
-    } catch (err) {
-      console.error("Error fetching packaging-transport history:", err)
-      setProcessedOrders([])
-    } finally {
-      setProcessedLoading(false)
-    }
-  }
-
   useEffect(() => {
     fetchOrders()
   }, [])
@@ -218,51 +219,6 @@ export default function PackagingTransportPage() {
   const handleProcessedTabClick = async () => {
     await fetchProcessedOrders()
   }
-
-  // Role-based access: 'user' role only sees rows matching their assigned
-  // CRM names and location (Settings > User Management) — see lib/access.ts.
-  const filteredOrders = useMemo(() => {
-    let filtered = filterByAccess(orders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = pendingColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [orders, searchTerm, crmNameFilter, currentUser])
-
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
-
-  const filteredProcessedOrders = useMemo(() => {
-    let filtered = filterByAccess(processedOrders, currentUser)
-    if (crmNameFilter !== "all") filtered = filtered.filter((order) => order.crmName === crmNameFilter)
-    if (searchTerm) {
-      filtered = filtered.filter((order) => {
-        const searchableFields = historyColumns
-          .filter((col) => col.searchable)
-          .map((col) => String(order[col.key] || "").toLowerCase())
-        return searchableFields.some((field) => field.includes(searchTerm.toLowerCase()))
-      })
-    }
-    return filtered
-  }, [processedOrders, searchTerm, crmNameFilter, currentUser])
-
-  const togglePendingColumn = (columnKey: string) =>
-    setVisiblePendingColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const toggleHistoryColumn = (columnKey: string) =>
-    setVisibleHistoryColumns((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))
-  const showAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllPendingColumns = () =>
-    setVisiblePendingColumns(pendingColumns.reduce((acc, col) => ({ ...acc, [col.key]: col.key === "actions" }), {}))
-  const showAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: true }), {}))
-  const hideAllHistoryColumns = () =>
-    setVisibleHistoryColumns(historyColumns.reduce((acc, col) => ({ ...acc, [col.key]: false }), {}))
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
@@ -311,7 +267,7 @@ export default function PackagingTransportPage() {
 
     const totalBeforeCount = existingBeforePhotoUrls.length + beforePhotoFiles.length
     if (totalBeforeCount === 0) {
-      alert("Please upload at least one Before Photo (Packing).")
+      toast.error("Please upload at least one Before Photo (Packing).")
       return
     }
 
@@ -338,13 +294,13 @@ export default function PackagingTransportPage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — photos saved. Still pending; open again to complete the rest.`)
+        toast.success(`Order ${selectedOrder.orderNo} — photos saved. Still pending; open again to complete the rest.`)
       } else {
         throw new Error(result.error || "Save failed")
       }
     } catch (err: any) {
       console.error("Error saving packaging-transport photos:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSavingPhotos(false)
     }
@@ -357,37 +313,37 @@ export default function PackagingTransportPage() {
 
     const totalBeforeCount = existingBeforePhotoUrls.length + beforePhotoFiles.length
     if (totalBeforeCount === 0) {
-      alert("Please upload at least one Before Photo (Packing).")
+      toast.error("Please upload at least one Before Photo (Packing).")
       return
     }
     if (!transportMode) {
-      alert("Please select a Transport Mode.")
+      toast.error("Please select a Transport Mode.")
       return
     }
     const receivingCopyField = sectionFields.find((f) => f.key === "receiving_copy_url")
     for (const def of sectionFields) {
       if (!def.required || def.key === "receiving_copy_url") continue
       if (!String(fieldValues[def.key] || "").trim()) {
-        alert(`Please enter ${def.label}.`)
+        toast.error(`Please enter ${def.label}.`)
         return
       }
     }
     if (receivingCopyField?.required && !existingReceivingCopyUrl && !receivingCopyFile) {
-      alert(`Please upload ${receivingCopyField.label}.`)
+      toast.error(`Please upload ${receivingCopyField.label}.`)
       return
     }
     if (biltyRequired) {
       if (!freightCharge.trim()) {
-        alert("Please enter the Freight Charge.")
+        toast.error("Please enter the Freight Charge.")
         return
       }
       if (existingBiltyUrls.length + biltyFiles.length === 0) {
-        alert("Please upload at least one Bilty / Docket file.")
+        toast.error("Please upload at least one Bilty / Docket file.")
         return
       }
     }
     if (dispatchStatus === "notokay" && !notOkReason.trim()) {
-      alert("Please provide a reason for 'Not Okay' status.")
+      toast.error("Please provide a reason for 'Not Okay' status.")
       return
     }
 
@@ -427,13 +383,13 @@ export default function PackagingTransportPage() {
         setIsDialogOpen(false)
         setSelectedOrder(null)
         await fetchOrders()
-        alert(`Order ${selectedOrder.orderNo} — packaging and transport recorded.`)
+        toast.success(`Order ${selectedOrder.orderNo} — packaging and transport recorded.`)
       } else {
         throw new Error(result.error || "Update failed")
       }
     } catch (err: any) {
       console.error("Error submitting packaging-transport:", err)
-      alert(`Error: ${err.message}`)
+      toast.error(`Error: ${err.message}`)
     } finally {
       setIsSubmitting(false)
     }
@@ -444,7 +400,11 @@ export default function PackagingTransportPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button size="sm" onClick={() => handleProcess(order)}>
+          <Button
+            size="sm"
+            className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+            onClick={() => handleProcess(order)}
+          >
             {order.isDraft ? "Continue" : "Process"}
           </Button>
         )
@@ -453,30 +413,30 @@ export default function PackagingTransportPage() {
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800"
+            className="h-7 px-2 gap-1 text-xs border-primary/20 bg-primary/5 text-primary hover:bg-primary/10"
             onClick={() => handleViewItemList(order)}
           >
             <Eye className="h-3.5 w-3.5" />
-            View Items
+            <span>Items</span>
           </Button>
         )
       case "draftStatus":
         return order.isDraft ? (
-          <Badge className="bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100">Photos Saved</Badge>
+          <StatusBadge tone="warning">Photos Saved</StatusBadge>
         ) : (
-          <Badge variant="secondary">New</Badge>
+          <StatusBadge tone="neutral">New</StatusBadge>
         )
       case "beforePhoto":
         return order.beforePhotoUrls && order.beforePhotoUrls.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {order.beforePhotoUrls.map((url: string, idx: number) => (
               <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="default">{idx + 1}</Badge>
+                <StatusBadge tone="info">{idx + 1}</StatusBadge>
               </a>
             ))}
           </div>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "freightCharge":
       case "hamaliCharge":
@@ -487,51 +447,62 @@ export default function PackagingTransportPage() {
           <div className="flex flex-wrap gap-1">
             {order.biltyUploadUrls.map((url: string, idx: number) => (
               <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="default">{idx + 1}</Badge>
+                <StatusBadge tone="info">{idx + 1}</StatusBadge>
               </a>
             ))}
           </div>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "receivingCopy":
         return order.receivingCopyUrl ? (
           <a href={order.receivingCopyUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "afterPhoto":
         return order.afterPhotoUrls && order.afterPhotoUrls.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {order.afterPhotoUrls.map((url: string, idx: number) => (
               <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                <Badge variant="default">{idx + 1}</Badge>
+                <StatusBadge tone="info">{idx + 1}</StatusBadge>
               </a>
             ))}
           </div>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       case "expenseAmount":
         return value !== "" && value !== null && value !== undefined ? `₹${value}` : ""
       case "dispatchStatus":
         return (
-          <Badge variant={value === "notokay" ? "destructive" : "default"}>
+          <StatusBadge tone={value === "notokay" ? "danger" : "success"}>
             {value === "notokay" ? "Not Okay" : "Okay"}
-          </Badge>
+          </StatusBadge>
         )
       case "invoiceCopy":
         return order.invoiceCopyUrl ? (
           <a href={order.invoiceCopyUrl} target="_blank" rel="noopener noreferrer">
-            <Badge variant="default">Link</Badge>
+            <StatusBadge tone="info">Link</StatusBadge>
           </a>
         ) : (
-          <Badge variant="secondary">N/A</Badge>
+          <span className="text-xs text-muted-foreground">N/A</span>
         )
       default:
         return value || ""
+    }
+  }
+
+  const handleTabChange = (value: string) => {
+    setCurrentTab(value)
+  }
+
+  const handleRefresh = () => {
+    fetchOrders()
+    if (currentTab === "history" || processedOrders.length > 0) {
+      fetchProcessedOrders()
     }
   }
 
@@ -551,7 +522,7 @@ export default function PackagingTransportPage() {
       <MainLayout>
         <div className="space-y-6">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-red-600">Error Loading Data</h1>
+            <h1 className="text-2xl font-bold text-destructive">Error Loading Data</h1>
             <p className="text-muted-foreground mt-2">{error}</p>
             <Button onClick={fetchOrders} className="mt-4">
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -564,250 +535,138 @@ export default function PackagingTransportPage() {
   }
 
   return (
-    <MainLayout>
-      <div className="p-2 h-[calc(100vh-5rem)] md:h-[calc(100vh-5.5rem)] flex flex-col">
-        <Tabs
-          value={currentTab}
-          onValueChange={(value) => setCurrentTab(value)}
-          className="flex-1 flex flex-col min-h-0"
-        >
-          <Card className="flex-1 flex flex-col min-h-0">
-            <CardHeader className="border-b py-3 shrink-0">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="pending">Pending ({filteredOrders.length})</TabsTrigger>
-                  <TabsTrigger value="history" onClick={handleProcessedTabClick}>
-                    History ({filteredProcessedOrders.length})
-                  </TabsTrigger>
-                </TabsList>
-
-                <div className="relative flex-1 min-w-[200px] max-w-md">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="All CRM Names" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All CRM Names</SelectItem>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button onClick={fetchOrders} variant="outline" size="sm">
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Refresh
-                  </Button>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm">
-                        <Settings className="h-4 w-4 mr-2" />
-                        Column Visibility
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent className="w-80 max-h-96 overflow-y-auto">
-                      <DropdownMenuLabel>Show/Hide Columns</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <div className="flex gap-2 p-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? showAllPendingColumns : showAllHistoryColumns}
-                        >
-                          Show All
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={currentTab === "pending" ? hideAllPendingColumns : hideAllHistoryColumns}
-                        >
-                          Hide All
-                        </Button>
-                      </div>
-                      <DropdownMenuSeparator />
-                      <div className="p-2 space-y-2">
-                        {(currentTab === "pending" ? pendingColumns : historyColumns).map((column) => {
-                          const visibleCols = currentTab === "pending" ? visiblePendingColumns : visibleHistoryColumns;
-                          const toggleCol = currentTab === "pending" ? togglePendingColumn : toggleHistoryColumn;
-                          return (
-                            <div key={column.key} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`col-${column.key}`}
-                                checked={visibleCols[column.key]}
-                                onCheckedChange={() => toggleCol(column.key)}
-                              />
-                              <Label htmlFor={`col-${column.key}`} className="text-sm">
-                                {column.label}
-                              </Label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-4 flex-1 min-h-0 flex flex-col">
-              <TabsContent value="pending" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                  {filteredOrders.map((order, idx) => (
-                    <MobileRecordCard
-                      key={order.id || idx}
-                      columns={pendingColumns}
-                      visibleColumns={visiblePendingColumns}
-                      record={order}
-                      renderCellContent={renderCellContent}
-                    />
+    <MainLayout fitViewport>
+      <div className="flex flex-col flex-1 min-h-0 gap-3">
+        {/* One toolbar row; the table below fills the rest of the screen and scrolls inside its own card, so the page itself never scrolls. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusTabs
+            tabs={tabs}
+            activeTab={currentTab}
+            onChange={handleTabChange}
+            variant="segmented"
+          />
+          <FilterSearch
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search order no, company, contact, quotation, invoice..."
+            className="min-w-[220px] flex-1"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="w-[180px]">
+              <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
+                <SelectTrigger className="h-9 text-xs border-input bg-card">
+                  <SelectValue placeholder="All CRM Names" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">
+                    All CRM Names
+                  </SelectItem>
+                  {crmNameOptions.map((name) => (
+                    <SelectItem key={name} value={name} className="text-xs">
+                      {name}
+                    </SelectItem>
                   ))}
-                  {filteredOrders.length === 0 && (
-                    <p className="text-center text-muted-foreground py-8">
-                      {searchTerm ? "No orders match your search criteria" : "No pending packaging/transport records"}
-                    </p>
-                  )}
-                </div>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>Refresh</span>
+          </Button>
+          <ColumnSelector
+            options={columnPanel.columns}
+            visible={columnPanel.visible}
+            onToggle={columnPanel.toggle}
+            onSelectAll={columnPanel.showAll}
+            onHideAll={columnPanel.hideAll}
+          />
+        </div>
 
-                <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                  <div className="overflow-auto flex-1 min-h-0">
-                    <Table className="w-full relative">
-                      <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                        <TableRow>
-                          {pendingColumns
-                            .filter((col) => visiblePendingColumns[col.key])
-                            .map((column) => (
-                              <TableHead
-                                key={column.key}
-                                className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                style={{ minWidth: column.key === "actions" ? "120px" : "160px" }}
-                              >
-                                {column.label}
-                              </TableHead>
-                            ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredOrders.map((order, idx) => (
-                          <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                            {pendingColumns
-                              .filter((col) => visiblePendingColumns[col.key])
-                              .map((column) => (
-                                <TableCell
-                                  key={column.key}
-                                  className="border-b px-4 py-3 align-top"
-                                  style={{ minWidth: column.key === "actions" ? "120px" : "160px" }}
-                                >
-                                  <div className="break-words whitespace-normal leading-relaxed">
-                                    {renderCellContent(order, column.key)}
-                                  </div>
-                                </TableCell>
-                              ))}
-                          </TableRow>
-                        ))}
-                        {filteredOrders.length === 0 && (
-                          <TableRow>
-                            <TableCell
-                              colSpan={pendingColumns.filter((col) => visiblePendingColumns[col.key]).length}
-                              className="text-center text-muted-foreground h-32"
-                            >
-                              {searchTerm ? "No orders match your search criteria" : "No pending packaging/transport records"}
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
-              </TabsContent>
+        <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
-              <TabsContent value="history" className="mt-0 flex-1 min-h-0 flex flex-col data-[state=inactive]:hidden">
-                {processedLoading ? (
-                  <div className="flex items-center justify-center h-32">
-                    <RefreshCw className="h-6 w-6 animate-spin" />
-                    <span className="ml-2">Loading history...</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="md:hidden space-y-3 overflow-y-auto flex-1">
-                      {filteredProcessedOrders.map((order, idx) => (
-                        <MobileRecordCard
-                          key={order.id || idx}
-                          columns={historyColumns}
-                          visibleColumns={visibleHistoryColumns}
-                          record={order}
-                          renderCellContent={renderCellContent}
-                        />
-                      ))}
-                      {filteredProcessedOrders.length === 0 && (
-                        <p className="text-center text-muted-foreground py-8">
-                          {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="hidden md:flex flex-col flex-1 min-h-0 border rounded-lg overflow-hidden relative">
-                      <div className="overflow-auto flex-1 min-h-0">
-                        <Table className="w-full relative">
-                          <TableHeader className="sticky top-0 z-20 bg-gray-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]">
-                            <TableRow>
-                              {historyColumns
-                                .filter((col) => visibleHistoryColumns[col.key])
-                                .map((column) => (
-                                  <TableHead
-                                    key={column.key}
-                                    className="bg-gray-50 font-semibold text-gray-900 px-4 py-3 whitespace-nowrap"
-                                    style={{ minWidth: "160px" }}
-                                  >
-                                    {column.label}
-                                  </TableHead>
-                                ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredProcessedOrders.map((order, idx) => (
-                              <TableRow key={order.id || idx} className="hover:bg-gray-50">
-                                {historyColumns
-                                  .filter((col) => visibleHistoryColumns[col.key])
-                                  .map((column) => (
-                                    <TableCell key={column.key} className="border-b px-4 py-3 align-top" style={{ minWidth: "160px" }}>
-                                      <div className="break-words whitespace-normal leading-relaxed">
-                                        {renderCellContent(order, column.key)}
-                                      </div>
-                                    </TableCell>
-                                  ))}
-                              </TableRow>
-                            ))}
-                            {filteredProcessedOrders.length === 0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={historyColumns.filter((col) => visibleHistoryColumns[col.key]).length}
-                                  className="text-center text-muted-foreground h-32"
-                                >
-                                  {searchTerm ? "No orders match your search criteria" : "No processed orders found"}
-                                </TableCell>
-                              </TableRow>
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </TabsContent>
-            </CardContent>
-          </Card>
-        </Tabs>
+        {/* Unified Enterprise DataTable */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <DataTable
+            headers={activeColumns.map((col) => ({
+              key: col.key,
+              label: col.label,
+              minWidth:
+                col.key === "actions"
+                  ? "110px"
+                  : col.key === "itemList"
+                  ? "75px"
+                  : col.key === "companyName"
+                  ? "220px"
+                  : col.key === "orderNo"
+                  ? "120px"
+                  : col.key === "quotationNo"
+                  ? "130px"
+                  : col.key === "contactPersonName"
+                  ? "160px"
+                  : col.key === "invoiceNumber"
+                  ? "150px"
+                  : col.key === "transportMode" || col.key === "modeDetails"
+                  ? "180px"
+                  : "140px",
+            }))}
+            data={activeRows}
+            keyExtractor={(order, idx) => order.id || order.queueId || order.orderId || order.orderNo || idx}
+            loading={currentTab === "history" ? processedLoading : false}
+            emptyTitle={
+              searchTerm
+                ? "No matching records found"
+                : currentTab === "pending"
+                ? "No pending packaging/transport records"
+                : "No processed orders found"
+            }
+            emptyDescription={
+              searchTerm ? "Try adjusting your search terms or clearing CRM filters." : undefined
+            }
+            simpleFooter={currentTab === "pending"}
+            currentPage={historyPage}
+            itemsPerPage={historyPageSize}
+            totalResults={currentTab === "pending" ? undefined : historyTotal}
+            totalPages={historyTotalPages}
+            onPageChange={setHistoryPage}
+            onItemsPerPageChange={(n) => { setHistoryPageSize(n); setHistoryPage(1) }}
+            itemsPerPageOptions={[25, 50, 100, 200]}
+            renderRow={(order) => (
+              <TableRow
+                key={order.id || order.queueId || order.orderId || order.orderNo}
+                className="hover:bg-secondary/50 transition-colors"
+              >
+                {activeColumns.map((column) => (
+                  <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
+                    {(() => {
+                      const content = renderCellContent(order, column.key)
+                      return typeof content === "string" ? (
+                        <div className="max-w-[280px] truncate" title={content}>
+                          {content}
+                        </div>
+                      ) : (
+                        <div>{content}</div>
+                      )
+                    })()}
+                  </TableCell>
+                ))}
+              </TableRow>
+            )}
+            renderCard={(order) => (
+              <MobileRecordCard
+                columns={columnPanel.columns}
+                visibleColumns={columnPanel.visible}
+                record={order}
+                renderCellContent={renderCellContent}
+              />
+            )}
+          />
+        </div>
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -829,18 +688,18 @@ export default function PackagingTransportPage() {
               </div>
 
               {/* Documentation */}
-              <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-200 space-y-4">
+              <div className="bg-card p-4 rounded-lg border border-border space-y-4">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-emerald-900">Documentation</h4>
+                  <h3 className="text-sm font-semibold text-foreground">Documentation</h3>
                   {selectedOrder?.isDraft && (
-                    <Badge className="bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-100">
+                    <Badge variant="outline" className="border-warning/40 text-warning-foreground bg-warning/10">
                       Draft — photos already saved
                     </Badge>
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="beforePhoto" className="text-emerald-700">
-                    Before Photo (Packing) <span className="text-red-500 font-bold">*</span>
+                  <Label htmlFor="beforePhoto">
+                    Before Photo (Packing) <span className="text-destructive font-bold">*</span>
                   </Label>
                   {existingBeforePhotoUrls.length > 0 && (
                     <div className="flex flex-wrap gap-2 pb-1">
@@ -850,7 +709,7 @@ export default function PackagingTransportPage() {
                           href={url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="block h-16 w-16 overflow-hidden rounded-lg border border-emerald-200 bg-white"
+                          className="block h-16 w-16 overflow-hidden rounded-lg border border-border bg-card"
                         >
                           <img src={url} alt={`Before ${idx + 1}`} className="h-full w-full object-cover" />
                         </a>
@@ -869,7 +728,7 @@ export default function PackagingTransportPage() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="afterPhoto" className="text-emerald-700">
+                  <Label htmlFor="afterPhoto">
                     After Photo (Final Package)
                   </Label>
                   {existingAfterPhotoUrls.length > 0 && (
@@ -880,7 +739,7 @@ export default function PackagingTransportPage() {
                           href={url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="block h-16 w-16 overflow-hidden rounded-lg border border-emerald-200 bg-white"
+                          className="block h-16 w-16 overflow-hidden rounded-lg border border-border bg-card"
                         >
                           <img src={url} alt={`After ${idx + 1}`} className="h-full w-full object-cover" />
                         </a>
@@ -915,7 +774,7 @@ export default function PackagingTransportPage() {
               {/* Transport Mode — decides which section renders below */}
               <div className="space-y-2">
                 <Label htmlFor="transportMode">
-                  Transport Mode <span className="text-red-500 font-bold">*</span>
+                  Transport Mode <span className="text-destructive font-bold">*</span>
                 </Label>
                 <Select value={transportMode} onValueChange={setTransportMode}>
                   <SelectTrigger id="transportMode">
@@ -935,21 +794,17 @@ export default function PackagingTransportPage() {
                   currently selected Transport Mode (see
                   lib/dispatch-mode.ts). Every mode shares this one renderer
                   instead of 11 hand-written blocks. */}
-              <div
-                className={`p-4 rounded-xl border space-y-4 ${
-                  isReceivingPath ? "bg-amber-50/50 border-amber-200" : "bg-indigo-50/50 border-indigo-200"
-                }`}
-              >
-                <h4 className={`text-sm font-bold ${isReceivingPath ? "text-amber-900" : "text-indigo-900"}`}>
+              <div className="bg-card p-4 rounded-lg border border-border space-y-4">
+                <h3 className="text-sm font-semibold text-foreground">
                   {isReceivingPath ? "Receiving's Section" : "Dispatch Details"}
-                </h4>
+                </h3>
                 <div className="grid grid-cols-2 gap-4">
                   {sectionFields
                     .filter((def) => def.key !== "receiving_copy_url")
                     .map((def) => (
                       <div key={def.key} className="space-y-2">
-                        <Label htmlFor={def.key} className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
-                          {def.label} {def.required && <span className="text-red-500 font-bold">*</span>}
+                        <Label htmlFor={def.key}>
+                          {def.label} {def.required && <span className="text-destructive font-bold">*</span>}
                         </Label>
                         <Input
                           id={def.key}
@@ -964,10 +819,10 @@ export default function PackagingTransportPage() {
 
                 {sectionFields.some((def) => def.key === "receiving_copy_url") && (
                   <div className="space-y-2">
-                    <Label htmlFor="receivingCopy" className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
+                    <Label htmlFor="receivingCopy">
                       {sectionFields.find((def) => def.key === "receiving_copy_url")!.label}{" "}
                       {sectionFields.find((def) => def.key === "receiving_copy_url")!.required && (
-                        <span className="text-red-500 font-bold">*</span>
+                        <span className="text-destructive font-bold">*</span>
                       )}
                     </Label>
                     {existingReceivingCopyUrl && (
@@ -975,7 +830,7 @@ export default function PackagingTransportPage() {
                         href={existingReceivingCopyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block h-16 w-16 overflow-hidden rounded-lg border border-amber-200 bg-white"
+                        className="block h-16 w-16 overflow-hidden rounded-lg border border-border bg-card"
                       >
                         <img src={existingReceivingCopyUrl} alt="Proof document" className="h-full w-full object-cover" />
                       </a>
@@ -991,7 +846,7 @@ export default function PackagingTransportPage() {
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="transporterRemarks" className={isReceivingPath ? "text-amber-700" : "text-indigo-700"}>
+                  <Label htmlFor="transporterRemarks">
                     Remarks
                   </Label>
                   <Textarea
@@ -1008,29 +863,29 @@ export default function PackagingTransportPage() {
                   collected. Freight Charge + Bilty/Docket are mandatory for every
                   non-receiving mode, optional for Customer Pickup and the legacy
                   receiving modes (see isBiltyRequired in lib/dispatch-mode.ts). */}
-              <div className="bg-sky-50/50 p-4 rounded-xl border border-sky-200 space-y-4">
-                <h4 className="text-sm font-bold text-sky-900">
-                  Bilty / Docket {!biltyRequired && <span className="font-normal text-sky-700">(optional for this mode)</span>}
-                </h4>
+              <div className="bg-card p-4 rounded-lg border border-border space-y-4">
+                <h3 className="text-sm font-semibold text-foreground">
+                  Bilty / Docket {!biltyRequired && <span className="font-normal text-muted-foreground">(optional for this mode)</span>}
+                </h3>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="freightCharge" className="text-sky-700">
-                      Freight Charge {biltyRequired && <span className="text-red-500 font-bold">*</span>}
+                    <Label htmlFor="freightCharge">
+                      Freight Charge {biltyRequired && <span className="text-destructive font-bold">*</span>}
                     </Label>
                     <Input id="freightCharge" type="number" value={freightCharge} onChange={(e) => setFreightCharge(e.target.value)} placeholder="0" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="hamaliCharge" className="text-sky-700">Hamali Charge</Label>
+                    <Label htmlFor="hamaliCharge">Hamali Charge</Label>
                     <Input id="hamaliCharge" type="number" value={hamaliCharge} onChange={(e) => setHamaliCharge(e.target.value)} placeholder="0" />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="parkingCharge" className="text-sky-700">Parking Charge</Label>
+                    <Label htmlFor="parkingCharge">Parking Charge</Label>
                     <Input id="parkingCharge" type="number" value={parkingCharge} onChange={(e) => setParkingCharge(e.target.value)} placeholder="0" />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="biltyUpload" className="text-sky-700">
-                    Bilty / Docket Upload {biltyRequired && <span className="text-red-500 font-bold">*</span>}
+                  <Label htmlFor="biltyUpload">
+                    Bilty / Docket Upload {biltyRequired && <span className="text-destructive font-bold">*</span>}
                   </Label>
                   {existingBiltyUrls.length > 0 && (
                     <div className="flex flex-wrap gap-1">
@@ -1053,29 +908,29 @@ export default function PackagingTransportPage() {
               </div>
 
               {/* Dispatch Confirmation */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="bg-card p-4 rounded-lg border border-border space-y-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-bold text-slate-800">Dispatch Confirmation</h4>
-                  <div className="flex bg-slate-200/50 p-1 rounded-xl border border-slate-200">
+                  <h3 className="text-sm font-semibold text-foreground">Dispatch Confirmation</h3>
+                  <div className="flex bg-muted/50 p-1 rounded-md border border-border">
                     <button
                       type="button"
                       onClick={() => setDispatchStatus("okay")}
-                      className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${dispatchStatus === "okay" ? "bg-green-600 text-white shadow-md" : "text-slate-500 hover:text-slate-700"}`}
+                      className={`px-6 py-2 rounded-md text-sm font-bold transition-all ${dispatchStatus === "okay" ? "bg-success text-success-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
                     >
                       OKAY
                     </button>
                     <button
                       type="button"
                       onClick={() => setDispatchStatus("notokay")}
-                      className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${dispatchStatus === "notokay" ? "bg-red-600 text-white shadow-md" : "text-slate-500 hover:text-slate-700"}`}
+                      className={`px-6 py-2 rounded-md text-sm font-bold transition-all ${dispatchStatus === "notokay" ? "bg-destructive text-destructive-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
                     >
                       NOT OKAY
                     </button>
                   </div>
                 </div>
                 {dispatchStatus === "notokay" && (
-                  <div className="space-y-2 pt-2 border-t border-slate-200">
-                    <Label htmlFor="notOkReason" className="text-red-700 font-semibold">
+                  <div className="space-y-2 pt-2 border-t border-border">
+                    <Label htmlFor="notOkReason" className="text-destructive font-semibold">
                       Reason for NOT OKAY
                     </Label>
                     <Textarea
@@ -1083,7 +938,7 @@ export default function PackagingTransportPage() {
                       value={notOkReason}
                       onChange={(e) => setNotOkReason(e.target.value)}
                       placeholder="Please specify why this order is not okay for dispatch..."
-                      className="border-red-100"
+                      className="border-destructive/40"
                     />
                   </div>
                 )}

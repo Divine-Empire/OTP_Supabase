@@ -179,11 +179,11 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
     const normalized = normalizeStatus(status)
     switch (normalized) {
       case "complete":
-        return "bg-green-100 text-green-800 border-green-200"
+        return "bg-success/10 text-success border-success/30"
       case "cancelled":
-        return "bg-red-100 text-red-800 border-red-200"
+        return "bg-destructive/10 text-destructive border-destructive/30"
       default:
-        return "bg-gray-100 text-gray-800 border-gray-200"
+        return "bg-warning/15 text-warning-foreground border-warning/30"
     }
   }
 
@@ -270,33 +270,33 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
+    <div className="bg-card rounded-lg border border-border shadow-xs">
       {/* Header */}
-      <div className="p-6 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">All Orders</h3>
-        <p className="text-sm text-gray-600 mt-1">
+      <div className="p-6 border-b border-border">
+        <h2 className="text-lg font-semibold text-foreground">All Orders</h2>
+        <p className="text-sm text-muted-foreground mt-1">
           Latest order activities ({filteredOrders.length} of {orders.length} orders)
         </p>
         
         {/* Search and Filter Controls */}
         <div className="flex flex-col sm:flex-row gap-4 mt-4">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <input
               type="text"
               placeholder="Search by order number, company, or amount..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full h-9 pl-9 pr-4 text-sm border border-input rounded-md bg-card text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-primary outline-none"
             />
           </div>
           
           <div className="flex items-center gap-2">
-            <Filter className="h-4 w-4 text-gray-400" />
+            <Filter className="h-4 w-4 text-muted-foreground" />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+              className="h-9 px-3 text-sm border border-input rounded-md bg-card text-foreground focus:ring-2 focus:ring-primary focus:border-primary outline-none"
             >
               <option value="all">All Status</option>
               <option value="pending">Pending</option>
@@ -308,42 +308,42 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
           <div className="relative">
             <button
               onClick={() => setShowColumnDropdown(!showColumnDropdown)}
-              className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white hover:bg-gray-50"
+              className="flex items-center gap-2 h-9 px-3 border border-input rounded-md text-sm text-foreground bg-card hover:bg-muted/40 focus:ring-2 focus:ring-primary focus:border-primary outline-none"
             >
-              <Eye className="h-4 w-4 text-gray-400" />
-              <span className="text-sm">Columns</span>
-              <ChevronDown className="h-4 w-4 text-gray-400" />
+              <Eye className="h-4 w-4 text-muted-foreground" />
+              <span>Columns</span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </button>
             
             {showColumnDropdown && (
-              <div className="absolute right-0 mt-1 w-80 bg-white border border-gray-200 rounded-md shadow-lg z-50 max-h-96 overflow-y-auto">
-                <div className="p-3 border-b border-gray-200">
-                  <h4 className="text-sm font-semibold text-gray-900">Show/Hide Columns</h4>
-                  <p className="text-xs text-gray-500 mt-1">Select which columns to display in the table</p>
+              <div className="absolute right-0 mt-1 w-80 bg-card border border-border rounded-md shadow-md z-50 max-h-96 overflow-y-auto">
+                <div className="p-3 border-b border-border">
+                  <h3 className="text-sm font-semibold text-foreground">Show/Hide Columns</h3>
+                  <p className="text-xs text-muted-foreground mt-1">Select which columns to display in the table</p>
                 </div>
                 <div className="p-2">
                   {ALL_COLUMNS.map((column) => (
                     <label
                       key={column.key}
-                      className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
+                      className="flex items-center gap-2 p-2 hover:bg-muted/40 rounded cursor-pointer"
                     >
                       <input
                         type="checkbox"
                         checked={visibleColumns.has(column.key)}
                         onChange={() => toggleColumnVisibility(column.key)}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        className="h-4 w-4 text-primary focus:ring-primary border-input rounded"
                       />
-                      <span className="text-sm text-gray-700 flex-1">{column.label}</span>
+                      <span className="text-sm text-foreground flex-1">{column.label}</span>
                       {visibleColumns.has(column.key) ? (
-                        <Eye className="h-3 w-3 text-green-500" />
+                        <Eye className="h-3 w-3 text-success" />
                       ) : (
-                        <EyeOff className="h-3 w-3 text-gray-400" />
+                        <EyeOff className="h-3 w-3 text-muted-foreground" />
                       )}
                     </label>
                   ))}
                 </div>
-                <div className="p-3 border-t border-gray-200 bg-gray-50">
-                  <div className="text-xs text-gray-600">
+                <div className="p-3 border-t border-border bg-muted/40">
+                  <div className="text-xs text-muted-foreground">
                     {visibleColumns.size} of {ALL_COLUMNS.length} columns visible
                   </div>
                 </div>
@@ -356,32 +356,32 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="bg-muted/40">
             <tr>
               {visibleColumnsList.map((column) => (
                 <th
                   key={column.key}
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap"
+                  className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider whitespace-nowrap"
                 >
                   {column.label}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-card divide-y divide-border">
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={visibleColumnsList.length} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={visibleColumnsList.length} className="px-6 py-8 text-center text-muted-foreground text-sm">
                   {orders.length === 0 ? "No orders found" : "No orders match your search criteria"}
                 </td>
               </tr>
             ) : (
               filteredOrders.map((order, index) => (
-                <tr key={`${order.orderNo}-${index}`} className="hover:bg-gray-50">
+                <tr key={`${order.orderNo}-${index}`} className="hover:bg-muted/30">
                   {visibleColumnsList.map((column) => (
                     <td
                       key={column.key}
-                      className="px-6 py-4 whitespace-nowrap text-sm text-gray-900"
+                      className="px-6 py-4 whitespace-nowrap text-sm text-foreground"
                     >
                       {getCellValue(order, column.key)}
                     </td>
@@ -395,8 +395,8 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
       
       {/* Results summary */}
       {(searchTerm || statusFilter !== "all") && (
-        <div className="px-6 py-3 bg-gray-50 border-t border-gray-200">
-          <p className="text-sm text-gray-600">
+        <div className="px-6 py-3 bg-muted/40 border-t border-border">
+          <p className="text-sm text-muted-foreground">
             Showing {filteredOrders.length} of {orders.length} orders
             {searchTerm && ` matching "${searchTerm}"`}
             {statusFilter !== "all" && ` with status "${statusFilter}"`}

@@ -14,15 +14,15 @@ export function DispatchMetrics({ data }: DispatchMetricsProps) {
       <CardContent>
         <div className="grid gap-4 md:grid-cols-3">
           <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">{data.dispatchComplete}</div>
+            <div className="text-2xl font-bold text-success tabular-nums">{data.dispatchComplete}</div>
             <p className="text-sm text-muted-foreground">Orders Dispatched</p>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-yellow-600">{data.pendingOrders}</div>
+            <div className="text-2xl font-bold text-warning-foreground tabular-nums">{data.pendingOrders}</div>
             <p className="text-sm text-muted-foreground">Pending Dispatch</p>
           </div>
           <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">
+            <div className="text-2xl font-bold text-primary tabular-nums">
               {data.dispatchComplete + data.pendingOrders > 0
                 ? Math.round((data.dispatchComplete / (data.dispatchComplete + data.pendingOrders)) * 100)
                 : 0}

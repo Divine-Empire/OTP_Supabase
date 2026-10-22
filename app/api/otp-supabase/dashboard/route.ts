@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { fetchAllRows } from "@/lib/fetch-all"
 
 // Aggregates real pipeline data for the Dashboard — every number here comes
 // from the actual otp_* tables (no more dead otp_v_order_full /
@@ -12,6 +13,14 @@ export async function GET(request: Request) {
   try {
     const location = new URL(request.url).searchParams.get("location")
     const supabase = getSupabaseAdmin()
+    // Every table is read in full to aggregate in JS; page it past PostgREST's
+    // 1000-row cap, otherwise every number here silently freezes at 1000 rows.
+    // Same result shape as a plain select ({ data, error }) so the code below is unchanged.
+    const all = (table: string, cols: string) =>
+      fetchAllRows((from, to) => supabase.from(table).select(cols).order("id").range(from, to)).then(
+        (data) => ({ data, error: null as null }),
+        (error) => ({ data: null as any[] | null, error })
+      )
 
     const [
       ordersRes,
@@ -25,16 +34,16 @@ export async function GET(request: Request) {
       makeInvoiceRes,
       calibrationRes,
     ] = await Promise.all([
-      supabase.from("otp_orders").select("id, order_no, company_name, payment_mode, amount_with_tax, created_at, order_location"),
-      supabase.from("otp_orders_acceptable").select("order_id, is_order_acceptable, check_inventory_planned, proforma_invoice_planned, debit_note_planned"),
-      supabase.from("otp_proforma_invoice").select("order_id"),
-      supabase.from("otp_debit_note").select("order_id"),
-      supabase.from("otp_check_inventory").select("order_id"),
-      supabase.from("otp_indent_creation").select("order_id, material_received"),
-      supabase.from("otp_pre_invoice_queue").select("id, order_id, status, debit_note_planned, make_invoice_planned"),
-      supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
-      supabase.from("otp_make_invoice").select("id, order_id, pre_invoice_queue_id, total_bill_amount, calibration_planned, created_at"),
-      supabase.from("otp_calibration_certificate").select("make_invoice_id"),
+      all("otp_orders", "id, order_no, company_name, payment_mode, amount_with_tax, created_at, order_location"),
+      all("otp_orders_acceptable", "order_id, is_order_acceptable, check_inventory_planned, proforma_invoice_planned, debit_note_planned"),
+      all("otp_proforma_invoice", "order_id"),
+      all("otp_debit_note", "order_id"),
+      all("otp_check_inventory", "order_id"),
+      all("otp_indent_creation", "order_id, material_received"),
+      all("otp_pre_invoice_queue", "id, order_id, status, debit_note_planned, make_invoice_planned"),
+      all("otp_debit_note_for_invoice", "pre_invoice_queue_id"),
+      all("otp_make_invoice", "id, order_id, pre_invoice_queue_id, total_bill_amount, calibration_planned, created_at"),
+      all("otp_calibration_certificate", "make_invoice_id"),
     ])
 
     for (const r of [ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, queueRes, DeliveryNoteInvRes, makeInvoiceRes, calibrationRes]) {

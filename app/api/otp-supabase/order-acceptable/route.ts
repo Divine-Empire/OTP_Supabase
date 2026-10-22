@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 import { ORDER_LOCATIONS } from "@/lib/locations"
 
@@ -14,40 +16,55 @@ export async function GET(request: Request) {
     const status = searchParams.get("status") // "pending" | "history"
     const supabase = getSupabaseAdmin()
 
-    if (status === "history") {
-      const { data, error } = await supabase
-        .from("otp_orders_acceptable")
-        .select("*, order:otp_orders(*)")
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-server-history.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_order_acceptable_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_order_acceptable_history").select("*", { count: "exact" }),
+        p
+      )
         .order("created_at", { ascending: false })
-        .limit(200)
-
+        .order("id")
+        .range(p.offset, p.to)
       if (error) throw error
-      return NextResponse.json({ success: true, data: data || [] })
+      return pageJson(data, count, p)
+    }
+
+    if (status === "history") {
+      // One chunk per request (?offset=&limit=) with the overall `total`, so the
+      // page can show the first rows immediately and keep pulling the rest in
+      // the background (see hooks/use-chunked-history.ts). The old flat
+      // .limit(200) silently dropped every order beyond the 200 newest (e.g.
+      // DO-5068 sat at position 239 and never showed). Stable order
+      // (created_at, id) keeps chunks from overlapping or skipping rows.
+      const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 200, 1), 1000)
+      const offset = Math.max(Number(searchParams.get("offset")) || 0, 0)
+      const { data, error, count } = await supabase
+        .from("otp_orders_acceptable")
+        .select("*, order:otp_orders(*)", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(offset, offset + limit - 1)
+      if (error) throw error
+      const total = count ?? offset + (data?.length || 0)
+      return NextResponse.json({ success: true, data: data || [], total, hasMore: offset + (data?.length || 0) < total })
     }
 
     // Default / "pending": orders whose stage-1 planned date is set but that
     // don't have an otp_orders_acceptable row yet.
-    const { data: doneRows, error: doneError } = await supabase
-      .from("otp_orders_acceptable")
-      .select("order_id")
+    // Anti-join view (Database/72, 73): no done-id list in the URL, and paged
+    // past PostgREST's 1000-row cap.
+    const data = await fetchAllRows((from, to) =>
+      supabase
+        .from("otp_v_order_acceptable_pending")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to)
+    )
 
-    if (doneError) throw doneError
-    const doneIds = (doneRows || []).map((r: any) => r.order_id).filter(Boolean)
-
-    let query = supabase
-      .from("otp_orders")
-      .select("*")
-      .not("order_acceptable_planned", "is", null)
-      .order("created_at", { ascending: false })
-
-    if (doneIds.length > 0) {
-      query = query.not("id", "in", `(${doneIds.join(",")})`)
-    }
-
-    const { data, error } = await query
-    if (error) throw error
-
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/order-acceptable exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

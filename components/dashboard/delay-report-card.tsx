@@ -76,7 +76,7 @@ function formatDelay(total: number): string {
 }
 
 function Delay({ value }: { value: number | null }) {
-  if (value === null || value === undefined) return <span className="text-slate-300">-</span>
+  if (value === null || value === undefined) return <span className="text-muted-foreground/40">-</span>
   return (
     <span title={`${num(value)} minutes`}>{formatDelay(value)}</span>
   )
@@ -179,26 +179,26 @@ export function DelayReportCard() {
             <Label htmlFor="delay-to" className="text-xs text-muted-foreground">To</Label>
             <Input id="delay-to" type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
           </div>
-          {rangeInvalid && <p className="text-xs text-rose-600 pb-2">Pick a valid date range.</p>}
+          {rangeInvalid && <p className="text-xs text-destructive pb-2">Pick a valid date range.</p>}
         </div>
       </CardHeader>
 
       <CardContent className="flex-1 space-y-4">
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-lg border bg-slate-50 p-3">
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Orders</p>
-            <p className="text-xl font-bold text-slate-900" data-testid="delay-orders">{data ? num(data.summary.orders) : "-"}</p>
+            <p className="text-xl font-bold text-foreground tabular-nums" data-testid="delay-orders">{data ? num(data.summary.orders) : "-"}</p>
           </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Total Summative Delay</p>
-            <p className="text-xl font-bold text-slate-900" data-testid="delay-total" title={data ? `${num(data.summary.totalDelay)} minutes` : undefined}>
+            <p className="text-xl font-bold text-foreground tabular-nums" data-testid="delay-total" title={data ? `${num(data.summary.totalDelay)} minutes` : undefined}>
               {data ? formatDelay(data.summary.totalDelay) : "-"}
             </p>
-            <p className="text-[11px] text-muted-foreground">sum of every order's total</p>
+            <p className="text-[11px] text-muted-foreground">sum of every order&apos;s total</p>
           </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
+          <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Average Delay</p>
-            <p className="text-xl font-bold text-indigo-600" data-testid="delay-average" title={data ? `${num(data.summary.averageDelay)} minutes` : undefined}>
+            <p className="text-xl font-bold text-primary tabular-nums" data-testid="delay-average" title={data ? `${num(data.summary.averageDelay)} minutes` : undefined}>
               {data ? formatDelay(data.summary.averageDelay) : "-"}
             </p>
             <p className="text-[11px] text-muted-foreground">per order</p>
@@ -206,24 +206,24 @@ export function DelayReportCard() {
         </div>
 
         {error ? (
-          <p className="text-sm text-rose-600">{error}</p>
+          <p className="text-sm text-destructive">{error}</p>
         ) : loading && !data ? (
           <p className="text-sm text-muted-foreground">Loading delay report...</p>
         ) : rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No orders were processed through Packaging and Dispatch in this period.</p>
         ) : (
-          <div className={`max-h-[32rem] overflow-auto rounded-lg border ${loading ? "opacity-60" : ""}`}>
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-slate-50">
+          <div className={`rounded-lg border border-border ${loading ? "opacity-60" : ""}`}>
+            <Table containerClassName="max-h-[32rem]" regionLabel="Delay report table">
+              <TableHeader className="sticky top-0 z-10 bg-muted/80">
                 <TableRow>
-                  <TableHead className="sticky left-0 z-20 h-auto min-w-[5rem] bg-slate-50 px-2 py-2 text-xs">Order No.</TableHead>
+                  <TableHead className="sticky left-0 z-20 h-auto min-w-[5rem] bg-muted/80 px-2 py-2 text-xs">Order No.</TableHead>
                   <TableHead className="h-auto min-w-[8.5rem] whitespace-nowrap px-2 py-2 text-right text-xs">Order Acceptable</TableHead>
                   {STAGE_COLUMNS.map((col) => (
                     <TableHead key={col.key} className="h-auto min-w-[5.5rem] whitespace-normal px-2 py-2 text-right text-xs leading-tight">
                       {col.label}
                     </TableHead>
                   ))}
-                  <TableHead className="sticky right-0 z-20 h-auto min-w-[6.5rem] whitespace-nowrap border-l bg-slate-100 px-2 py-2 text-right text-xs font-bold text-slate-900">
+                  <TableHead className="sticky right-0 z-20 h-auto min-w-[6.5rem] whitespace-nowrap border-l border-border bg-muted/90 px-2 py-2 text-right text-xs font-bold text-foreground">
                     Total Delay
                   </TableHead>
                 </TableRow>
@@ -231,7 +231,7 @@ export function DelayReportCard() {
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={row.orderId}>
-                    <TableCell className="sticky left-0 z-10 bg-white px-2 py-2 text-sm font-medium whitespace-nowrap" title={row.companyName}>
+                    <TableCell className="sticky left-0 z-10 bg-card px-2 py-2 text-sm font-medium whitespace-nowrap" title={row.companyName}>
                       {row.orderNo}
                     </TableCell>
                     <TableCell className="whitespace-nowrap px-2 py-2 text-right text-sm tabular-nums" title={row.orderAcceptableAt ?? undefined}>
@@ -247,7 +247,7 @@ export function DelayReportCard() {
                         )}
                       </TableCell>
                     ))}
-                    <TableCell className="sticky right-0 z-10 whitespace-nowrap border-l bg-slate-50 px-2 py-2 text-right text-sm font-semibold tabular-nums">
+                    <TableCell className="sticky right-0 z-10 whitespace-nowrap border-l border-border bg-muted/30 px-2 py-2 text-right text-sm font-semibold tabular-nums">
                       <Delay value={row.totalDelay} />
                     </TableCell>
                   </TableRow>

@@ -19,16 +19,16 @@ export function TopCustomers({ customers }: TopCustomersProps) {
       <CardContent>
         <div className="space-y-3">
           {customers.map((customer, index) => (
-            <div key={customer.name} className="flex items-center justify-between">
+            <div key={customer.name} className="flex items-center justify-between py-1 border-b border-border/50 last:border-0">
               <div className="flex items-center gap-3">
-                <Badge variant="outline">{index + 1}</Badge>
+                <Badge variant="outline" className="h-6 w-6 rounded-full p-0 flex items-center justify-center text-xs font-semibold">{index + 1}</Badge>
                 <div>
-                  <p className="text-sm font-medium">{customer.name}</p>
+                  <p className="text-sm font-medium text-foreground">{customer.name}</p>
                   <p className="text-xs text-muted-foreground">{customer.orders} orders</p>
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-sm font-medium">₹{customer.revenue.toLocaleString()}</p>
+                <p className="text-sm font-semibold tabular-nums text-foreground">₹{customer.revenue.toLocaleString("en-IN")}</p>
               </div>
             </div>
           ))}

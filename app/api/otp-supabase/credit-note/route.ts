@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 
 const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
 
@@ -95,12 +97,40 @@ export async function GET(request: Request) {
       return NextResponse.json({ success: true, data: cards.filter(Boolean) })
     }
 
+    if (status === "history" && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_credit_note_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_credit_note_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
+
+    if (status === "history") {
+      const { offset, to } = chunkParams(searchParams)
+      const { data, error, count } = await supabase
+        .from("otp_credit_note")
+        .select("*", { count: "exact" })
+        .eq("status", "completed")
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(offset, to)
+      if (error) throw error
+      return chunkJson(data, count, offset)
+    }
+
     const { data, error } = await supabase
       .from("otp_credit_note")
       .select("*")
-      .eq("status", status === "history" ? "completed" : "pending")
+      .eq("status", "pending")
       .order("created_at", { ascending: false })
-      .limit(status === "history" ? 200 : 1000)
+      .limit(1000)
     if (error) throw error
 
     return NextResponse.json({ success: true, data: data || [] })

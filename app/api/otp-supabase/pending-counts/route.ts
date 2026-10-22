@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 
-// Lightweight, sidebar-only counterpart to /api/otp-supabase/dashboard's
-// pipelineStages — same "planned IS NOT NULL AND no matching child row"
-// logic each stage's own GET route uses, but stripped down to just the
-// counts (no orders/customers/monthly-trend work) since this runs on every
-// page load (Sidebar remounts on every navigation — see main-layout.tsx).
-// Keyed directly by the sidebar's own kebab-case `step` values so the
-// component can look counts up with zero translation.
+// Sidebar-only pending counts, keyed by the sidebar's own kebab-case `step`
+// values so the component can look counts up with zero translation. Runs on
+// page loads (Sidebar remounts on navigation; it caches client-side, see
+// components/layout/sidebar.tsx).
+//
+// All the counting is one SQL function, otp_pending_counts() (Database/72):
+// the same "planned IS NOT NULL AND no matching child row" rule each stage's
+// own Pending view uses, counted in the DB. The old version pulled 14 whole
+// tables into Node, which silently stopped at PostgREST's 1000-row cap and
+// made every count wrong past that. There is deliberately no fallback to
+// that code: if the function is missing this must fail loudly.
 //
 // ?location=<label> scopes every count to orders at that location (plus
 // orders with no location yet), matching lib/access.ts's canSeeLocation
@@ -17,92 +21,9 @@ export async function GET(request: Request) {
     const location = new URL(request.url).searchParams.get("location")
     const supabase = getSupabaseAdmin()
 
-    const [
-      ordersRes,
-      acceptableRes,
-      proformaRes,
-      DeliveryNoteRes,
-      checkInvRes,
-      indentRes,
-      repeatShortageRes,
-      queueRes,
-      DeliveryNoteInvRes,
-      makeInvoiceRes,
-      calibrationRes,
-      packagingTransportRes,
-      clientConfirmationRes,
-      creditNotePendingRes,
-    ] = await Promise.all([
-      supabase.from("otp_orders").select("id, order_location"),
-      supabase.from("otp_orders_acceptable").select("order_id, check_inventory_planned, proforma_invoice_planned, debit_note_planned"),
-      supabase.from("otp_proforma_invoice").select("order_id"),
-      supabase.from("otp_debit_note").select("order_id"),
-      supabase.from("otp_check_inventory").select("order_id"),
-      supabase.from("otp_indent_creation").select("order_id, indent_created_at"),
-      supabase.from("otp_check_inventory_shortage").select("order_id").eq("status", "pending"),
-      supabase.from("otp_pre_invoice_queue").select("id, order_id, status, debit_note_planned, make_invoice_planned"),
-      supabase.from("otp_debit_note_for_invoice").select("pre_invoice_queue_id"),
-      supabase.from("otp_make_invoice").select("id, order_id, pre_invoice_queue_id, calibration_planned, packaging_transport_planned"),
-      supabase.from("otp_calibration_certificate").select("make_invoice_id"),
-      supabase.from("otp_packaging_transport").select("id, order_id, make_invoice_id, status, client_confirmation_planned"),
-      supabase.from("otp_client_confirmation").select("packaging_transport_id"),
-      supabase.from("otp_credit_note").select("order_location").eq("status", "pending"),
-    ])
-
-    for (const r of [
-      ordersRes, acceptableRes, proformaRes, DeliveryNoteRes, checkInvRes, indentRes, repeatShortageRes, queueRes,
-      DeliveryNoteInvRes, makeInvoiceRes, calibrationRes, packagingTransportRes, clientConfirmationRes,
-      creditNotePendingRes,
-    ]) {
-      if (r.error) throw r.error
-    }
-
-    const visibleLocation = (loc: string | null | undefined) => !location || !loc || loc === location
-    const orders = (ordersRes.data || []).filter((o: any) => visibleLocation(o.order_location))
-    const visibleOrderIds = new Set(orders.map((o: any) => o.id))
-    const visible = <T extends { order_id?: string }>(rows: T[] | null) =>
-      (rows || []).filter((r) => visibleOrderIds.has(r.order_id))
-
-    const acceptableRows = visible(acceptableRes.data as any[])
-    const proformaDoneIds = new Set((proformaRes.data || []).map((r: any) => r.order_id))
-    const DeliveryNoteDoneIds = new Set((DeliveryNoteRes.data || []).map((r: any) => r.order_id))
-    const checkInvDoneIds = new Set((checkInvRes.data || []).map((r: any) => r.order_id))
-    const indentRows = visible(indentRes.data as any[])
-    const repeatShortageOrderIds = new Set(visible(repeatShortageRes.data as any[]).map((r: any) => r.order_id))
-    const queueRows = visible(queueRes.data as any[])
-    const DeliveryNoteInvDoneIds = new Set((DeliveryNoteInvRes.data || []).map((r: any) => r.pre_invoice_queue_id))
-    const makeInvoiceRows = visible(makeInvoiceRes.data as any[])
-    const makeInvoiceDoneQueueIds = new Set((makeInvoiceRes.data || []).map((r: any) => r.pre_invoice_queue_id).filter(Boolean))
-    const calibrationDoneIds = new Set((calibrationRes.data || []).map((r: any) => r.make_invoice_id))
-    const packagingTransportRows = visible(packagingTransportRes.data as any[])
-    const packagingSubmittedIds = new Set(
-      (packagingTransportRes.data || []).filter((r: any) => r.status === "submitted").map((r: any) => r.make_invoice_id)
-    )
-    const confirmations = clientConfirmationRes.data || []
-    const clientConfirmationDonePtIds = new Set(confirmations.map((r: any) => r.packaging_transport_id))
-
-    const acceptableDoneIds = new Set((acceptableRes.data || []).map((r: any) => r.order_id))
-
-    const data: Record<string, number> = {
-      "order-acceptable": orders.filter((o: any) => !acceptableDoneIds.has(o.id)).length,
-      "proforma-invoice": acceptableRows.filter((r: any) => r.proforma_invoice_planned && !proformaDoneIds.has(r.order_id)).length,
-      "delivery-note": acceptableRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteDoneIds.has(r.order_id)).length,
-      "packing-list":
-        acceptableRows.filter((r: any) => r.check_inventory_planned && !checkInvDoneIds.has(r.order_id)).length +
-        repeatShortageOrderIds.size,
-      "indent-creation": indentRows.filter((r: any) => !r.indent_created_at).length,
-      "pre-invoice": queueRows.filter((r: any) => r.status === "pending").length,
-      "delivery-note-for-invoice": queueRows.filter((r: any) => r.debit_note_planned && !DeliveryNoteInvDoneIds.has(r.id)).length,
-      "make-invoice": queueRows.filter((r: any) => r.make_invoice_planned && !makeInvoiceDoneQueueIds.has(r.id)).length,
-      calibration: makeInvoiceRows.filter((r: any) => r.calibration_planned && !calibrationDoneIds.has(r.id)).length,
-      "packaging-transport": makeInvoiceRows.filter((r: any) => r.packaging_transport_planned && !packagingSubmittedIds.has(r.id)).length,
-      // Packaging and Dispatch is the only parent (the Bilty Upload stage in
-      // between was removed, Database/65).
-      "client-confirmation": packagingTransportRows.filter(
-        (r: any) => r.client_confirmation_planned && !clientConfirmationDonePtIds.has(r.id)
-      ).length,
-      "credit-note": (creditNotePendingRes.data || []).filter((r: any) => visibleLocation(r.order_location)).length,
-    }
+    const { data, error } = await supabase.rpc("otp_pending_counts", { p_location: location || null })
+    if (error) throw error
+    if (!data || typeof data !== "object") throw new Error("otp_pending_counts returned no data")
 
     return NextResponse.json({ success: true, data })
   } catch (err: any) {

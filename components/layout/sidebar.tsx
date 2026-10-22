@@ -36,7 +36,14 @@ import {
 let pendingCountsCache: Record<string, number> | null = null
 let pendingCountsCacheAt = 0
 let pendingCountsCacheKey = ""
-const PENDING_COUNTS_TTL_MS = 25_000
+const PENDING_COUNTS_TTL_MS = 45_000
+
+export function invalidateSidebarPendingCounts() {
+  pendingCountsCacheAt = 0
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("otp:invalidate-pending-counts"))
+  }
+}
 
 const menuItems = [
   {
@@ -126,10 +133,18 @@ const menuItems = [
   { href: "/settings", label: "Settings", icon: Settings, step: "settings" },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onMobileOpenChange?: (open: boolean) => void;
+}
+
+export function Sidebar({ mobileOpen, onMobileOpenChange }: SidebarProps = {}) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = typeof mobileOpen === "boolean";
+  const open = isControlled ? mobileOpen : internalOpen;
+  const setOpen = isControlled && onMobileOpenChange ? onMobileOpenChange : setInternalOpen;
   // Same rule as lib/access.ts: admins, and users with no location yet, see
   // every location's counts.
   const countsLocation =
@@ -139,24 +154,35 @@ export function Sidebar() {
   );
 
   useEffect(() => {
+    const fetchCounts = () => {
+      const query = countsLocation ? `?location=${encodeURIComponent(countsLocation)}` : "";
+      fetch(`/api/otp-supabase/pending-counts${query}`)
+        .then((res) => res.json())
+        .then((result) => {
+          if (result.success && result.data) {
+            pendingCountsCache = result.data;
+            pendingCountsCacheAt = Date.now();
+            pendingCountsCacheKey = countsLocation;
+            setPendingCounts(result.data);
+          }
+        })
+        .catch((err) => console.error("Error fetching sidebar pending counts:", err));
+    };
+
     const isFresh =
       pendingCountsCache &&
       pendingCountsCacheKey === countsLocation &&
       Date.now() - pendingCountsCacheAt < PENDING_COUNTS_TTL_MS;
-    if (isFresh) return; // cache already applied as initial state above — nothing to do
+    if (!isFresh) {
+      fetchCounts();
+    }
 
-    const query = countsLocation ? `?location=${encodeURIComponent(countsLocation)}` : "";
-    fetch(`/api/otp-supabase/pending-counts${query}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success && result.data) {
-          pendingCountsCache = result.data;
-          pendingCountsCacheAt = Date.now();
-          pendingCountsCacheKey = countsLocation;
-          setPendingCounts(result.data);
-        }
-      })
-      .catch((err) => console.error("Error fetching sidebar pending counts:", err));
+    const handleInvalidate = () => {
+      fetchCounts();
+    };
+
+    window.addEventListener("otp:invalidate-pending-counts", handleInvalidate);
+    return () => window.removeEventListener("otp:invalidate-pending-counts", handleInvalidate);
   }, [countsLocation]);
 
   const filteredMenuItems = menuItems.filter((item) => {
@@ -171,25 +197,22 @@ export function Sidebar() {
     );
   });
 
-  const SidebarContent = () => (
-    // <div className="flex flex-col h-full from-blue-50 to-purple-500 border-r border-gray-200">
-    <div className="flex flex-col h-full border-r border-gray-200">
-      <div className="p-6 border-b border-gray-200 bg-gradient-to-b from-blue-50 to-purple-50 ">
-        <h2 className="text-lg font-semibold text-purple-600">Order to Payment</h2>
-        <p className="text-sm text-gray-600">Divine Empire</p>
-        {/* <div className="text-red-900 mt-4 rounded-xl hover:bg-blue-700 hover:text-white p-1 cursor-pointer text-start">
-          <a
-            href="https://service-installation.vercel.app/"
-            className="font-bold"
-            target="_black"
-          >
-            Service Installation Here
-          </a>
-        </div> */}
+  // A plain element (not an inner component): defining a component inside render
+  // makes React remount the whole sidebar every render.
+  const sidebarContent = (
+    <div className="flex flex-col h-full border-r border-border bg-card">
+      <div className="flex h-14 shrink-0 items-center border-b border-border px-4 bg-card">
+        <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setOpen(false)}>
+          <img src="/divine-logo.svg" alt="Divine" className="h-8 w-auto shrink-0" />
+          <div className="leading-tight">
+            <p className="text-sm font-semibold text-foreground">Divine</p>
+            <p className="text-xs text-muted-foreground">Order to Payment</p>
+          </div>
+        </Link>
       </div>
 
-      <ScrollArea className="flex-1 px-3 bg-gradient-to-b from-blue-50 to-purple-50 ">
-        <div className="space-y-1 py-4">
+      <ScrollArea className="flex-1 px-2 py-2">
+        <nav aria-label="Main navigation" className="space-y-1">
           {filteredMenuItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
@@ -199,42 +222,49 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setOpen(false)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all hover:bg-gray-100 ${
+                aria-current={isActive ? "page" : undefined}
+                className={`relative flex h-9 items-center justify-between rounded-md px-3 text-sm transition-colors ${
                   isActive
-                    ? "bg-gradient-to-b from-blue-50 to-purple-100  text-blue-700 border-r-2 border-blue-700"
-                    : "text-gray-700"
+                    ? "bg-accent font-medium text-foreground before:absolute before:bottom-1.5 before:left-0 before:top-1.5 before:w-0.5 before:rounded-full before:bg-brand-lime"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                <span className="flex-1">{item.label}</span>
+                <span className="flex min-w-0 items-center gap-3">
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
+                  <span className="truncate">{item.label}</span>
+                </span>
                 {!!pendingCount && (
-                  <span className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-purple-600 text-white text-xs font-semibold">
+                  <span className="ml-2 shrink-0 rounded bg-primary/10 px-1.5 text-xs font-semibold tabular-nums text-brand-700">
                     {pendingCount}
                   </span>
                 )}
               </Link>
             );
           })}
-        </div>
+        </nav>
       </ScrollArea>
-      <div className="border-t border-gray-200 bg-gradient-to-br from-blue-50/70 via-purple-50/70 to-indigo-50/70">
-        {/* User Info */}
-        <div className="p-3 pb-4">
-          <div className="flex items-center gap-3 px-3 py-2 text-sm">
-            <div className="flex-1">
-              <p className="font-medium text-gray-900">{user?.fullName}</p>
-              <p className="text-xs text-gray-600">{user?.role}</p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            className="w-full justify-start gap-3 mt-2 text-white bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 transition-all duration-200"
-            onClick={logout}
+
+      <div className="shrink-0 border-t border-border p-3 bg-card">
+        <div className="flex items-center gap-2.5 px-1 py-1 text-sm mb-1.5">
+          <span
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary"
+            aria-hidden="true"
           >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </Button>
+            {(user?.fullName?.[0] || user?.username?.[0] || "U").toUpperCase()}
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate font-medium text-foreground text-sm">{user?.fullName || user?.username}</p>
+            <p className="text-xs text-muted-foreground capitalize">{user?.role}</p>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={logout}
+          className="flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          <span>Log out</span>
+        </button>
       </div>
     </div>
   );
@@ -242,23 +272,25 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop Sidebar */}
-      <div className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0">
-        <SidebarContent />
-      </div>
+      <aside aria-label="Sidebar" className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0">
+        {sidebarContent}
+      </aside>
 
       {/* Mobile Sidebar */}
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="md:hidden">
-            <Menu className="h-5 w-5" />
-          </Button>
-        </SheetTrigger>
+        {!isControlled && (
+          <SheetTrigger asChild>
+            <Button variant="ghost" size="icon" className="md:hidden">
+              <Menu className="h-5 w-5" />
+            </Button>
+          </SheetTrigger>
+        )}
         <SheetContent side="left" className="p-0 w-64" aria-describedby={undefined}>
           <VisuallyHidden>
             <SheetTitle>Navigation Menu</SheetTitle>
             <SheetDescription>OTP System Navigation Menu</SheetDescription>
           </VisuallyHidden>
-          <SidebarContent />
+          {sidebarContent}
         </SheetContent>
       </Sheet>
     </>

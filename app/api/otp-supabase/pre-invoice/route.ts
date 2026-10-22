@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { consumeWaveReservation, syncWaveReservation } from "@/lib/ims-reservation"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { chunkParams, chunkJson } from "@/lib/history-chunk"
+import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
@@ -82,16 +84,37 @@ function computeReleases(
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
-    const status = searchParams.get("status") === "history" ? "invoiced" : "pending"
+    const isHistory = searchParams.get("status") === "history"
+    const status = isHistory ? "invoiced" : "pending"
     const supabase = getSupabaseAdmin()
+    if (isHistory && searchParams.has("page")) {
+      // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
+      // CRM filter / access rules applied in SQL on otp_v_pre_invoice_history.
+      const p = parseHistoryParams(searchParams)
+      const { data, error, count } = await applyHistoryFilters(
+        supabase.from("otp_v_pre_invoice_history").select("*", { count: "exact" }),
+        p
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(p.offset, p.to)
+      if (error) throw error
+      return pageJson(data, count, p)
+    }
 
-    let { data, error } = await supabase
+    const { offset, to } = chunkParams(searchParams)
+    const selectOpts = isHistory ? { count: "exact" as const } : undefined
+
+    let q1 = supabase
       .from("otp_pre_invoice_queue")
       .select(
-        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)"
+        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)",
+        selectOpts
       )
       .eq("status", status)
       .order("created_at", { ascending: false })
+    if (isHistory) q1 = q1.order("id").range(offset, to)
+    let { data, error, count } = await q1
 
     // Database/55_otp_released_stock.sql not applied yet — PostgREST can't
     // resolve the embedded `released` relation and fails the WHOLE query.
@@ -99,14 +122,18 @@ export async function GET(request: Request) {
     // entire stage's Pending/History while that migration is pending.
     if (error && (error.code === "PGRST205" || /schema cache|could not find/i.test(error.message || ""))) {
       console.warn("otp_released_stock table not found yet — fetching pre-invoice without it:", error.message)
-      ;({ data, error } = await supabase
+      let q2 = supabase
         .from("otp_pre_invoice_queue")
-        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))")
+        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))", selectOpts)
         .eq("status", status)
-        .order("created_at", { ascending: false }))
+        .order("created_at", { ascending: false })
+      if (isHistory) q2 = q2.order("id").range(offset, to)
+      ;({ data, error, count } = await q2)
     }
 
     if (error) throw error
+
+    if (isHistory) return chunkJson(data, count, offset)
 
     return NextResponse.json({ success: true, data: data || [] })
   } catch (err: any) {

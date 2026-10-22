@@ -18,6 +18,7 @@ import { toast } from "@/components/ui/use-toast"
 import { TAT_STAGE_OPTIONS, minutesToDHM, dhmToMinutes, formatDHM } from "./tat-helpers"
 import { formatCategoryLabel } from "./dropdown-helpers"
 import { ORDER_LOCATIONS, ALL_LOCATIONS } from "@/lib/locations"
+import { StatusTabs, StatusBadge, useConfirmDialog } from "@/components/shared"
 
 interface User {
   id: string
@@ -67,6 +68,7 @@ const allSteps = [
 
 export default function SettingsPage() {
   const { user: currentUser } = useAuth()
+  const { askConfirm, confirmDialog } = useConfirmDialog()
 
   // Tab state
   const [activeTab, setActiveTab] = useState<"users" | "tat" | "dropdown">("users")
@@ -498,25 +500,33 @@ export default function SettingsPage() {
     setIsDropdownDialogOpen(true)
   }
 
-  const handleDeleteDropdownValue = async (option: DropdownOption) => {
-    if (!confirm(`Delete "${option.value}" from ${formatCategoryLabel(option.category)}?`)) return
+  const handleDeleteDropdownValue = (option: DropdownOption) => {
+    askConfirm(
+      {
+        title: "Delete Dropdown Value",
+        message: `Delete "${option.value}" from ${formatCategoryLabel(option.category)}?`,
+        confirmText: "Delete",
+        destructive: true,
+      },
+      async () => {
+        try {
+          const response = await fetch(`/api/otp-supabase/dropdowns?id=${encodeURIComponent(option.id)}`, {
+            method: "DELETE",
+          })
+          const result = await response.json()
 
-    try {
-      const response = await fetch(`/api/otp-supabase/dropdowns?id=${encodeURIComponent(option.id)}`, {
-        method: "DELETE",
-      })
-      const result = await response.json()
-
-      if (result.success) {
-        await fetchDropdownOptions()
-        toast({ title: "Value deleted", description: `"${option.value}" removed from ${formatCategoryLabel(option.category)}.` })
-      } else {
-        throw new Error(result.error || "Delete failed")
+          if (result.success) {
+            await fetchDropdownOptions()
+            toast({ title: "Value deleted", description: `"${option.value}" removed from ${formatCategoryLabel(option.category)}.` })
+          } else {
+            throw new Error(result.error || "Delete failed")
+          }
+        } catch (error: any) {
+          console.error("Error deleting dropdown value:", error)
+          toast({ title: "Error", description: error.message || "Failed to delete value.", variant: "destructive" })
+        }
       }
-    } catch (error: any) {
-      console.error("Error deleting dropdown value:", error)
-      toast({ title: "Error", description: error.message || "Failed to delete value.", variant: "destructive" })
-    }
+    )
   }
 
   const handleDropdownSave = async () => {
@@ -573,8 +583,8 @@ export default function SettingsPage() {
       <MainLayout>
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-900">Access Denied</h2>
-            <p className="text-gray-600">You don't have permission to access Settings.</p>
+            <h2 className="text-2xl font-bold text-foreground">Access Denied</h2>
+            <p className="text-muted-foreground">You don&apos;t have permission to access Settings.</p>
           </div>
         </div>
       </MainLayout>
@@ -583,54 +593,51 @@ export default function SettingsPage() {
 
   return (
     <MainLayout>
-      <div className="p-2">
+      <div className="p-3 md:p-6 space-y-4 max-w-[1920px] mx-auto min-h-[calc(100vh-4rem)] flex flex-col">
+        {/* Controls Card: Tabs, Actions */}
+        <div className="rounded-xl border border-border bg-card p-4 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <StatusTabs
+              tabs={[
+                { id: "users", label: "User Management", count: users.length },
+                { id: "tat", label: "TAT Management", count: stageTats.length },
+                { id: "dropdown", label: "Dropdowns", count: dropdownGroups.length },
+              ]}
+              activeTab={activeTab}
+              onChange={(v) => setActiveTab(v as "users" | "tat" | "dropdown")}
+              variant="segmented"
+            />
+
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <Button
+                onClick={handleRefresh}
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Refresh</span>
+              </Button>
+              {activeTab === "users" && (
+                <Button
+                  size="sm"
+                  onClick={handleAddUser}
+                  className="h-9 gap-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add User</span>
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "users" | "tat" | "dropdown")}>
-          <Card>
-            <CardHeader className="border-b py-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <TabsList>
-                  <TabsTrigger value="users" className="gap-2 font-medium">
-                    <UsersIcon className="h-4 w-4" />
-                    User Management
-                  </TabsTrigger>
-                  <TabsTrigger value="tat" className="gap-2 font-medium">
-                    <Clock className="h-4 w-4" />
-                    TAT Management
-                  </TabsTrigger>
-                  <TabsTrigger value="dropdown" className="gap-2 font-medium">
-                    <ListTree className="h-4 w-4" />
-                    Dropdown
-                  </TabsTrigger>
-                </TabsList>
-
-                {activeTab === "users" && (
-                  <div className="flex items-center gap-2">
-                    <Button onClick={handleRefresh} variant="outline" size="sm">
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh
-                    </Button>
-                    <Button size="sm" onClick={handleAddUser} className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white">
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add User
-                    </Button>
-                  </div>
-                )}
-
-                {activeTab === "dropdown" && (
-                  <div className="flex items-center gap-2">
-                    <Button onClick={handleRefresh} variant="outline" size="sm">
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </CardHeader>
-
+          <Card className="rounded-xl border border-border bg-card shadow-xs overflow-hidden">
             <CardContent className="p-0">
               {/* TAB 1: User Management */}
               <TabsContent value="users" className="mt-0">
-                <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50/50">
+                <div className="flex items-center justify-between px-4 py-3 border-b bg-secondary/50">
                   <p className="text-sm text-muted-foreground">Manage application accounts, credentials, and stage access permissions</p>
                   <Badge variant="outline" className="font-mono shrink-0">
                     {users.length} Active Users
@@ -638,13 +645,13 @@ export default function SettingsPage() {
                 </div>
                 {userLoading ? (
                   <div className="flex items-center justify-center h-48">
-                    <RefreshCw className="h-6 w-6 animate-spin text-indigo-600" />
+                    <RefreshCw className="h-6 w-6 animate-spin text-primary" />
                     <span className="ml-2 text-muted-foreground">Loading users...</span>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <Table>
-                      <TableHeader className="bg-slate-50 dark:bg-slate-900">
+                      <TableHeader className="bg-secondary">
                         <TableRow>
                           <TableHead className="w-[100px]">Actions</TableHead>
                           <TableHead className="w-[180px]">Full Name</TableHead>
@@ -657,19 +664,19 @@ export default function SettingsPage() {
                       </TableHeader>
                       <TableBody>
                         {users.map((user) => (
-                          <TableRow key={user.id} className="hover:bg-slate-50/70 transition-colors">
+                          <TableRow key={user.id} className="hover:bg-accent/60 transition-colors">
                             <TableCell>
                               <div className="flex gap-1">
-                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleEditUser(user)}>
-                                  <Edit className="h-4 w-4 text-slate-600 hover:text-indigo-600" />
+                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleEditUser(user)} aria-label={`Edit ${user.fullName}`}>
+                                  <Edit className="h-4 w-4 text-muted-foreground hover:text-primary" />
                                 </Button>
-                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-rose-600 hover:text-rose-700 hover:bg-rose-50" onClick={() => handleDeleteUser(user.id)}>
+                                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDeleteUser(user.id)} aria-label={`Delete ${user.fullName}`}>
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
                             </TableCell>
                             <TableCell>{user.fullName}</TableCell>
-                            <TableCell className="font-semibold text-slate-800 dark:text-slate-200">{user.username}</TableCell>
+                            <TableCell className="font-semibold text-foreground">{user.username}</TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1.5 font-mono text-sm">
                                 <span>
@@ -682,8 +689,9 @@ export default function SettingsPage() {
                                 <button
                                   type="button"
                                   onClick={() => togglePasswordVisibility(user.id)}
-                                  className="text-gray-400 hover:text-gray-600"
+                                  className="text-muted-foreground hover:text-foreground"
                                   tabIndex={-1}
+                                  aria-label={visiblePasswords.has(user.id) ? "Hide password" : "Show password"}
                                 >
                                   {visiblePasswords.has(user.id) ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                                 </button>
@@ -699,11 +707,11 @@ export default function SettingsPage() {
                             </TableCell>
                             <TableCell>
                               {user.role === "admin" || user.location === ALL_LOCATIONS ? (
-                                <span className="text-xs text-slate-500">All locations</span>
+                                <span className="text-xs text-muted-foreground">All locations</span>
                               ) : user.location ? (
                                 <Badge variant="outline" className="text-xs">{user.location}</Badge>
                               ) : (
-                                <Badge variant="outline" className="text-xs border-amber-400 text-amber-700">Not set</Badge>
+                                <Badge variant="outline" className="text-xs border-warning/40 bg-warning/15 text-warning-foreground">Not set</Badge>
                               )}
                             </TableCell>
                             <TableCell>
@@ -711,14 +719,14 @@ export default function SettingsPage() {
                                 {user.role === "admin" ||
                                 user.assignedSteps.includes("all") ||
                                 user.assignedSteps.length >= allSteps.length ? (
-                                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">
+                                  <Badge variant="outline" className="bg-success/10 text-success border-success/25 text-xs">
                                     All Steps (Full Access)
                                   </Badge>
                                 ) : user.assignedSteps.length === 0 ? (
                                   <span className="text-xs text-muted-foreground italic">No steps assigned</span>
                                 ) : (
                                   user.assignedSteps.map((step) => (
-                                    <Badge key={step} variant="outline" className="text-xs bg-slate-50 text-slate-700 border-slate-200">
+                                    <Badge key={step} variant="outline" className="text-xs bg-secondary text-foreground border-border">
                                       {allSteps.find((s) => s.id === step)?.label || step}
                                     </Badge>
                                   ))
@@ -742,20 +750,20 @@ export default function SettingsPage() {
 
               {/* TAB 2: TAT Management */}
               <TabsContent value="tat" className="mt-0">
-                <div className="flex items-center justify-between px-4 py-3 border-b bg-slate-50/50">
+                <div className="flex items-center justify-between px-4 py-3 border-b bg-secondary/50">
                   <p className="text-sm text-muted-foreground">
-                    Each stage's planned date = the previous stage's record creation time + its TAT duration below.
+                    Each stage&apos;s planned date = the previous stage&apos;s record creation time + its TAT duration below.
                   </p>
                 </div>
                 {tatLoading ? (
                   <div className="flex items-center justify-center h-48">
-                    <RefreshCw className="h-6 w-6 animate-spin text-indigo-600" />
+                    <RefreshCw className="h-6 w-6 animate-spin text-primary" />
                     <span className="ml-2 text-muted-foreground">Loading stage TATs...</span>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <Table>
-                      <TableHeader className="bg-slate-50 dark:bg-slate-900">
+                      <TableHeader className="bg-secondary">
                         <TableRow>
                           <TableHead className="w-[80px]">S No.</TableHead>
                           <TableHead className="w-[220px]">Stage Name</TableHead>
@@ -766,23 +774,23 @@ export default function SettingsPage() {
                       </TableHeader>
                       <TableBody>
                         {stageTats.map((tat, index) => (
-                          <TableRow key={tat.stage_key} className="hover:bg-slate-50/70 transition-colors">
+                          <TableRow key={tat.stage_key} className="hover:bg-accent/60 transition-colors">
                             <TableCell className="font-mono text-xs text-muted-foreground font-semibold">
                               {index + 1}
                             </TableCell>
                             <TableCell>
-                              <div className="font-semibold text-slate-900 dark:text-slate-100">{tat.stage_label}</div>
+                              <div className="font-semibold text-foreground">{tat.stage_label}</div>
                               <div className="text-xs font-mono text-muted-foreground">{tat.stage_key}</div>
                             </TableCell>
                             <TableCell>
-                              <div className="font-medium text-indigo-700 dark:text-indigo-400">{formatDHM(tat.tat_minutes)}</div>
+                              <div className="font-semibold text-foreground font-mono">{formatDHM(tat.tat_minutes)}</div>
                             </TableCell>
-                            <TableCell className="text-sm text-slate-600 dark:text-slate-300">
+                            <TableCell className="text-sm text-muted-foreground">
                               {tat.description || "—"}
                             </TableCell>
                             <TableCell className="text-right">
                               <Button size="sm" variant="outline" className="gap-1.5" onClick={() => handleEditTat(tat)}>
-                                <Edit className="h-3.5 w-3.5 text-indigo-600" />
+                                <Edit className="h-3.5 w-3.5 text-primary" />
                                 Edit
                               </Button>
                             </TableCell>
@@ -803,14 +811,14 @@ export default function SettingsPage() {
 
               {/* TAB 3: Dropdown */}
               <TabsContent value="dropdown" className="mt-0">
-                <div className="px-4 py-3 border-b bg-slate-50/50">
+                <div className="px-4 py-3 border-b bg-secondary/50">
                   <p className="text-sm text-muted-foreground">
-                    Add, edit, or delete values within an existing dropdown category. New categories aren't creatable from here.
+                    Add, edit, or delete values within an existing dropdown category. New categories aren&apos;t creatable from here.
                   </p>
                 </div>
                 {dropdownLoading ? (
                   <div className="flex items-center justify-center h-48">
-                    <RefreshCw className="h-6 w-6 animate-spin text-indigo-600" />
+                    <RefreshCw className="h-6 w-6 animate-spin text-primary" />
                     <span className="ml-2 text-muted-foreground">Loading dropdowns...</span>
                   </div>
                 ) : (
@@ -831,15 +839,16 @@ export default function SettingsPage() {
                             <Button
                               size="icon"
                               variant="outline"
-                              className="h-8 w-8 text-indigo-600 border-indigo-200 hover:bg-indigo-50 shrink-0"
+                              className="h-8 w-8 text-primary border-primary/20 hover:bg-primary/10 shrink-0"
                               onClick={() => handleAddDropdownValue(category)}
+                              aria-label={`Add option to ${formatCategoryLabel(category)}`}
                             >
                               <Plus className="h-4 w-4" />
                             </Button>
                           </CardHeader>
                           <CardContent className="p-3 space-y-2 flex-1">
                             <div className="relative">
-                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 h-3.5 w-3.5" />
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground h-3.5 w-3.5" />
                               <Input
                                 placeholder="Filter options..."
                                 value={dropdownCardFilters[category] || ""}
@@ -851,23 +860,25 @@ export default function SettingsPage() {
                               {filteredOptions.map((option) => (
                                 <div
                                   key={option.id}
-                                  className="group flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 text-sm"
+                                  className="group flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-accent text-sm"
                                 >
-                                  <span className="text-slate-800 dark:text-slate-200 truncate">{option.value}</span>
+                                  <span className="text-foreground truncate">{option.value}</span>
                                   <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                                     <Button
                                       size="icon"
                                       variant="ghost"
                                       className="h-6 w-6"
                                       onClick={() => handleEditDropdownValue(option)}
+                                      aria-label={`Edit ${option.value}`}
                                     >
-                                      <Edit className="h-3.5 w-3.5 text-slate-600 hover:text-indigo-600" />
+                                      <Edit className="h-3.5 w-3.5 text-muted-foreground hover:text-primary" />
                                     </Button>
                                     <Button
                                       size="icon"
                                       variant="ghost"
-                                      className="h-6 w-6 text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                                      className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
                                       onClick={() => handleDeleteDropdownValue(option)}
+                                      aria-label={`Delete ${option.value}`}
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </Button>
@@ -939,7 +950,8 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                       tabIndex={-1}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -963,7 +975,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <Label>Assigned Step Access</Label>
                   {userFormData.role === "admin" ? (
-                    <span className="flex items-center gap-1 text-xs text-indigo-600 font-medium">
+                    <span className="flex items-center gap-1 text-xs text-primary font-medium">
                       <Lock className="h-3 w-3" />
                       Auto-granted (Admin)
                     </span>
@@ -972,7 +984,7 @@ export default function SettingsPage() {
                       type="button"
                       variant="link"
                       size="sm"
-                      className="p-0 h-auto text-xs text-indigo-600"
+                      className="p-0 h-auto text-xs text-accent-foreground"
                       onClick={() => {
                         if (userFormData.assignedSteps.length === allSteps.length) {
                           setUserFormData((prev) => ({ ...prev, assignedSteps: [] }))
@@ -990,7 +1002,7 @@ export default function SettingsPage() {
                     Admins automatically get access to every page — the step list below is locked and informational only.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-slate-50/50">
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-secondary/50">
                   {allSteps.map((step) => (
                     <div key={step.id} className="flex items-center space-x-2">
                       <Checkbox
@@ -1013,7 +1025,7 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <Label>CRM Name Access</Label>
                   {userFormData.role === "admin" ? (
-                    <span className="flex items-center gap-1 text-xs text-indigo-600 font-medium">
+                    <span className="flex items-center gap-1 text-xs text-primary font-medium">
                       <Lock className="h-3 w-3" />
                       Auto-granted (Admin)
                     </span>
@@ -1022,7 +1034,7 @@ export default function SettingsPage() {
                       type="button"
                       variant="link"
                       size="sm"
-                      className="p-0 h-auto text-xs text-indigo-600"
+                      className="p-0 h-auto text-xs text-accent-foreground"
                       onClick={() => {
                         if (userFormData.assignedCrmNames.length === crmNameOptions.length) {
                           setUserFormData((prev) => ({ ...prev, assignedCrmNames: [] }))
@@ -1041,10 +1053,10 @@ export default function SettingsPage() {
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    A 'user' role only sees, in every stage, orders whose CRM Name is checked here.
+                    A &apos;user&apos; role only sees, in every stage, orders whose CRM Name is checked here.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-slate-50/50">
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-secondary/50">
                   {crmNameOptions.length === 0 ? (
                     <p className="text-xs text-muted-foreground col-span-2">No CRM names found in otp_orders yet.</p>
                   ) : (
@@ -1099,7 +1111,7 @@ export default function SettingsPage() {
                 <Button
                   onClick={handleUserSubmit}
                   disabled={!userFormData.username || !userFormData.fullName || (!editingUser && !userFormData.password)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground"
                 >
                   {editingUser ? "Update User" : "Create User"}
                 </Button>
@@ -1113,7 +1125,7 @@ export default function SettingsPage() {
           <DialogContent className="max-w-lg">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-indigo-600" />
+                <Clock className="h-5 w-5 text-primary" />
                 Edit Stage Turnaround Time (TAT)
               </DialogTitle>
               <DialogDescription>
@@ -1129,7 +1141,7 @@ export default function SettingsPage() {
                 </p>
               </div>
 
-              <div className="bg-slate-50 dark:bg-slate-900 p-3.5 rounded-lg border space-y-3">
+              <div className="bg-secondary p-3.5 rounded-lg border space-y-3">
                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Duration Breakdown</div>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
@@ -1168,7 +1180,7 @@ export default function SettingsPage() {
 
                 <div className="pt-2 border-t flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Total Duration:</span>
-                  <span className="font-semibold text-indigo-700 dark:text-indigo-400">{formatDHM(tatFormData.totalMinutes)}</span>
+                  <span className="font-semibold text-primary">{formatDHM(tatFormData.totalMinutes)}</span>
                 </div>
               </div>
 
@@ -1189,7 +1201,7 @@ export default function SettingsPage() {
                 <Button
                   onClick={handleTatSave}
                   disabled={savingTat}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
                 >
                   {savingTat ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Save TAT Changes
@@ -1204,7 +1216,7 @@ export default function SettingsPage() {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <ListTree className="h-5 w-5 text-indigo-600" />
+                <ListTree className="h-5 w-5 text-primary" />
                 {editingDropdownOption ? "Edit Dropdown Value" : "Add Dropdown Value"}
               </DialogTitle>
               <DialogDescription>
@@ -1234,7 +1246,7 @@ export default function SettingsPage() {
                 <Button
                   onClick={handleDropdownSave}
                   disabled={savingDropdown || !dropdownFormData.category || !dropdownFormData.value.trim()}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
                 >
                   {savingDropdown ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {editingDropdownOption ? "Save Changes" : "Add Value"}
@@ -1243,6 +1255,7 @@ export default function SettingsPage() {
             </div>
           </DialogContent>
         </Dialog>
+        {confirmDialog}
       </div>
     </MainLayout>
   )
