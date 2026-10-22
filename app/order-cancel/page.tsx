@@ -43,7 +43,6 @@ export default function OrderCancelPage() {
     page: logPage,
     pageSize: logPageSize,
     search: searchTerm,
-    currentUser,
   })
   const logs = history.rows
   const logsTotal = history.total

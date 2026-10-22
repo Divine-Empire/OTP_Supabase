@@ -12,13 +12,13 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Plus, Edit, Trash2, RefreshCw, Clock, Users as UsersIcon, Save, ShieldCheck, Eye, EyeOff, Lock, ListTree, Search } from "lucide-react"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { Plus, Edit, Trash2, RefreshCw, Clock, Save, Eye, EyeOff, Lock, ListTree, Search } from "lucide-react"
 import { toast } from "@/components/ui/use-toast"
 import { TAT_STAGE_OPTIONS, minutesToDHM, dhmToMinutes, formatDHM } from "./tat-helpers"
 import { formatCategoryLabel } from "./dropdown-helpers"
 import { ORDER_LOCATIONS, ALL_LOCATIONS } from "@/lib/locations"
-import { StatusTabs, StatusBadge, useConfirmDialog } from "@/components/shared"
+import { StatusTabs, useConfirmDialog } from "@/components/shared"
 
 interface User {
   id: string

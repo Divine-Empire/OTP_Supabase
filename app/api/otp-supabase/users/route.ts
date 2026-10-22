@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { SESSION_COOKIE, SESSION_MAX_AGE_SECONDS, createSessionToken, readSessionFromRequest } from "@/lib/session"
+import { requestAccess } from "@/lib/request-access"
+
+// proxy.ts leaves this route open (login/logout have no cookie yet), so every
+// other action is gated here: managing users needs an active admin, re-checked
+// against the DB on each call.
+async function denyUnlessAdmin(request: Request) {
+  const access = await requestAccess(request)
+  return access.isAdmin ? null : NextResponse.json({ success: false, error: "Admin access required" }, { status: 403 })
+}
 
 // Passwords (stored plain-text, shown to admins in Settings) are only
 // included when the caller holds a valid signed session cookie belonging to
@@ -11,6 +20,7 @@ export async function GET(request: Request) {
     const supabase = getSupabaseAdmin()
 
     const session = readSessionFromRequest(request)
+    if (!session) return NextResponse.json({ success: false, error: "Not signed in" }, { status: 401 })
     let isAdmin = false
     if (session) {
       const { data: caller } = await supabase
@@ -115,7 +125,9 @@ export async function POST(request: Request) {
     }
 
     // Create User Action (Settings page)
-    const { username, fullName, password, role, assignedSteps, assignedCrmNames, deployLink, warehousePageAccess, location, defaultGodown } = body
+    const denied = await denyUnlessAdmin(request)
+    if (denied) return denied
+    const { username, fullName, password, role, assignedSteps, assignedCrmNames, warehousePageAccess, location, defaultGodown } = body
     if (!username || !fullName) {
       return NextResponse.json(
         { success: false, error: "Username and Full Name are required" },
@@ -153,6 +165,8 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   try {
+    const denied = await denyUnlessAdmin(request)
+    if (denied) return denied
     const body = await request.json()
     const { id, username, fullName, password, role, assignedSteps, assignedCrmNames, warehousePageAccess, location, defaultGodown, isActive } = body
 
@@ -196,6 +210,8 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const denied = await denyUnlessAdmin(request)
+    if (denied) return denied
     const { searchParams } = new URL(request.url)
     const id = searchParams.get("id")
     const username = searchParams.get("username")

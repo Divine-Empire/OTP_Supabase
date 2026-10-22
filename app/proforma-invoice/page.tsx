@@ -4,13 +4,11 @@ import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 import {
@@ -121,7 +119,6 @@ export default function ProformaInvoicePage() {
     pageSize: historyPageSize,
     search: searchTerm,
     crmName: crmNameFilter,
-    currentUser,
   })
   const processedOrders = history.rows
   const processedTotal = history.total
@@ -195,7 +192,10 @@ export default function ProformaInvoicePage() {
     return filtered
   }, [orders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(orders, currentUser)), [orders, currentUser])
+  const crmNameOptions = useMemo(
+    () => Array.from(new Set([...crmNameOptionsFrom(filterByAccess(orders, currentUser)), ...(history.facets.crmName || [])])).sort(),
+    [orders, currentUser, history.facets]
+  )
 
   const filteredPaymentAgainstPiOrders = useMemo(() => {
     let filtered = filterByAccess(paymentAgainstPiOrders, currentUser)

@@ -13,6 +13,8 @@ export default defineConfig([
       // React-19 compiler rule. Flags the page-wide "fetch on mount in useEffect" pattern (setLoading/setState inside the effect).
       // Real but not a bug here; migrate to a data-fetching layer (Batch 2) rather than rewriting 18 call sites.
       "react-hooks/set-state-in-effect": "warn",
+      // `_`-prefixed names and rest-siblings (omit-by-destructuring) are intentionally unused.
+      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true }],
     },
   },
   globalIgnores([".next/**", "node_modules/**", "out/**", "next-env.d.ts", "components/ui/**"]),

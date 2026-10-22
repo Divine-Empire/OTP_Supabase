@@ -3,8 +3,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -12,14 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye, Plus, Trash2, Loader2 } from "lucide-react"
+import { RefreshCw, Eye, Plus, Trash2 } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapPreInvoiceRowToUI } from "@/lib/otp-utils"
@@ -166,7 +157,6 @@ export default function PreInvoicePage() {
     activeChips,
     handleClearAllFilters,
     filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -174,7 +164,6 @@ export default function PreInvoicePage() {
     columnPanel,
     activeColumns,
     activeRows,
-    historyPageRows,
     historyTotal,
     historyTotalPages,
     history,

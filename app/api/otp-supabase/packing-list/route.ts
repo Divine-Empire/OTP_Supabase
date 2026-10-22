@@ -3,7 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 import { subGodownFor } from "@/lib/locations"
 import { syncWaveReservation } from "@/lib/ims-reservation"
 import { chunkParams, chunkJson } from "@/lib/history-chunk"
-import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
+import { requestAccess } from "@/lib/request-access"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -376,7 +377,7 @@ export async function GET(request: Request) {
       // run in SQL on otp_v_check_inventory_history (Database/78), then the same per-page
       // shaping below. Legacy ?offset&limit chunk mode is kept for older callers.
       const paged = searchParams.has("page")
-      const hp = parseHistoryParams(searchParams, ["availability", "editable"])
+      const hp = parseHistoryParams(searchParams, ["availability", "editable"], await requestAccess(request))
       const { offset, to } = paged ? { offset: hp.offset, to: hp.to } : chunkParams(searchParams)
       const { data: inventoryRows, error, count } = (paged
         ? await applyHistoryFilters(supabase.from("otp_v_check_inventory_history").select("*", { count: "exact" }), hp, {
@@ -447,7 +448,7 @@ export async function GET(request: Request) {
       })
       await enrichOrderItemsWithCode(supabase, shaped)
 
-      return paged ? pageJson(shaped, count, hp) : chunkJson(shaped, count, offset)
+      return paged ? pageJson(shaped, count, hp, await crmFacet(supabase, "otp_v_check_inventory_history", hp)) : chunkJson(shaped, count, offset)
     }
 
     // Cross-order released-stock hints — one query, reused across all three

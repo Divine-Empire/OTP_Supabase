@@ -1,6 +1,6 @@
 // Server half of the History tab's paging + filtering (hooks/use-stage-list.ts is
 // the client half). A History route reads ?page=&pageSize=&search=&crmName=
-// &restricted=&crmNames=&location=&<extra filter> via parseHistoryParams, adds the
+// &<extra filter> via parseHistoryParams, adds the
 // filters with applyHistoryFilters and answers with pageJson.
 //
 // It queries a flat `otp_v_<stage>_history` view (Database/74+) rather than a table
@@ -10,6 +10,8 @@
 // concat of the key searchable columns), `crm_name`, `order_location` and any
 // stage-specific filter column.
 import { NextResponse } from "next/server"
+import type { RequestAccess } from "@/lib/request-access"
+import { fetchAllRows } from "@/lib/fetch-all"
 
 export const MAX_PAGE_SIZE = 200
 
@@ -20,7 +22,7 @@ export interface HistoryParams {
   to: number
   search: string
   crmName: string // "" = no filter
-  restricted: boolean // role=user: apply the access rules below
+  restricted: boolean // non-admin: apply the access rules below (decided server-side, see lib/request-access.ts)
   crmNames: string[] // restricted users: CRMs they may see (rows with no CRM are always visible)
   location: string // restricted users with a location set; "" = no location filter
   extra: Record<string, string>
@@ -33,7 +35,9 @@ export interface HistoryFilterSpec {
   skipCrmAccess?: boolean
 }
 
-export function parseHistoryParams(sp: URLSearchParams, extraKeys: string[] = []): HistoryParams {
+// `access` comes from requestAccess(request) — the CRM / location limits are never read
+// from the query string, so a client cannot widen what it is allowed to see.
+export function parseHistoryParams(sp: URLSearchParams, extraKeys: string[], access: RequestAccess): HistoryParams {
   const pageSize = Math.min(Math.max(Number(sp.get("pageSize")) || 50, 1), MAX_PAGE_SIZE)
   const page = Math.max(Number(sp.get("page")) || 1, 1)
   const offset = (page - 1) * pageSize
@@ -50,9 +54,9 @@ export function parseHistoryParams(sp: URLSearchParams, extraKeys: string[] = []
     to: offset + pageSize - 1,
     search: (sp.get("search") || "").trim(),
     crmName: crm && crm !== "all" ? crm : "",
-    restricted: sp.get("restricted") === "1",
-    crmNames: (sp.get("crmNames") || "").split("|").filter(Boolean),
-    location: sp.get("location") || "",
+    restricted: access.restricted,
+    crmNames: access.crmNames,
+    location: access.location,
     extra,
   }
 }
@@ -94,4 +98,22 @@ export function pageJson(data: any[] | null, count: number | null, p: HistoryPar
   const rows = data || []
   const total = count ?? p.offset + rows.length
   return NextResponse.json({ success: true, data: rows, total, page: p.page, pageSize: p.pageSize, ...extra })
+}
+
+// CRM dropdown options for the History tab: every CRM the caller may see across the
+// WHOLE History (access rules only — not narrowed by the current search / CRM filter, or
+// the dropdown would collapse to the one chosen value). Sent as facets.crmName on page 1;
+// the client keeps it for later pages. Without it the dropdown only knew the CRMs of the
+// Pending rows already loaded.
+export async function crmFacet(supabase: any, view: string, p: HistoryParams, spec: HistoryFilterSpec = {}) {
+  if (p.page !== 1) return {}
+  const base: HistoryParams = { ...p, crmName: "", search: "", extra: {} }
+  const rows = await fetchAllRows((from, to) =>
+    applyHistoryFilters(supabase.from(view).select("crm_name").not("crm_name", "is", null), base, spec)
+      .order("crm_name")
+      .order("id")
+      .range(from, to)
+  )
+  const crmName = Array.from(new Set(rows.map((r: any) => r.crm_name).filter(Boolean))).sort() as string[]
+  return { facets: { crmName } }
 }

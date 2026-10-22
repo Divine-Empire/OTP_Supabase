@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { useServerHistory } from "@/hooks/use-server-history"
 
@@ -105,7 +105,6 @@ export function useStageList<T extends Record<string, any>>({
     search: searchTerm,
     crmName: crmNameFilter,
     extra: extraValues,
-    currentUser,
   })
   const serverRows = sh.rows
   const serverTotal = sh.total
@@ -113,9 +112,12 @@ export function useStageList<T extends Record<string, any>>({
   const reloadHistory = sh.reload
   const historyRows = serverHistory ? serverRows : clientHistoryRows
 
-  // Pending rows the current user may see; CRM options come from these.
+  // CRM options: CRMs of the Pending rows the user may see, plus every CRM in the whole History (server facet).
   const visiblePending = useMemo(() => filterByAccess(pendingRows, currentUser), [pendingRows, currentUser])
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(visiblePending), [visiblePending])
+  const crmNameOptions = useMemo(
+    () => Array.from(new Set([...crmNameOptionsFrom(visiblePending), ...(facets.crmName || [])])).sort(),
+    [visiblePending, facets]
+  )
 
   // Options for an extra filter: every distinct value across BOTH tabs' raw rows.
   const extraOptions = useMemo(() => {

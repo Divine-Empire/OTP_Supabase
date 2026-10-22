@@ -28,7 +28,7 @@
 // added there at all) still has no category to find and the call will
 // correctly fail just for that item's batch — that's a real data gap on
 // PFMS's side, not something this lookup can paper over.
-async function resolveItemCategories(baseUrl: string, itemNames: string[]): Promise<Map<string, string>> {
+async function resolveItemCategories(baseUrl: string, _itemNames: string[]): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   try {
     const res = await fetch(`${baseUrl}/api/dropdowns`, { signal: AbortSignal.timeout(8000) })

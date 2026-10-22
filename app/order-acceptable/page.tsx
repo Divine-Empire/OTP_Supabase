@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -12,7 +11,7 @@ import { ORDER_LOCATIONS } from "@/lib/locations"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
-import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 
@@ -77,8 +76,6 @@ export default function OrderAcceptablePage() {
   const [checkedItems, setCheckedItems] = useState<any[]>([])
   const [remarks, setRemarks] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [viewDialogOpen, setViewDialogOpen] = useState(false)
-  const [viewOrder, setViewOrder] = useState<any>(null)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
@@ -98,7 +95,6 @@ export default function OrderAcceptablePage() {
   )
   const [historyCreFilter, setHistoryCreFilter] = useState("all")
   const [creName, setCreName] = useState("")
-  const [creFilter, setCreFilter] = useState("all")
   const { user: currentUser } = useAuth()
 
   // History: one server page per request (search / CRM / access rules run in SQL).
@@ -110,7 +106,6 @@ export default function OrderAcceptablePage() {
     pageSize: historyPageSize,
     search: searchTerm,
     crmName: historyCreFilter,
-    currentUser,
   })
   const processedOrders = history.rows
   const processedTotal = history.total
@@ -172,16 +167,16 @@ export default function OrderAcceptablePage() {
   // Filter orders based on status
   const pendingOrders = filteredOrders
 
+  // Pending CRMs plus every CRM in the whole History (server facet).
   const creOptions = useMemo(() => {
-    const options = new Set<string>()
+    const options = new Set<string>(history.facets.crmName || [])
     filterByAccess(orders, currentUser).forEach((order) => {
       if (order.crmName) options.add(order.crmName)
     })
-    return Array.from(options)
-  }, [orders, currentUser])
+    return Array.from(options).sort()
+  }, [orders, currentUser, history.facets])
 
   // Already filtered and paged by the server.
-  const filteredProcessedOrders = processedOrders
 
   const handleProcessedTabClick = () => {
     setHistoryPage(1)
@@ -390,11 +385,6 @@ export default function OrderAcceptablePage() {
       default:
         return value || ""
     }
-  }
-
-  const handleView = (order: any) => {
-    setViewOrder(order)
-    setViewDialogOpen(true)
   }
 
   const handleViewItemList = (order: any) => {
@@ -684,62 +674,6 @@ export default function OrderAcceptablePage() {
                 </Button>
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Dialog */}
-        <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Order Details</DialogTitle>
-              <DialogDescription>View order information and processing details</DialogDescription>
-            </DialogHeader>
-            {viewOrder && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Order No.</Label>
-                    <p className="text-sm">{viewOrder.id}</p>
-                  </div>
-                  <div>
-                    <Label>Company Name</Label>
-                    <p className="text-sm">{viewOrder.companyName}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Contact Person</Label>
-                    <p className="text-sm">{viewOrder.contactPerson}</p>
-                  </div>
-                  <div>
-                    <Label>Contact Number</Label>
-                    <p className="text-sm">{viewOrder.contactNumber}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>PO Number</Label>
-                    <p className="text-sm">{viewOrder.poNumber}</p>
-                  </div>
-                  <div>
-                    <Label>Payment Mode</Label>
-                    <p className="text-sm">{viewOrder.paymentMode}</p>
-                  </div>
-                </div>
-                {viewOrder.acceptanceData && (
-                  <div>
-                    <Label>Acceptance Status</Label>
-                    <p className="text-sm">{viewOrder.acceptanceData.isAcceptable}</p>
-                    {viewOrder.acceptanceData.remarks && (
-                      <div className="mt-2">
-                        <Label>Remarks</Label>
-                        <p className="text-sm">{viewOrder.acceptanceData.remarks}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </DialogContent>
         </Dialog>
         {/* Item List Dialog */}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapPackagingTransportPendingRowToUI, mapPackagingTransportHistoryRowToUI } from "@/lib/otp-utils"
@@ -153,8 +153,6 @@ export default function PackagingTransportPage() {
     crmNameOptions,
     activeChips,
     handleClearAllFilters,
-    filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -162,7 +160,6 @@ export default function PackagingTransportPage() {
     columnPanel,
     activeColumns,
     activeRows,
-    historyPageRows,
     historyTotal,
     historyTotalPages,
     history,
@@ -178,7 +175,6 @@ export default function PackagingTransportPage() {
   // History is fetched a page at a time by the hook; these keep the page's older names.
   const processedOrders = history.rows
   const processedLoading = history.loading
-  const loadProcessedOrders = history.reload
   const fetchProcessedOrders = history.reload
 
   const fetchOrders = async () => {
@@ -215,10 +211,6 @@ export default function PackagingTransportPage() {
       })
       .catch((err) => console.error("Error fetching transport mode options:", err))
   }, [])
-
-  const handleProcessedTabClick = async () => {
-    await fetchProcessedOrders()
-  }
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)

@@ -55,6 +55,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkAuth()
   }, [])
 
+  // The API answers 401 when the signed session cookie is missing or expired
+  // (e.g. a session from before server-side auth, or after 30 days). The saved
+  // localStorage user would otherwise keep showing a logged-in UI whose every
+  // request fails, so drop it and go to the login page.
+  useEffect(() => {
+    const originalFetch = window.fetch
+    window.fetch = async (...args) => {
+      const res = await originalFetch(...args)
+      const url = typeof args[0] === "string" ? args[0] : args[0] instanceof URL ? args[0].pathname : (args[0] as Request).url
+      if (res.status === 401 && url.includes("/api/otp-supabase/") && !url.includes("/api/otp-supabase/users")) {
+        localStorage.removeItem("otp-user")
+        localStorage.removeItem("otp-authenticated")
+        setUser(null)
+        setIsAuthenticated(false)
+        router.push("/login")
+      }
+      return res
+    }
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [router])
+
   const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
       setIsLoading(true)

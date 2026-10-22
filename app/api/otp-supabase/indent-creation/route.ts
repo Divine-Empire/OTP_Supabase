@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
+import { requestAccess } from "@/lib/request-access"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { tryCreatePfmsIndent } from "@/lib/pfms"
 import { chunkParams, chunkJson } from "@/lib/history-chunk"
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
     if (status === "history" && searchParams.has("page")) {
       // Server-paged History (hooks/use-server-history.ts): one page per request, search /
       // CRM filter / access rules applied in SQL on otp_v_indent_creation_history.
-      const p = parseHistoryParams(searchParams)
+      const p = parseHistoryParams(searchParams, [], await requestAccess(request))
       const { data, error, count } = await applyHistoryFilters(
         supabase.from("otp_v_indent_creation_history").select("*", { count: "exact" }),
         p
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
         .order("id")
         .range(p.offset, p.to)
       if (error) throw error
-      return pageJson(data, count, p)
+      return pageJson(data, count, p, await crmFacet(supabase, "otp_v_indent_creation_history", p))
     }
 
     if (status === "history") {

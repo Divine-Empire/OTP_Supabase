@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { chunkParams, chunkJson } from "@/lib/history-chunk"
-import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
+import { requestAccess } from "@/lib/request-access"
 
 // Stage — Calibration Certificate.
 //
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
     if (status === "history" && searchParams.has("page")) {
       // Server-paged History (hooks/use-stage-list.ts): one page per request,
       // search / CRM / calibration-type filters and access rules applied in SQL.
-      const p = parseHistoryParams(searchParams, ["calibrationType"])
+      const p = parseHistoryParams(searchParams, ["calibrationType"], await requestAccess(request))
       const query = applyHistoryFilters(
         supabase.from("otp_v_calibration_history").select("*", { count: "exact" }),
         p,
@@ -41,11 +42,11 @@ export async function GET(request: Request) {
         supabase.from("otp_pre_invoice_queue").select("calibration_type").not("calibration_type", "is", null).order("id").range(from, to)
       )
       const calibrationType = Array.from(new Set(types.map((r: any) => r.calibration_type).filter(Boolean))).sort()
-      return pageJson(data, count, p, { facets: { calibrationType } })
+      return pageJson(data, count, p, { facets: { calibrationType, ...(await crmFacet(supabase, "otp_v_calibration_history", p)).facets } })
     }
 
     if (status === "history") {
-      const { limit, offset, to } = chunkParams(searchParams)
+      const { offset, to } = chunkParams(searchParams)
       const { data, error, count } = await supabase
         .from("otp_calibration_certificate")
         .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, queue:otp_pre_invoice_queue(calibration_type))", { count: "exact" })

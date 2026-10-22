@@ -3,7 +3,6 @@
 import { Fragment, useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -18,7 +17,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
-import { Trash2, RefreshCw, Search, Eye, ScanLine, ArrowLeftRight, Bell, Loader2 } from "lucide-react"
+import { Trash2, RefreshCw, Eye, ScanLine, ArrowLeftRight, Bell } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
@@ -26,7 +25,7 @@ import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
-import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable } from "@/components/shared"
 
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
 // Purchase-FMS-Supabase's serial format is "SN-<vendorCode>/<encodedDate>/<seq>"
@@ -279,13 +278,11 @@ export default function CheckInventoryPage() {
   }, [manualSearchQuery])
 
   const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
-  const [viewDialogOpen, setViewDialogOpen] = useState(false)
-  const [viewOrder, setViewOrder] = useState<any>(null)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [currentTab, setCurrentTab] = useState("pending")
-  const [selectedColumn, setSelectedColumn] = useState("all")
+  const [selectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
   // History: show only waves not yet processed downstream (still editable)
   const [onlyEditable, setOnlyEditable] = useState(false)
@@ -322,7 +319,6 @@ export default function CheckInventoryPage() {
     search: searchTerm,
     crmName: crmNameFilter,
     extra: { availability: availabilityFilter, editable: onlyEditable ? "true" : "all" },
-    currentUser,
   })
   const processedOrders = history.rows
   const processedTotal = history.total
@@ -414,14 +410,13 @@ export default function CheckInventoryPage() {
   const pendingOrders = filteredOrders;
 
   const crmNameOptions = useMemo(
-    () => crmNameOptionsFrom(filterByAccess(orders, currentUser)),
-    [orders, currentUser]
+    () => Array.from(new Set([...crmNameOptionsFrom(filterByAccess(orders, currentUser)), ...(history.facets.crmName || [])])).sort(),
+    [orders, currentUser, history.facets]
   )
 
   // Filter processed orders based on search term
   // Update the filteredProcessedOrders useMemo
   // Already filtered and paged by the server.
-  const filteredProcessedOrders = processedOrders
 
   // History is server-paged (hooks/use-server-history.ts): this just asks for a refetch.
   const handleProcessedTabClick = () => {
@@ -1085,11 +1080,6 @@ export default function CheckInventoryPage() {
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  const handleView = (order: any) => {
-    setViewOrder(order)
-    setViewDialogOpen(true)
   }
 
   const handleViewItemList = (order: any) => {
@@ -1933,72 +1923,6 @@ export default function CheckInventoryPage() {
                 </>
               )}
             </div>
-          </DialogContent>
-        </Dialog>
-
-        {/* View Dialog */}
-        <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Inventory Check Details</DialogTitle>
-              <DialogDescription>View inventory check information and results</DialogDescription>
-            </DialogHeader>
-            {viewOrder && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Order No.</Label>
-                    <p className="text-sm">{viewOrder.orderNo || viewOrder.id}</p>
-                  </div>
-                  <div>
-                    <Label>Company Name</Label>
-                    <p className="text-sm">{viewOrder.companyName}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Contact Person</Label>
-                    <p className="text-sm">{viewOrder.contactPerson}</p>
-                  </div>
-                  <div>
-                    <Label>Contact Number</Label>
-                    <p className="text-sm">{viewOrder.contactNumber}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>PO Number</Label>
-                    <p className="text-sm">{viewOrder.poNumber}</p>
-                  </div>
-                  <div>
-                    <Label>Payment Mode</Label>
-                    <p className="text-sm">{viewOrder.paymentMode}</p>
-                  </div>
-                </div>
-                {(viewOrder.availabilityStatus || viewOrder.inventoryStatus) && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label>Availability Status</Label>
-                      <p className="text-sm">{viewOrder.availabilityStatus || viewOrder.inventoryStatus}</p>
-                    </div>
-                    <div>
-                      <Label>Remarks</Label>
-                      <p className="text-sm">{viewOrder.inventoryRemarks || "N/A"}</p>
-                    </div>
-                  </div>
-                )}
-                {(viewOrder.processedDate || viewOrder.timestamp) && (
-                  <div>
-                    <Label>Processed Date</Label>
-                    <p className="text-sm">
-                      {viewOrder.processedDate
-                        ? new Date(viewOrder.processedDate).toLocaleDateString()
-                        : viewOrder.timestamp}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
           </DialogContent>
         </Dialog>
 

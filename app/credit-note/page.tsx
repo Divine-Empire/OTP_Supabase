@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -9,12 +9,12 @@ import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye, Trash2, Loader2 } from "lucide-react"
+import { RefreshCw, Eye, Trash2 } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapCreditNoteRowToUI } from "@/lib/otp-utils"
 import { MobileRecordCard } from "@/components/mobile-record-card"
-import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
+import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable } from "@/components/shared"
 import { toast } from "sonner"
 
 // Ledger palette — deliberately distinct from the rest of the app (the
@@ -69,8 +69,6 @@ export default function CreditNotePage() {
     crmNameOptions,
     activeChips,
     handleClearAllFilters,
-    filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -78,7 +76,6 @@ export default function CreditNotePage() {
     columnPanel,
     activeColumns,
     activeRows,
-    historyPageRows,
     historyTotal,
     historyTotalPages,
     history,

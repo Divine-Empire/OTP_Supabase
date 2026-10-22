@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapDeliveryNotePendingRowToUI, mapDeliveryNoteHistoryRowToUI } from "@/lib/otp-utils"
@@ -93,7 +93,6 @@ export default function DeliveryNotePage() {
     activeChips,
     handleClearAllFilters,
     filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -146,10 +145,6 @@ export default function DeliveryNotePage() {
   useEffect(() => {
     fetchOrders()
   }, [])
-
-  const handleProcessedTabClick = async () => {
-    await fetchProcessedOrders()
-  }
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)

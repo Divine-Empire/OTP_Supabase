@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { requestAccess, scopeLocation } from "@/lib/request-access"
 
 // Sidebar-only pending counts, keyed by the sidebar's own kebab-case `step`
 // values so the component can look counts up with zero translation. Runs on
@@ -13,12 +14,13 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 // made every count wrong past that. There is deliberately no fallback to
 // that code: if the function is missing this must fail loudly.
 //
-// ?location=<label> scopes every count to orders at that location (plus
-// orders with no location yet), matching lib/access.ts's canSeeLocation
-// rule. Omitted for admins and for users with no location assigned.
+// Counts are scoped to orders at the caller's location (plus orders with no
+// location yet), matching lib/access.ts's canSeeLocation. The location comes
+// from the session, not the query: a restricted user cannot ask for another
+// one; an admin may narrow with ?location=<label>.
 export async function GET(request: Request) {
   try {
-    const location = new URL(request.url).searchParams.get("location")
+    const location = scopeLocation(await requestAccess(request), new URL(request.url).searchParams.get("location"))
     const supabase = getSupabaseAdmin()
 
     const { data, error } = await supabase.rpc("otp_pending_counts", { p_location: location || null })

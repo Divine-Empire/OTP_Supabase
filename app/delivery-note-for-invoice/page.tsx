@@ -1,25 +1,14 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapDeliveryNoteForInvoicePendingRowToUI, mapDeliveryNoteForInvoiceHistoryRowToUI } from "@/lib/otp-utils"
@@ -78,7 +67,6 @@ export default function DeliveryNoteForInvoicePage() {
     activeChips,
     handleClearAllFilters,
     filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -97,7 +85,6 @@ export default function DeliveryNoteForInvoicePage() {
     currentUser,
   })
   // History is fetched a page at a time by the hook; these keep the page's older names.
-  const processedOrders = history.rows
   const processedLoading = history.loading
   const loadProcessedOrders = history.reload
 

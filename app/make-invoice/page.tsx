@@ -3,8 +3,6 @@
 import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -12,14 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu"
-import { RefreshCw, Search, Settings, Eye, Banknote, ChevronLeft, Loader2 } from "lucide-react"
+import { RefreshCw, Search, Eye, Banknote, ChevronLeft } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { filterByAccess } from "@/lib/access"
 import { useAuth } from "@/components/auth-provider"
@@ -124,7 +115,6 @@ export default function MakeInvoicePage() {
     activeChips,
     handleClearAllFilters,
     filteredPendingRows: filteredOrders,
-    filteredHistoryRows: filteredProcessedOrders,
     historyPage,
     setHistoryPage,
     historyPageSize,
@@ -132,7 +122,6 @@ export default function MakeInvoicePage() {
     columnPanel,
     activeColumns,
     activeRows,
-    historyPageRows,
     historyTotal,
     historyTotalPages,
     history,
@@ -147,7 +136,6 @@ export default function MakeInvoicePage() {
   // History is fetched a page at a time by the hook; these keep the page's older names.
   const processedOrders = history.rows
   const processedLoading = history.loading
-  const loadProcessedOrders = history.reload
   const fetchProcessedOrders = history.reload
 
   // Credit Note — invoice-picker modal launched from this page's header
@@ -263,10 +251,6 @@ export default function MakeInvoicePage() {
   useEffect(() => {
     fetchOrders()
   }, [])
-
-  const handleProcessedTabClick = async () => {
-    await fetchProcessedOrders()
-  }
 
   const handleProcess = (order: any) => {
     setSelectedOrder(order)

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { requestAccess } from "@/lib/request-access"
 import { releaseWaveReservations } from "@/lib/ims-reservation"
 import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
@@ -46,7 +47,7 @@ export async function GET(request: Request) {
     if (!orderNo && searchParams.has("page")) {
       // Server-paged History (hooks/use-server-history.ts): one page per request, search /
       // CRM filter / access rules applied in SQL on otp_v_order_cancel_history.
-      const p = parseHistoryParams(searchParams)
+      const p = parseHistoryParams(searchParams, [], await requestAccess(request))
       const { data, error, count } = await applyHistoryFilters(
         supabase.from("otp_v_order_cancel_history").select("*", { count: "exact" }),
         p, { skipCrmAccess: true }

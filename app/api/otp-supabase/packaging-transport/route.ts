@@ -3,7 +3,8 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 import { chunkParams, chunkJson } from "@/lib/history-chunk"
-import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
+import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
+import { requestAccess } from "@/lib/request-access"
 import {
   getSectionForMode,
   isBiltyRequired,
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
     if (status === "history" && searchParams.has("page")) {
       // Server-paged History (hooks/use-stage-list.ts): one page per request, search /
       // CRM filter / access rules applied in SQL on otp_v_packaging_transport_history.
-      const p = parseHistoryParams(searchParams)
+      const p = parseHistoryParams(searchParams, [], await requestAccess(request))
       const { data, error, count } = await applyHistoryFilters(
         supabase.from("otp_v_packaging_transport_history").select("*", { count: "exact" }),
         p
@@ -63,11 +64,11 @@ export async function GET(request: Request) {
         .order("id")
         .range(p.offset, p.to)
       if (error) throw error
-      return pageJson(data, count, p)
+      return pageJson(data, count, p, await crmFacet(supabase, "otp_v_packaging_transport_history", p))
     }
 
     if (status === "history") {
-      const { limit, offset, to } = chunkParams(searchParams)
+      const { offset, to } = chunkParams(searchParams)
       const { data, error, count } = await supabase
         .from("otp_packaging_transport")
         .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)", { count: "exact" })

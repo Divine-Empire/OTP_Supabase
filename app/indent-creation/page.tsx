@@ -4,14 +4,12 @@ import { useState, useEffect, useMemo } from "react"
 import { MainLayout } from "@/components/layout/main-layout"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye, Loader2 } from "lucide-react"
+import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
 import { toast } from "sonner"
 import { useAuth } from "@/components/auth-provider"
@@ -117,7 +115,6 @@ export default function IndentCreationPage() {
     pageSize: historyPageSize,
     search: searchTerm,
     crmName: crmNameFilter,
-    currentUser,
   })
   const historyOrders = history.rows
   const historyTotal = history.total
@@ -182,7 +179,10 @@ export default function IndentCreationPage() {
     return filtered
   }, [pendingOrders, searchTerm, crmNameFilter, currentUser])
 
-  const crmNameOptions = useMemo(() => crmNameOptionsFrom(filterByAccess(pendingOrders, currentUser)), [pendingOrders, currentUser])
+  const crmNameOptions = useMemo(
+    () => Array.from(new Set([...crmNameOptionsFrom(filterByAccess(pendingOrders, currentUser)), ...(history.facets.crmName || [])])).sort(),
+    [pendingOrders, currentUser, history.facets]
+  )
 
   const filteredMaterialReceivedOrders = useMemo(() => {
     let filtered = filterByAccess(materialReceivedOrders, currentUser)
