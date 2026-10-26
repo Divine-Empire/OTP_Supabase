@@ -2,9 +2,8 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { subGodownFor } from "@/lib/locations"
 import { syncWaveReservation } from "@/lib/ims-reservation"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 
 // otp_orders.items only carries {item_name, quantity} — it was populated
 // straight from lto_enquiry_items/lto_lead_items, neither of which track an
@@ -370,28 +369,22 @@ export async function GET(request: Request) {
     const supabase = getSupabaseAdmin()
 
     if (status === "history") {
-      // One chunk per request (see lib/history-chunk.ts): all the per-chunk
-      // lookups below (acceptance, reconciliation, wave links) are keyed by
-      // this chunk's own rows, so they stay small however large History grows.
-      // Server-paged mode (?page=): search / CRM / availability / only-editable / access rules
-      // run in SQL on otp_v_check_inventory_history (Database/78), then the same per-page
-      // shaping below. Legacy ?offset&limit chunk mode is kept for older callers.
-      const paged = searchParams.has("page")
+      // History is server-paged only (?page=): search / CRM / availability / only-editable /
+      // access rules run in SQL on otp_v_check_inventory_history (Database/78), then the
+      // per-page lookups below (acceptance, reconciliation, wave links) are keyed by this
+      // page's own rows, so they stay small however large History grows.
+      if (!searchParams.has("page")) {
+        return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
+      }
       const hp = parseHistoryParams(searchParams, ["availability", "editable"], await requestAccess(request))
-      const { offset, to } = paged ? { offset: hp.offset, to: hp.to } : chunkParams(searchParams)
-      const { data: inventoryRows, error, count } = (paged
-        ? await applyHistoryFilters(supabase.from("otp_v_check_inventory_history").select("*", { count: "exact" }), hp, {
-            extraEq: { availability: "availability_status", editable: "is_editable" },
-          })
-            .order("created_at", { ascending: false })
-            .order("id")
-            .range(offset, to)
-        : await supabase
-            .from("otp_check_inventory")
-            .select("*, order:otp_orders(*)", { count: "exact" })
-            .order("created_at", { ascending: false })
-            .order("id")
-            .range(offset, to)) as { data: any[] | null; error: { message: string } | null; count: number | null }
+      const { data: inventoryRows, error, count } = (await applyHistoryFilters(
+        supabase.from("otp_v_check_inventory_history").select("*", { count: "exact" }),
+        hp,
+        { extraEq: { availability: "availability_status", editable: "is_editable" } }
+      )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(hp.offset, hp.to)) as { data: any[] | null; error: { message: string } | null; count: number | null }
 
       if (error) throw error
 
@@ -448,7 +441,7 @@ export async function GET(request: Request) {
       })
       await enrichOrderItemsWithCode(supabase, shaped)
 
-      return paged ? pageJson(shaped, count, hp, await crmFacet(supabase, "otp_v_check_inventory_history", hp)) : chunkJson(shaped, count, offset)
+      return pageJson(shaped, count, hp, await crmFacet(supabase, "otp_v_check_inventory_history", hp))
     }
 
     // Cross-order released-stock hints — one query, reused across all three
@@ -610,7 +603,7 @@ export async function GET(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, data: shaped })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(shaped, await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/packing-list exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -637,12 +630,12 @@ interface AccessoryPayload {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { orderId, items, accessories, createdBy, subGodown } = body as {
+    const { orderId, items, accessories, subGodown } = body as {
       orderId: string
       items: ScanItemPayload[]
       accessories?: AccessoryPayload[]
-      createdBy?: string
       subGodown?: string | null
     }
 
@@ -760,7 +753,7 @@ export async function POST(request: Request) {
         order_id: orderId,
         availability_status: availabilityStatus,
         items: normalized,
-        created_by: createdBy || null,
+        created_by: actorName,
         actual_date: new Date().toISOString(),
       })
       .select()
@@ -867,10 +860,10 @@ export async function POST(request: Request) {
 // plpgsql function if that ever happens in practice.
 export async function PATCH(request: Request) {
   try {
-    const { inventoryId, items, editedBy } = (await request.json()) as {
+    const { actorName } = await requestAccess(request)
+    const { inventoryId, items } = (await request.json()) as {
       inventoryId: string
       items: { item_name: string; scanned_qty: number }[]
-      editedBy?: string
     }
     if (!inventoryId || !Array.isArray(items)) {
       return NextResponse.json({ success: false, error: "Missing inventoryId or items" }, { status: 400 })
@@ -1067,9 +1060,9 @@ export async function PATCH(request: Request) {
       order_id: inv.order_id,
       order_no: order?.order_no || null,
       crm_name: order?.crm_name || null,
-      message: `${order?.order_no || "Order"}${order?.crm_name ? ` (${order.crm_name})` : ""} — Packing List History edited by ${editedBy || "someone"}`,
+      message: `${order?.order_no || "Order"}${order?.crm_name ? ` (${order.crm_name})` : ""} — Packing List History edited by ${actorName || "someone"}`,
       changes,
-      created_by: editedBy || null,
+      created_by: actorName,
     })
     if (notifyError) throw notifyError
 

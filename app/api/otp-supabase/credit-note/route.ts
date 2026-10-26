@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 
 const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
 
@@ -95,7 +94,7 @@ export async function GET(request: Request) {
         })
       )
 
-      return NextResponse.json({ success: true, data: cards.filter(Boolean) })
+      return NextResponse.json({ success: true, data: scopeRowsByAccess(cards.filter(Boolean), await requestAccess(request)) })
     }
 
     if (status === "history" && searchParams.has("page")) {
@@ -113,17 +112,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_credit_note_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_credit_note")
-        .select("*", { count: "exact" })
-        .eq("status", "completed")
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-      return chunkJson(data, count, offset)
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     const { data, error } = await supabase
@@ -134,7 +125,7 @@ export async function GET(request: Request) {
       .limit(1000)
     if (error) throw error
 
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data || [], await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/credit-note exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -147,14 +138,14 @@ export async function GET(request: Request) {
 // of submit).
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { invoiceNumber, companyName, poNumber, crmName, items, createdBy } = body as {
+    const { invoiceNumber, companyName, poNumber, crmName, items } = body as {
       invoiceNumber: string
       companyName?: string
       poNumber?: string
       crmName?: string
       items: { order_id: string; order_no: string; make_invoice_id: string; item_code: string | null; item_name: string; qty: number }[]
-      createdBy?: string
     }
 
     if (!invoiceNumber || !Array.isArray(items) || items.length === 0) {
@@ -213,7 +204,7 @@ export async function POST(request: Request) {
         crm_name: crmName || null,
         order_location: locOrder?.order_location || null,
         items,
-        created_by: createdBy || null,
+        created_by: actorName,
       })
       .select()
       .single()

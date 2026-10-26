@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 
 // Stage — Client Confirmation, the final stage.
 //
@@ -34,20 +33,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_client_confirmation_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_client_confirmation")
-        .select(
-          "*, order:otp_orders(*), packagingTransport:otp_packaging_transport(transport_mode, receiving_copy_url, client_confirmation_planned, transporter_name, reference_no, freight_charge, hamali_charge, parking_charge, bilty_upload_urls, makeInvoice:otp_make_invoice(invoice_number, items))",
-          { count: "exact" }
-        )
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-
-      return chunkJson(data, count, offset)
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     const [doneRes, packagingRes] = await Promise.all([
@@ -64,7 +52,7 @@ export async function GET(request: Request) {
     const donePackagingIds = new Set((doneRes.data || []).map((r: any) => r.packaging_transport_id))
     const data = (packagingRes.data || []).filter((r: any) => !donePackagingIds.has(r.id))
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data, await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/client-confirmation exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -73,13 +61,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { packagingTransportId, materialReceived, sitePersonName, contactNumber, createdBy } = body as {
+    const { packagingTransportId, materialReceived, sitePersonName, contactNumber } = body as {
       packagingTransportId: string
       materialReceived: "Yes" | "No"
       sitePersonName: string
       contactNumber: string
-      createdBy?: string
     }
 
     if (!packagingTransportId) {
@@ -115,7 +103,7 @@ export async function POST(request: Request) {
         material_received: materialReceived,
         site_person_name: sitePersonName.trim(),
         contact_number: contactNumber.trim(),
-        created_by: createdBy || null,
+        created_by: actorName,
       })
       .select()
       .single()

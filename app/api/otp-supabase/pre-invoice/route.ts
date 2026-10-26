@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import { consumeWaveReservation, syncWaveReservation } from "@/lib/ims-reservation"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 
 const nameKey = (name?: string | null) => (name || "").trim().toLowerCase()
@@ -103,19 +102,19 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_pre_invoice_history", p))
     }
 
-    const { offset, to } = chunkParams(searchParams)
-    const selectOpts = isHistory ? { count: "exact" as const } : undefined
+    // History is server-paged only (?page=, handled above).
+    if (isHistory) {
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
+    }
 
     let q1 = supabase
       .from("otp_pre_invoice_queue")
       .select(
-        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)",
-        selectOpts
+        "*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received)), released:otp_released_stock(item_name, qty_released, reason, released_by, created_at)"
       )
       .eq("status", status)
       .order("created_at", { ascending: false })
-    if (isHistory) q1 = q1.order("id").range(offset, to)
-    let { data, error, count } = await q1
+    let { data, error } = await q1
 
     // Database/55_otp_released_stock.sql not applied yet — PostgREST can't
     // resolve the embedded `released` relation and fails the WHOLE query.
@@ -125,18 +124,15 @@ export async function GET(request: Request) {
       console.warn("otp_released_stock table not found yet — fetching pre-invoice without it:", error.message)
       let q2 = supabase
         .from("otp_pre_invoice_queue")
-        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))", selectOpts)
+        .select("*, order:otp_orders(*, shortages:otp_check_inventory_shortage(shortage_qty, status), indents:otp_indent_creation(items, material_received))")
         .eq("status", status)
         .order("created_at", { ascending: false })
-      if (isHistory) q2 = q2.order("id").range(offset, to)
-      ;({ data, error, count } = await q2)
+      ;({ data, error } = await q2)
     }
 
     if (error) throw error
 
-    if (isHistory) return chunkJson(data, count, offset)
-
-    return NextResponse.json({ success: true, data: data || [] })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data || [], await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/pre-invoice exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -145,10 +141,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
     const {
       id,
-      createdBy,
       items,
       calibrationRequired,
       calibrationType,
@@ -165,7 +161,6 @@ export async function POST(request: Request) {
       reductionReasons,
     } = body as {
       id: string
-      createdBy?: string
       items?: { item_code: string; item_name: string; qty: number; serial_no?: string }[]
       calibrationRequired?: "YES" | "NO" | ""
       calibrationType?: string
@@ -216,7 +211,7 @@ export async function POST(request: Request) {
       const result = computeReleases(originalItems, items, reductionReasons, {
         orderId: primaryRow.order_id,
         queueId: id,
-        createdBy,
+        createdBy: actorName ?? undefined,
       })
       if (result.missingReasons.length > 0) {
         return NextResponse.json(
@@ -257,7 +252,7 @@ export async function POST(request: Request) {
     const { data, error } = await supabase
       .from("otp_pre_invoice_queue")
       .update({
-        created_by: createdBy || null,
+        created_by: actorName,
         status: "invoiced",
         invoiced_at: new Date().toISOString(),
         debit_note_for_invoice_required: DeliveryNoteRequired,
@@ -309,11 +304,11 @@ export async function POST(request: Request) {
 // is processed it leaves Pending, so this naturally stops applying.
 export async function PATCH(request: Request) {
   try {
-    const { id, items, reductionReasons, editedBy } = (await request.json()) as {
+    const { actorName } = await requestAccess(request)
+    const { id, items, reductionReasons } = (await request.json()) as {
       id: string
       items: { item_name: string; qty: number }[]
       reductionReasons?: Record<string, string>
-      editedBy?: string
     }
     if (!id || !Array.isArray(items)) {
       return NextResponse.json({ success: false, error: "Missing id or items" }, { status: 400 })
@@ -347,7 +342,7 @@ export async function PATCH(request: Request) {
     const { missingReasons, releaseRows } = computeReleases(original, items, reductionReasons, {
       orderId: row.order_id,
       queueId: id,
-      createdBy: editedBy,
+      createdBy: actorName ?? undefined,
     })
     if (missingReasons.length > 0) {
       return NextResponse.json(

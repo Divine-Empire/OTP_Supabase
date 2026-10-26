@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { tryCreatePfmsIndent } from "@/lib/pfms"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
 // Stage — Indent Creation. Replaces the old "Material Received" stage —
 // see Database/52_indent_creation_stage.sql. One table backs all 3 tabs:
@@ -38,18 +37,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_indent_creation_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      // Legacy chunked mode (?offset=&limit=); the page uses the server-paged branch above.
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_indent_creation")
-        .select("*, order:otp_orders(*)", { count: "exact" })
-        .not("material_received", "is", null)
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-      return chunkJson(data, count, offset)
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     // material_received IS NULL too on Pending: a 'Rejected' row never gets
@@ -63,7 +53,7 @@ export async function GET(request: Request) {
       return filtered.order("created_at", { ascending: false }).order("id").range(from, to)
     })
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data, await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/indent-creation exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -73,6 +63,7 @@ export async function GET(request: Request) {
 // Submits the Indent Creation process form (Pending -> Material Received tab).
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
     const {
       indentId,
@@ -135,7 +126,7 @@ export async function POST(request: Request) {
       .from("otp_indent_creation")
       .update({
         customer_wants_material_as: customerWantsMaterialAs || null,
-        created_by: createdBy || null,
+        created_by: createdBy || actorName,
         warehouse_location: warehouseLocation || null,
         receiving_lead_time: receivingLeadTime ? Number(receivingLeadTime) : null,
         inventory_photo_url: inventoryPhotoUrl || null,

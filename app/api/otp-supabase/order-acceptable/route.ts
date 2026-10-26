@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
 import { ORDER_LOCATIONS } from "@/lib/locations"
@@ -32,24 +32,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_order_acceptable_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      // One chunk per request (?offset=&limit=) with the overall `total`, so the
-      // page can show the first rows immediately and keep pulling the rest in
-      // the background (see hooks/use-chunked-history.ts). The old flat
-      // .limit(200) silently dropped every order beyond the 200 newest (e.g.
-      // DO-5068 sat at position 239 and never showed). Stable order
-      // (created_at, id) keeps chunks from overlapping or skipping rows.
-      const limit = Math.min(Math.max(Number(searchParams.get("limit")) || 200, 1), 1000)
-      const offset = Math.max(Number(searchParams.get("offset")) || 0, 0)
-      const { data, error, count } = await supabase
-        .from("otp_orders_acceptable")
-        .select("*, order:otp_orders(*)", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, offset + limit - 1)
-      if (error) throw error
-      const total = count ?? offset + (data?.length || 0)
-      return NextResponse.json({ success: true, data: data || [], total, hasMore: offset + (data?.length || 0) < total })
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     // Default / "pending": orders whose stage-1 planned date is set but that
@@ -65,7 +50,7 @@ export async function GET(request: Request) {
         .range(from, to)
     )
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data, await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/order-acceptable exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

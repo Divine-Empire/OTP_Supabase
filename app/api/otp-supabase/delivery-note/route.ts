@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { fetchAllRows } from "@/lib/fetch-all"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 
 // Stage — Delivery Note (only reached when otp_orders.payment_mode = 'na' —
 // see order-acceptable/route.ts). Terminal: processing here just moves the
@@ -33,17 +32,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_delivery_note_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_debit_note")
-        .select("*, order:otp_orders(*, acceptable:otp_orders_acceptable(debit_note_planned))", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-
-      return chunkJson(data, count, offset)
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     // Anti-join view (Database/72, 73): no done-id list in the URL, and paged
@@ -57,7 +48,7 @@ export async function GET(request: Request) {
         .range(from, to)
     )
 
-    return NextResponse.json({ success: true, data })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess(data, await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/delivery-note exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -66,12 +57,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { orderId, dnNumber, dnAttachmentUrl, createdBy } = body as {
+    const { orderId, dnNumber, dnAttachmentUrl } = body as {
       orderId: string
       dnNumber?: string
       dnAttachmentUrl?: string
-      createdBy?: string
     }
 
     if (!orderId) {
@@ -86,7 +77,7 @@ export async function POST(request: Request) {
         order_id: orderId,
         dn_number: dnNumber || null,
         dn_attachment_url: dnAttachmentUrl || null,
-        created_by: createdBy || null,
+        created_by: actorName,
       })
       .select()
       .single()

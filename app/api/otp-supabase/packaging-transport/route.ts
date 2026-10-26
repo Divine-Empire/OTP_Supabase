@@ -2,9 +2,8 @@ import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { getStageTatMinutes, addTatMinutes } from "@/lib/tat"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
-import { requestAccess } from "@/lib/request-access"
+import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
 import {
   getSectionForMode,
   isBiltyRequired,
@@ -67,18 +66,9 @@ export async function GET(request: Request) {
       return pageJson(data, count, p, await crmFacet(supabase, "otp_v_packaging_transport_history", p))
     }
 
+    // History is server-paged only (?page=, see lib/history-filters.ts).
     if (status === "history") {
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_packaging_transport")
-        .select("*, order:otp_orders(*), makeInvoice:otp_make_invoice(invoice_number, invoice_date, invoice_upload_url, items, packaging_transport_planned, created_at)", { count: "exact" })
-        .eq("status", "submitted")
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-
-      return chunkJson(data, count, offset)
+      return NextResponse.json({ success: false, error: "History requires ?page=" }, { status: 400 })
     }
 
     // Fresh rows come from the anti-join view (Database/72): Make Invoice rows
@@ -103,7 +93,7 @@ export async function GET(request: Request) {
         .range(from, to)
     )
 
-    return NextResponse.json({ success: true, data: [...draftRows, ...freshRows] })
+    return NextResponse.json({ success: true, data: scopeRowsByAccess([...draftRows, ...freshRows], await requestAccess(request)) })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/packaging-transport exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
@@ -112,6 +102,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
     const {
       mode,
@@ -128,7 +119,6 @@ export async function POST(request: Request) {
       transporterRemarks,
       dispatchStatus,
       notOkReason,
-      createdBy,
     } = body as {
       mode?: "draft" | "final"
       makeInvoiceId: string
@@ -144,7 +134,6 @@ export async function POST(request: Request) {
       transporterRemarks?: string
       dispatchStatus?: string
       notOkReason?: string
-      createdBy?: string
     }
 
     if (!makeInvoiceId) {
@@ -270,7 +259,7 @@ export async function POST(request: Request) {
       transporter_remarks: transporterRemarks || null,
       dispatch_status: dispatchStatus === "notokay" ? "notokay" : "okay",
       not_ok_reason: dispatchStatus === "notokay" ? notOkReason || null : null,
-      created_by: createdBy || null,
+      created_by: actorName,
       status: "submitted",
       client_confirmation_planned: addTatMinutes(new Date(), await getStageTatMinutes("client_confirmation")),
       ...(beforePhotoUrls ? { before_photo_urls: beforePhotoUrls } : {}),

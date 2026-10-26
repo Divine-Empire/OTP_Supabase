@@ -3,7 +3,6 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 import { parseHistoryParams, applyHistoryFilters, pageJson } from "@/lib/history-filters"
 import { requestAccess } from "@/lib/request-access"
 import { releaseWaveReservations } from "@/lib/ims-reservation"
-import { chunkParams, chunkJson } from "@/lib/history-chunk"
 
 // Order Cancel — pulls an order out of whichever stage(s) it is
 // CURRENTLY pending in. Reuses the "planned date IS NOT NULL + no
@@ -60,16 +59,8 @@ export async function GET(request: Request) {
     }
 
     if (!orderNo) {
-      // No order given — behave like the old route's plain log listing.
-      const { offset, to } = chunkParams(searchParams)
-      const { data, error, count } = await supabase
-        .from("otp_order_cancel")
-        .select("*, order:otp_orders(order_location)", { count: "exact" })
-        .order("cancelled_at", { ascending: false })
-        .order("id")
-        .range(offset, to)
-      if (error) throw error
-      return chunkJson(data, count, offset)
+      // The cancel log is server-paged only (?page=, see lib/history-filters.ts).
+      return NextResponse.json({ success: false, error: "orderNo or page is required" }, { status: 400 })
     }
 
     const { data: order, error: orderError } = await supabase
@@ -256,12 +247,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { orderNo, selectedStages, cancelReason, cancelledBy } = body as {
+    const { orderNo, selectedStages, cancelReason } = body as {
       orderNo: string
       selectedStages: string[]
       cancelReason: string
-      cancelledBy?: string
     }
 
     if (!orderNo || !Array.isArray(selectedStages) || selectedStages.length === 0) {
@@ -355,7 +346,7 @@ export async function POST(request: Request) {
           stage_key: s.key,
           stage_label: s.label,
           cancel_reason: cancelReason.trim(),
-          cancelled_by: cancelledBy || null,
+          cancelled_by: actorName,
         }))
       )
       .select()
