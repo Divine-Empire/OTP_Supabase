@@ -289,7 +289,7 @@ export default function CheckInventoryPage() {
     () =>
       ((packedDialogOrder?.inventoryItems || []) as any[])
         .filter((it) => Number(it.scanned_qty) > 0)
-        .map((it) => ({ itemName: it.item_name, qty: Number(it.scanned_qty) })),
+        .map((it) => ({ itemCode: it.item_code, itemName: it.item_name, qty: Number(it.scanned_qty) })),
     [packedDialogOrder]
   )
   const [searchTerm, setSearchTerm] = useState("")
@@ -1785,7 +1785,7 @@ export default function CheckInventoryPage() {
                     <ScannedItemListPdfButton
                       companyName={selectedOrder?.companyName}
                       quotationNo={selectedOrder?.quotationNo}
-                      items={compareItems.map((it) => ({ itemName: it.itemName, qty: it.scannedQty }))}
+                      items={compareItems.map((it) => ({ itemCode: it.itemCode, itemName: it.itemName, qty: it.scannedQty }))}
                       disabled={!compareItems.some((it) => it.scannedQty > 0)}
                     />
                   </div>
