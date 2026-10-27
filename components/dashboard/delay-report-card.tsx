@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Download } from "lucide-react"
+import { Download, Search } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -119,6 +119,7 @@ export function DelayReportCard() {
   const [from, setFrom] = useState(() => istDate(-6))
   const [to, setTo] = useState(() => istDate(0))
   const [data, setData] = useState<DelayReportData | null>(null)
+  const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -145,7 +146,19 @@ export function DelayReportCard() {
     }
   }, [from, to, location, rangeInvalid])
 
-  const rows = useMemo(() => data?.rows ?? [], [data])
+  // The order-number search narrows the table, the summary tiles and the export together.
+  const rows = useMemo(() => {
+    const all = data?.rows ?? []
+    const q = search.trim().toLowerCase()
+    return q ? all.filter((r) => r.orderNo.toLowerCase().includes(q)) : all
+  }, [data, search])
+
+  const summary = useMemo(() => {
+    if (!data) return null
+    if (!search.trim()) return data.summary
+    const totalDelay = rows.reduce((sum, r) => sum + r.totalDelay, 0)
+    return { orders: rows.length, totalDelay, averageDelay: rows.length ? Math.round(totalDelay / rows.length) : 0 }
+  }, [data, rows, search])
 
   const handleExport = () => {
     if (!data || rows.length === 0) return
@@ -163,43 +176,52 @@ export function DelayReportCard() {
   return (
     <Card className="flex flex-col">
       <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <CardTitle>Delay Report</CardTitle>
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={loading || rows.length === 0} className="gap-2">
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
-        </div>
-        <div className="flex flex-wrap items-end gap-3 pt-2">
-          <div className="space-y-1">
+        {/* Title | search | filters in one row. The outer two flex equally so the search sits in the
+            middle whenever there is room; the filter group never wraps, so Export stays on the date row. */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <CardTitle className="whitespace-nowrap md:flex-1">Delay Report</CardTitle>
+          <div className="relative md:w-72 md:shrink md:min-w-[11rem]">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              aria-label="Search by order number"
+              placeholder="Search order number"
+              className="h-8 pl-8"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 md:flex-1 md:flex-nowrap md:justify-end">
             <Label htmlFor="delay-from" className="text-xs text-muted-foreground">From</Label>
-            <Input id="delay-from" type="date" className="h-8 w-40" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div className="space-y-1">
+            <Input id="delay-from" type="date" className="h-8 w-36 shrink-0" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
             <Label htmlFor="delay-to" className="text-xs text-muted-foreground">To</Label>
-            <Input id="delay-to" type="date" className="h-8 w-40" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+            <Input id="delay-to" type="date" className="h-8 w-36 shrink-0" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={loading || rows.length === 0} className="h-8 shrink-0 gap-2">
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
           </div>
-          {rangeInvalid && <p className="text-xs text-destructive pb-2">Pick a valid date range.</p>}
         </div>
+        {rangeInvalid && <p className="pt-1 text-xs text-destructive md:text-right">Pick a valid date range.</p>}
       </CardHeader>
 
       <CardContent className="flex-1 space-y-4">
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Orders</p>
-            <p className="text-xl font-bold text-foreground tabular-nums" data-testid="delay-orders">{data ? num(data.summary.orders) : "-"}</p>
+            <p className="text-xl font-bold text-foreground tabular-nums" data-testid="delay-orders">{summary ? num(summary.orders) : "-"}</p>
           </div>
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Total Summative Delay</p>
             <p className="text-xl font-bold text-foreground tabular-nums" data-testid="delay-total" title={data ? `${num(data.summary.totalDelay)} minutes` : undefined}>
-              {data ? formatDelay(data.summary.totalDelay) : "-"}
+              {summary ? formatDelay(summary.totalDelay) : "-"}
             </p>
             <p className="text-[11px] text-muted-foreground">sum of every order&apos;s total</p>
           </div>
           <div className="rounded-lg border border-border bg-muted/40 p-3">
             <p className="text-xs text-muted-foreground">Average Delay</p>
             <p className="text-xl font-bold text-primary tabular-nums" data-testid="delay-average" title={data ? `${num(data.summary.averageDelay)} minutes` : undefined}>
-              {data ? formatDelay(data.summary.averageDelay) : "-"}
+              {summary ? formatDelay(summary.averageDelay) : "-"}
             </p>
             <p className="text-[11px] text-muted-foreground">per order</p>
           </div>
@@ -210,7 +232,7 @@ export function DelayReportCard() {
         ) : loading && !data ? (
           <p className="text-sm text-muted-foreground">Loading delay report...</p>
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No orders were processed through Packaging and Dispatch in this period.</p>
+          <p className="text-sm text-muted-foreground">{search.trim() ? "No orders match this search." : "No orders were processed through Packaging and Dispatch in this period."}</p>
         ) : (
           <div className={`rounded-lg border border-border ${loading ? "opacity-60" : ""}`}>
             <Table containerClassName="max-h-[32rem]" regionLabel="Delay report table">
