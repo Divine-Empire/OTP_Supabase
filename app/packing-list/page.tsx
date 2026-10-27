@@ -25,6 +25,7 @@ import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { QrScanner, parseItemQr } from "@/components/qr-scanner"
 import { toast } from "@/components/ui/use-toast"
 import { MobileRecordCard } from "@/components/mobile-record-card"
+import { ScannedItemListPdfButton } from "./scanned_item_list_pdf"
 import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable } from "@/components/shared"
 
 // One row per distinct item (grouped by itemMatchKey), not per QR scan.
@@ -214,7 +215,9 @@ const pendingColumns = [
 const historyColumns = [
   { key: "historyEdit", label: "Edit", searchable: false },
   { key: "preInvoiceStatus", label: "Pre-Invoice", searchable: false },
-  ...pendingColumns.filter((col) => col.key !== "actions"),
+  ...pendingColumns
+    .filter((col) => col.key !== "actions")
+    .flatMap((col) => (col.key === "itemList" ? [col, { key: "itemsPacked", label: "Items Packed", searchable: false }] : [col])),
   { key: "availabilityStatus", label: "Availability Status", searchable: true },
   { key: "inventoryRemarks", label: "Remarks", searchable: true },
   { key: "accessories", label: "Accessories", searchable: true },
@@ -280,6 +283,15 @@ export default function CheckInventoryPage() {
   const [computedStatus, setComputedStatus] = useState<"Available" | "Not Available" | "Partial" | "">("")
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
+  // History: the wave's own packed items (otp_check_inventory.items), not the order's item list.
+  const [packedDialogOrder, setPackedDialogOrder] = useState<any | null>(null)
+  const packedItems = useMemo(
+    () =>
+      ((packedDialogOrder?.inventoryItems || []) as any[])
+        .filter((it) => Number(it.scanned_qty) > 0)
+        .map((it) => ({ itemName: it.item_name, qty: Number(it.scanned_qty) })),
+    [packedDialogOrder]
+  )
   const [searchTerm, setSearchTerm] = useState("")
   const [currentTab, setCurrentTab] = useState("pending")
   const [selectedColumn] = useState("all")
@@ -488,6 +500,7 @@ export default function CheckInventoryPage() {
     switch (key) {
       case "actions": return "120px"
       case "itemList": return "130px"
+      case "itemsPacked": return "130px"
       case "orderNo": return "120px"
       case "quotationNo": return "150px"
       case "companyName": return "250px"
@@ -1119,6 +1132,18 @@ export default function CheckInventoryPage() {
             View Items
           </Button>
         )
+      case "itemsPacked":
+        return (
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5 border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
+            onClick={() => setPackedDialogOrder(order)}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View Items
+          </Button>
+        )
       case "availabilityStatus":
         return (
           <Badge variant={value === "Available" ? "default" : value === "Not Available" ? "destructive" : "secondary"}>
@@ -1367,6 +1392,7 @@ export default function CheckInventoryPage() {
                 record={order}
                 renderCellContent={renderCellContent}
                 previewCount={6}
+                pinnedKeys={currentTab === "history" ? ["itemsPacked"] : []}
               />
             )}
           />
@@ -1755,6 +1781,14 @@ export default function CheckInventoryPage() {
 
               {dialogStep === "preview" && (
                 <>
+                  <div className="flex justify-end">
+                    <ScannedItemListPdfButton
+                      companyName={selectedOrder?.companyName}
+                      quotationNo={selectedOrder?.quotationNo}
+                      items={compareItems.map((it) => ({ itemName: it.itemName, qty: it.scannedQty }))}
+                      disabled={!compareItems.some((it) => it.scannedQty > 0)}
+                    />
+                  </div>
                   <div className="flex items-center gap-2">
                     <Label className="mb-0">Result:</Label>
                     <Badge
@@ -2052,6 +2086,53 @@ export default function CheckInventoryPage() {
         </Dialog>
 
         {/* Item List Dialog */}
+        <Dialog open={!!packedDialogOrder} onOpenChange={(open) => !open && setPackedDialogOrder(null)}>
+          <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+            <DialogHeader>
+              <div className="flex items-center justify-between gap-2 pr-6">
+                <DialogTitle>Items Packed</DialogTitle>
+                <ScannedItemListPdfButton
+                  companyName={packedDialogOrder?.companyName}
+                  quotationNo={packedDialogOrder?.quotationNo}
+                  items={packedItems}
+                  disabled={packedItems.length === 0}
+                />
+              </div>
+            </DialogHeader>
+            <div className="flex-1 overflow-y-auto border rounded-md">
+            <Table>
+              <TableHeader className="sticky top-0 bg-background z-10">
+                <TableRow>
+                  <TableHead className="w-12">#</TableHead>
+                  <TableHead>Item Name</TableHead>
+                  <TableHead className="text-right">Qty</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {packedItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                      No items packed
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  packedItems.map((item, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                      <TableCell>{item.itemName}</TableCell>
+                      <TableCell className="text-right">{item.qty}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setPackedDialogOrder(null)}>Close</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
           <DialogContent className="max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
             <DialogHeader>

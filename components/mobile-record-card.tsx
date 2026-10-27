@@ -27,18 +27,24 @@ export function MobileRecordCard({
   record,
   renderCellContent,
   previewCount = 5,
+  pinnedKeys = [],
 }: {
   columns: RecordCardColumn[]
   visibleColumns: Record<string, boolean>
   record: any
   renderCellContent: (record: any, columnKey: string) => ReactNode
   previewCount?: number
+  // Button-style columns shown in the top action row next to "actions"
+  // instead of among the label/value fields (and so never hidden behind "Show more").
+  pinnedKeys?: string[]
 }) {
   const [expanded, setExpanded] = useState(false)
 
   const visible = columns.filter((col) => visibleColumns[col.key])
   const actionsColumn = visible.find((col) => col.key === "actions")
-  const fieldColumns = visible.filter((col) => col.key !== "actions")
+  const pinnedColumns = visible.filter((col) => pinnedKeys.includes(col.key))
+  const topColumns = [...pinnedColumns, ...(actionsColumn ? [actionsColumn] : [])]
+  const fieldColumns = visible.filter((col) => col.key !== "actions" && !pinnedKeys.includes(col.key))
 
   const renderedFields = fieldColumns
     .map((col) => ({ col, value: renderCellContent(record, col.key) }))
@@ -49,8 +55,12 @@ export function MobileRecordCard({
 
   return (
     <div className="rounded-lg border bg-white p-4 space-y-3 shadow-sm">
-      {actionsColumn && (
-        <div className="flex justify-end pb-2 border-b">{renderCellContent(record, actionsColumn.key)}</div>
+      {topColumns.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-2 pb-2 border-b">
+          {topColumns.map((col) => (
+            <div key={col.key}>{renderCellContent(record, col.key)}</div>
+          ))}
+        </div>
       )}
       <dl className="space-y-2">
         {shownFields.map(({ col, value }) => (
