@@ -360,44 +360,14 @@ export default function PreInvoicePage() {
       const result = await response.json()
 
       if (result.success) {
-        // Items marked Installation=Yes each become one row in
-        // sss_service_installation (existing legacy table/route — SI-001,
-        // SI-002... generated there). Best-effort: a failure here doesn't
-        // undo the Pre-Invoice submission that already succeeded above.
-        const installationItems = items.filter((it) => it.installation === "Yes")
-        let installationMessage = ""
-        if (installationItems.length > 0) {
-          try {
-            const siRes = await fetch("/api/otp-supabase/service-installation", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                orderNo: selectedOrder.orderNo,
-                companyName: selectedOrder.companyName,
-                contactPersonName: selectedOrder.contactPersonName,
-                contactPersonNo: selectedOrder.contactNumber,
-                items: installationItems.map((it) => ({
-                  itemName: it.name,
-                  qty: it.qty,
-                  serial: it.serialNo,
-                })),
-              }),
-            })
-            const siResult = await siRes.json()
-            installationMessage = siResult.success
-              ? `\n\n${installationItems.length} item(s) logged in Service Installation.`
-              : `\n\nFailed to log items in Service Installation: ${siResult.error}`
-          } catch (siErr) {
-            console.error("Error submitting to service-installation:", siErr)
-            installationMessage = "\n\nFailed to log items in Service Installation system."
-          }
-        }
-
+        // Items marked Installation=Yes get their sss_service_installation rows
+        // (and SI numbers) from the DB trigger on this submit — see
+        // Database/81_sss_service_installation_auto_sync.sql.
         setIsDialogOpen(false)
         setSelectedOrder(null)
         setSelectedQueueIds([])
         await fetchOrders()
-        toast.success(`Order ${selectedOrder.orderNo} moved to Pre-Invoice History${installationMessage}`)
+        toast.success(`Order ${selectedOrder.orderNo} moved to Pre-Invoice History`)
       } else {
         throw new Error(result.error || "Update failed")
       }

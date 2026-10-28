@@ -33,8 +33,9 @@ async function loadImage(src) {
   }
 }
 
+// createdBy: full name of whoever created the wave ("NA" when unknown).
 // items: [{ itemCode, itemName, qty }] — only qty > 0 rows are printed.
-export async function generateScannedItemListPdf({ companyName, quotationNo, items }) {
+export async function generateScannedItemListPdf({ companyName, quotationNo, createdBy, items }) {
   const [{ jsPDF }, { default: autoTable }, left, right] = await Promise.all([
     import("jspdf"),
     import("jspdf-autotable"),
@@ -78,6 +79,8 @@ export async function generateScannedItemListPdf({ companyName, quotationNo, ite
   const lines = [
     ...doc.splitTextToSize(`Company Name: ${String(companyName || "-")}`, maxWidth),
     `Quotation No: ${String(quotationNo || "-")}`,
+    // Waves processed before created_by was recorded have none: "NA".
+    `Created By: ${String(createdBy || "").trim() || "NA"}`,
   ]
   const lineHeight = 5
   lines.forEach((line, i) => doc.text(line, rightX, titleY - 3 + i * lineHeight, { align: "right" }))
@@ -103,7 +106,7 @@ export async function generateScannedItemListPdf({ companyName, quotationNo, ite
   doc.save(`Scanned_Items_${safe(quotationNo) || safe(companyName) || "list"}.pdf`)
 }
 
-export function ScannedItemListPdfButton({ companyName, quotationNo, items, disabled }) {
+export function ScannedItemListPdfButton({ companyName, quotationNo, createdBy, items, disabled }) {
   return (
     <Button
       type="button"
@@ -111,7 +114,7 @@ export function ScannedItemListPdfButton({ companyName, quotationNo, items, disa
       variant="outline"
       className="gap-1.5"
       disabled={disabled}
-      onClick={() => generateScannedItemListPdf({ companyName, quotationNo, items })}
+      onClick={() => generateScannedItemListPdf({ companyName, quotationNo, createdBy, items })}
     >
       <FileDown className="h-3.5 w-3.5" />
       PDF

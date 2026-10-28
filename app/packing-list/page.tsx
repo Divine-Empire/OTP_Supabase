@@ -1785,6 +1785,7 @@ export default function CheckInventoryPage() {
                     <ScannedItemListPdfButton
                       companyName={selectedOrder?.companyName}
                       quotationNo={selectedOrder?.quotationNo}
+                      createdBy={currentUser?.fullName || currentUser?.username}
                       items={compareItems.map((it) => ({ itemCode: it.itemCode, itemName: it.itemName, qty: it.scannedQty }))}
                       disabled={!compareItems.some((it) => it.scannedQty > 0)}
                     />
@@ -2094,6 +2095,7 @@ export default function CheckInventoryPage() {
                 <ScannedItemListPdfButton
                   companyName={packedDialogOrder?.companyName}
                   quotationNo={packedDialogOrder?.quotationNo}
+                  createdBy={packedDialogOrder?.createdBy}
                   items={packedItems}
                   disabled={packedItems.length === 0}
                 />
