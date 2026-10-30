@@ -8,7 +8,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { RefreshCw, Eye } from "lucide-react"
+import { RefreshCw, Eye, Filter, FileText } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { CertificateDialog } from "./certificate-formats/certificate-dialog"
+import { BatchCertificateDialog } from "./certificate-formats/batch-certificate-dialog"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapCalibrationPendingRowToUI, mapCalibrationHistoryRowToUI } from "@/lib/otp-utils"
@@ -30,7 +33,7 @@ const pendingColumns = [
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "calibrationType", label: "Type", searchable: true },
-  { key: "itemList", label: "Item List", searchable: false },
+  { key: "itemList", label: "Items Packed", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
   { key: "planned", label: "Planned", searchable: true },
 ]
@@ -52,7 +55,6 @@ const historyColumns = [
 // stage's own certificate/remarks/created-by fields) is still toggleable
 // via Column Visibility, just hidden by default.
 const DEFAULT_HIDDEN_COLUMNS = new Set([
-  "itemList",
   "certificateNumber",
   "certificateType",
   "certificateUpload",
@@ -65,6 +67,11 @@ export default function CalibrationPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
+  const [certificateDialogOpen, setCertificateDialogOpen] = useState(false)
+  const [generateOrder, setGenerateOrder] = useState<any>(null)
+  // PDF made by Generate Certificate, keyed by make-invoice id; pre-attached in that order's Process form.
+  const [generatedPdfs, setGeneratedPdfs] = useState<Record<string, { file: File; numbers: string[] }>>({})
+  const [usingGeneratedPdf, setUsingGeneratedPdf] = useState(false)
   const [certificateNumber, setCertificateNumber] = useState("")
   const [certificateType, setCertificateType] = useState("")
   const [certificateUploadFile, setCertificateUploadFile] = useState<File | null>(null)
@@ -139,11 +146,27 @@ export default function CalibrationPage() {
     fetchOrders()
   }, [])
 
+  // Inline preview of whichever PDF is attached to the Process form (generated or hand-picked).
+  const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!certificateUploadFile || certificateUploadFile.type !== "application/pdf") {
+      setUploadPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(certificateUploadFile)
+    setUploadPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [certificateUploadFile])
+
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
-    setCertificateNumber("")
-    setCertificateType("")
-    setCertificateUploadFile(null)
+    const generated = generatedPdfs[order.makeInvoiceId || order.id] || null
+    // First and last certificate number of the generated PDF; one number when there is only one.
+    const nums = generated?.numbers || []
+    setCertificateNumber(nums.length > 1 ? `${nums[0]} - ${nums[nums.length - 1]}` : nums[0] || "")
+    setCertificateType("NON-NABL")
+    setCertificateUploadFile(generated?.file || null)
+    setUsingGeneratedPdf(!!generated)
     setRemarks("")
     setIsDialogOpen(true)
   }
@@ -166,9 +189,15 @@ export default function CalibrationPage() {
         const formData = new FormData()
         formData.append("file", certificateUploadFile)
         formData.append("folder", "calibration")
-        const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
+        // Generated certificate PDFs go to their own bucket; a file the user picked by hand
+        // keeps using the general attachments upload.
+        const uploadRes = await fetch(
+          usingGeneratedPdf ? "/api/otp-supabase/calibration/certificate-upload" : "/api/otp-supabase/attachments",
+          { method: "POST", body: formData }
+        )
         const uploadJson = await uploadRes.json()
-        if (uploadJson.success) certificateUploadUrl = uploadJson.url
+        if (!uploadJson.success) throw new Error(uploadJson.error || "Certificate upload failed")
+        certificateUploadUrl = uploadJson.url
       }
 
       const response = await fetch("/api/otp-supabase/calibration", {
@@ -187,6 +216,10 @@ export default function CalibrationPage() {
 
       if (result.success) {
         setIsDialogOpen(false)
+        setGeneratedPdfs((prev) => {
+          const { [selectedOrder.makeInvoiceId || selectedOrder.id]: _done, ...rest } = prev
+          return rest
+        })
         setSelectedOrder(null)
         await fetchOrders()
         toast.success(`Order ${selectedOrder.orderNo} — calibration certificate recorded.`)
@@ -206,13 +239,23 @@ export default function CalibrationPage() {
     switch (columnKey) {
       case "actions":
         return (
-          <Button
-            size="sm"
-            className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
-            onClick={() => handleProcess(order)}
-          >
-            Process
-          </Button>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              className="h-7 px-2.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+              onClick={() => handleProcess(order)}
+            >
+              Process
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2.5 text-xs font-medium border-primary/30 text-primary hover:bg-primary/10"
+              onClick={() => setGenerateOrder(order)}
+            >
+              Generate Certificate
+            </Button>
+          </div>
         )
       case "itemList":
         return (
@@ -269,6 +312,8 @@ export default function CalibrationPage() {
     )
   }
 
+  const activeFilterCount = [crmNameFilter, calibrationTypeFilter].filter((v) => v && v !== "all").length
+
   if (error) {
     return (
       <MainLayout>
@@ -303,8 +348,19 @@ export default function CalibrationPage() {
             placeholder="Search order no, company, contact, quotation, certificate..."
             className="min-w-[220px] flex-1"
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="w-[170px]">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent">
+                <Filter className="h-3.5 w-3.5" />
+                <span>Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">{activeFilterCount}</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 space-y-3">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">CRM Name</p>
               <Select value={crmNameFilter} onValueChange={setCrmNameFilter}>
                 <SelectTrigger className="h-9 text-xs border-input bg-card">
                   <SelectValue placeholder="All CRM Names" />
@@ -313,15 +369,16 @@ export default function CalibrationPage() {
                   <SelectItem value="all" className="text-xs">
                     All CRM Names
                   </SelectItem>
-                  {crmNameOptions.map((name) => (
-                    <SelectItem key={name} value={name} className="text-xs">
-                      {name}
+                  {crmNameOptions.map((o) => (
+                    <SelectItem key={o} value={o} className="text-xs">
+                      {o}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="w-[150px]">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Type</p>
               <Select value={calibrationTypeFilter} onValueChange={setCalibrationTypeFilter}>
                 <SelectTrigger className="h-9 text-xs border-input bg-card">
                   <SelectValue placeholder="All Types" />
@@ -330,24 +387,37 @@ export default function CalibrationPage() {
                   <SelectItem value="all" className="text-xs">
                     All Types
                   </SelectItem>
-                  {calibrationTypeOptions.map((type) => (
-                    <SelectItem key={type} value={type} className="text-xs">
-                      {type}
+                  {calibrationTypeOptions.map((o) => (
+                    <SelectItem key={o} value={o} className="text-xs">
+                      {o}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
+            </PopoverContent>
+          </Popover>
           <Button
             onClick={handleRefresh}
             variant="outline"
             size="sm"
-            className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+            aria-label="Refresh"
+            title="Refresh"
+            className="h-9 w-9 p-0 border-input bg-card hover:bg-accent"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>Refresh</span>
           </Button>
+          {currentTab === "pending" && (
+            <Button
+              onClick={() => setCertificateDialogOpen(true)}
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5 text-xs font-medium border-input bg-card hover:bg-accent"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              <span>Certificate</span>
+            </Button>
+          )}
           <ColumnSelector
             options={columnPanel.columns}
             visible={columnPanel.visible}
@@ -356,6 +426,17 @@ export default function CalibrationPage() {
             onHideAll={columnPanel.hideAll}
           />
         </div>
+
+        <CertificateDialog open={certificateDialogOpen} onOpenChange={setCertificateDialogOpen} />
+        <BatchCertificateDialog
+          open={!!generateOrder}
+          onOpenChange={(o) => !o && setGenerateOrder(null)}
+          makeInvoiceId={generateOrder ? generateOrder.makeInvoiceId || generateOrder.id : null}
+          orderNo={generateOrder?.orderNo || ""}
+          onGenerated={(file, numbers) =>
+            generateOrder && setGeneratedPdfs((prev) => ({ ...prev, [generateOrder.makeInvoiceId || generateOrder.id]: { file, numbers } }))
+          }
+        />
 
         <FilterChips chips={activeChips} onClearAll={handleClearAllFilters} className="-mt-1" />
 
@@ -367,9 +448,9 @@ export default function CalibrationPage() {
               label: col.label,
               minWidth:
                 col.key === "actions"
-                  ? "90px"
+                  ? "230px"
                   : col.key === "itemList"
-                  ? "75px"
+                  ? "110px"
                   : col.key === "companyName"
                   ? "220px"
                   : col.key === "orderNo"
@@ -439,7 +520,7 @@ export default function CalibrationPage() {
 
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-h-[92vh] max-w-lg overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Process Calibration Certificate</DialogTitle>
               <DialogDescription>Record the calibration certificate details for this order</DialogDescription>
@@ -479,8 +560,17 @@ export default function CalibrationPage() {
 
               <div className="space-y-2">
                 <Label htmlFor="certificateUpload">Certificate Upload</Label>
-                <Input id="certificateUpload" type="file" onChange={(e) => setCertificateUploadFile(e.target.files?.[0] || null)} />
-                {certificateUploadFile && <p className="text-sm text-muted-foreground">Selected: {certificateUploadFile.name}</p>}
+                <Input id="certificateUpload" type="file" onChange={(e) => {
+                    setCertificateUploadFile(e.target.files?.[0] || null)
+                    setUsingGeneratedPdf(false) // a hand-picked file replaces the generated one
+                  }} />
+                {certificateUploadFile && (
+                  <p className="text-sm text-muted-foreground">
+                    {usingGeneratedPdf ? "Generated certificate attached: " : "Selected: "}
+                    {certificateUploadFile.name}
+                  </p>
+                )}
+                {uploadPreviewUrl && <iframe title="Certificate preview" src={uploadPreviewUrl} className="h-72 w-full rounded border" />}
               </div>
 
               <div className="space-y-2">
@@ -511,13 +601,14 @@ export default function CalibrationPage() {
         <Dialog open={itemListDialogOpen} onOpenChange={setItemListDialogOpen}>
           <DialogContent className="max-w-md max-h-[85vh] flex flex-col overflow-hidden">
             <DialogHeader>
-              <DialogTitle>Item List</DialogTitle>
+              <DialogTitle>Items Packed</DialogTitle>
             </DialogHeader>
             <div className="flex-1 overflow-y-auto border rounded-md">
             <Table>
               <TableHeader className="sticky top-0 bg-background z-10">
                 <TableRow>
                   <TableHead className="w-12">#</TableHead>
+                  <TableHead>Item Code</TableHead>
                   <TableHead>Item Name</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                 </TableRow>
@@ -525,7 +616,7 @@ export default function CalibrationPage() {
               <TableBody>
                 {itemListDialogItems.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
                       No items
                     </TableCell>
                   </TableRow>
@@ -533,6 +624,7 @@ export default function CalibrationPage() {
                   itemListDialogItems.map((item: any, idx: number) => (
                     <TableRow key={idx}>
                       <TableCell className="text-muted-foreground">{idx + 1}</TableCell>
+                      <TableCell className="font-mono text-xs">{item.item_code || "-"}</TableCell>
                       <TableCell>{item.item_name}</TableCell>
                       <TableCell className="text-right">{item.qty}</TableCell>
                     </TableRow>

@@ -205,8 +205,8 @@ export function Sidebar({ mobileOpen, onMobileOpenChange }: SidebarProps = {}) {
         <Link href="/dashboard" className="flex items-center gap-3" onClick={() => setOpen(false)}>
           <img src="/divine-logo.svg" alt="Divine" className="h-8 w-auto shrink-0" />
           <div className="leading-tight">
-            <p className="text-sm font-semibold text-foreground">Divine</p>
-            <p className="text-xs text-muted-foreground">Order to Payment</p>
+            <p className="text-l font-semibold text-foreground">Order to Payment</p>
+            <p className="text-sm text-muted-foreground">Divine</p>
           </div>
         </Link>
       </div>
