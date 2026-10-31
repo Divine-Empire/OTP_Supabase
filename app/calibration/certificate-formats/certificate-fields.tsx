@@ -56,6 +56,8 @@ export function CertificateFields({
 }) {
   const fields = format.fields.filter((f) => !hideKeys.includes(f.key))
   const labelClass = compact ? "text-xs" : undefined
+  // Sl. No. plus one equal column per readings column (3 for the proving ring, 5 for the CTMs).
+  const tableColumns = `3rem repeat(${format.table?.columns.length ?? 0}, minmax(0, 1fr))`
   return (
     <div className="space-y-4">
       <div className={`grid sm:grid-cols-2 ${compact ? "gap-3" : "gap-4"}`}>
@@ -83,7 +85,7 @@ export function CertificateFields({
         <div className="space-y-1.5">
           <p className={`font-medium ${compact ? "text-xs" : "text-sm"}`}>Readings</p>
           <div className="overflow-hidden rounded-md border">
-            <div className="grid grid-cols-[3rem_1fr_1fr] bg-muted/50 text-xs font-medium">
+            <div className="grid bg-muted/50 text-xs font-medium" style={{ gridTemplateColumns: tableColumns }}>
               <div className="px-2 py-1.5 text-center">Sl. No.</div>
               {format.table.columns.map((c) => (
                 <div key={c.label} className="px-2 py-1.5">
@@ -92,7 +94,7 @@ export function CertificateFields({
               ))}
             </div>
             {Array.from({ length: format.table.rows }, (_, row) => (
-              <div key={row} className="grid grid-cols-[3rem_1fr_1fr] items-center border-t">
+              <div key={row} className="grid items-center border-t" style={{ gridTemplateColumns: tableColumns }}>
                 <div className="px-2 text-center text-xs text-muted-foreground">{row + 1}</div>
                 {format.table!.columns.map((c) => (
                   <div key={c.label} className="p-1">

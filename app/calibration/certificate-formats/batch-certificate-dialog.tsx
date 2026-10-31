@@ -44,7 +44,7 @@ function parseNumber(next: string) {
 // otherwise a single certificate for the whole quantity.
 function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: boolean, formatId: string): Cert[] {
   const count = each ? item.qty : 1
-  const base = getCertificateFormat(formatId)?.getDefaults() ?? {}
+  const base = getCertificateFormat(formatId)?.getDefaults(item.itemName) ?? {}
   return Array.from({ length: count }, (_, k) => ({
     id: `${itemIdx}-${k}-${Math.random().toString(36).slice(2, 7)}`,
     itemIdx,
@@ -56,10 +56,11 @@ function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: bo
       certificateNo: "",
       instrumentName: item.itemName,
       calibrationDate: p.invoiceDate,
-      nextCalibrationDate: addMonths(p.invoiceDate, 6),
+      nextCalibrationDate: addMonths(p.invoiceDate, formatId === "test_sieve" ? 12 : 6),
       quantity: nos(each ? 1 : item.qty),
       // The certificate already prints "Based On", so a stored "Based On 9259 ..." drops the prefix.
-      basedOn: (item.isValue || "").replace(/^\s*based on\s*/i, "").trim(),
+      // An item with no stored IS value keeps the format's own default (the CTM formats carry one).
+      basedOn: (item.isValue || "").replace(/^\s*based on\s*/i, "").trim() || base.basedOn || "",
     },
   }))
 }
@@ -160,7 +161,10 @@ export function BatchCertificateDialog({
       prev.map((c) => {
         if (c.id !== certId) return c
         const values = { ...c.values, [key]: value }
-        if (key === "calibrationDate" && !c.nextEdited) values.nextCalibrationDate = addMonths(value, 6)
+        if (key === "calibrationDate" && !c.nextEdited) {
+          const months = formats[c.itemIdx] === "test_sieve" ? 12 : 6
+          values.nextCalibrationDate = addMonths(value, months)
+        }
         return { ...c, values, nextEdited: c.nextEdited || key === "nextCalibrationDate" }
       })
     )

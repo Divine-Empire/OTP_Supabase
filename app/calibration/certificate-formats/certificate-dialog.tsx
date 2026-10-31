@@ -50,7 +50,10 @@ export function CertificateDialog({ open, onOpenChange }: { open: boolean; onOpe
   const setField = (key: string, value: string) => {
     setValues((prev) => {
       const next = { ...prev, [key]: value }
-      if (key === "calibrationDate" && !nextEdited) next.nextCalibrationDate = addMonths(value, 6)
+      if (key === "calibrationDate" && !nextEdited) {
+        const months = format.id === "test_sieve" ? 12 : 6
+        next.nextCalibrationDate = addMonths(value, months)
+      }
       return next
     })
     if (key === "nextCalibrationDate") setNextEdited(true)

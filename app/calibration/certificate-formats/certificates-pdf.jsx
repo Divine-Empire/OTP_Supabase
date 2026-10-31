@@ -3,11 +3,19 @@
 // so they can never differ. A format's id (see formats.ts) selects its page layout here.
 import { drawCommonPage } from "./common-format-pdf.jsx"
 import { drawProvingRing50Page } from "./proving-ring-50-pdf.jsx"
+import { drawCtmPage } from "./ctm-pdf.jsx"
+import { drawWeightBalancePage } from "./weight-balance-pdf.jsx"
+import { drawTestSieveGi300Page } from "./test-sieve-gi-300-pdf.jsx"
 import { loadAssets } from "./pdf-shared.jsx"
 
 export const DRAWERS = {
   common_format: drawCommonPage,
   proving_ring_50: drawProvingRing50Page,
+  ctm_1000: drawCtmPage,
+  ctm_1500: drawCtmPage,
+  ctm_2000: drawCtmPage,
+  weight_balance: drawWeightBalancePage,
+  test_sieve: drawTestSieveGi300Page,
 }
 
 // certs: [{ formatId, values }] -> jsPDF document.
