@@ -148,6 +148,9 @@ export async function POST(request: Request) {
       items,
       calibrationRequired,
       calibrationType,
+      certHardcopyRequired,
+      hardcopyDeliveryType,
+      hardcopyDeliveryAddress,
       transportId,
       gstNumber,
       vehicleNumber,
@@ -164,6 +167,9 @@ export async function POST(request: Request) {
       items?: { item_code: string; item_name: string; qty: number; serial_no?: string }[]
       calibrationRequired?: "YES" | "NO" | ""
       calibrationType?: string
+      certHardcopyRequired?: "YES" | "NO" | ""
+      hardcopyDeliveryType?: "Billing Address" | "Shipping Address" | "Other" | ""
+      hardcopyDeliveryAddress?: string
       transportId?: string
       gstNumber?: string
       vehicleNumber?: string
@@ -181,6 +187,12 @@ export async function POST(request: Request) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: "Missing id" }, { status: 400 })
+    }
+
+    // Checked up front: the merge and stock release below can't be undone.
+    const hardcopyWanted = calibrationRequired === "YES" && certHardcopyRequired === "YES"
+    if (hardcopyWanted && (!hardcopyDeliveryType || !hardcopyDeliveryAddress?.trim())) {
+      return NextResponse.json({ success: false, error: "Hardcopy Delivery Add. is required when Cert. Hardcopy Req. is Yes" }, { status: 400 })
     }
 
     const supabase = getSupabaseAdmin()
@@ -264,6 +276,12 @@ export async function POST(request: Request) {
         ...(items ? { items } : {}),
         calibration_required: calibrationRequired === "YES" ? true : calibrationRequired === "NO" ? false : null,
         calibration_type: calibrationType || null,
+        // Hardcopy only applies to a calibrated wave; anything else stores NULLs
+        // (a wave processed before this feature also has NULL = never hardcopy).
+        cert_hardcopy_required:
+          calibrationRequired === "YES" ? (certHardcopyRequired === "YES" ? true : certHardcopyRequired === "NO" ? false : null) : null,
+        hardcopy_delivery_type: hardcopyWanted ? hardcopyDeliveryType || null : null,
+        hardcopy_delivery_address: hardcopyWanted ? hardcopyDeliveryAddress?.trim() || null : null,
         transport_id: transportId || null,
         gst_number: gstNumber || null,
         vehicle_number: vehicleNumber || null,

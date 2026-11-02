@@ -13,8 +13,9 @@ const STAGE_ORDER: Record<string, number> = {
   debit_note_for_invoice: 7,
   make_invoice: 8,
   calibration: 9,
-  packaging_transport: 10,
-  client_confirmation: 11,
+  certi_hardcopy: 10,
+  packaging_transport: 11,
+  client_confirmation: 12,
 }
 
 const DEFAULT_STAGES = [
@@ -27,6 +28,7 @@ const DEFAULT_STAGES = [
   { stage_key: "debit_note_for_invoice", stage_label: "Delivery Note (Inv.)", tat_minutes: 4320, description: "otp_pre_invoice_queue.debit_note_planned — 3 days from Pre-Invoice submit" },
   { stage_key: "make_invoice", stage_label: "Make Invoice", tat_minutes: 4320, description: "otp_pre_invoice_queue.make_invoice_planned — 3 days from Delivery Note (Inv.)" },
   { stage_key: "calibration", stage_label: "Calibration Certificate", tat_minutes: 7200, description: "otp_make_invoice.calibration_planned — 5 days from Make Invoice (calibration_required only)" },
+  { stage_key: "certi_hardcopy", stage_label: "Certi. Hardcopy", tat_minutes: 60, description: "otp_calibration_certificate.hardcopy_planned — 1 hour from Calibration Certificate (Cert. Hardcopy Req. = Yes only)" },
   { stage_key: "packaging_transport", stage_label: "Packaging and Dispatch", tat_minutes: 4320, description: "otp_make_invoice.packaging_transport_planned — 3 days from Make Invoice" },
   { stage_key: "client_confirmation", stage_label: "Client Confirmation", tat_minutes: 1440, description: "otp_packaging_transport.client_confirmation_planned — 1 day from Packaging and Dispatch" },
 ]

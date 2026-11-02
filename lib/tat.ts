@@ -11,6 +11,7 @@ const FALLBACK_TAT_MINUTES: Record<string, number> = {
   debit_note_for_invoice: 4320,
   make_invoice: 4320,
   calibration: 7200,
+  certi_hardcopy: 60,
   packaging_transport: 4320,
   client_confirmation: 1440,
 }

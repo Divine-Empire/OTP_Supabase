@@ -27,7 +27,14 @@ export async function GET(request: Request) {
     if (error) throw error
     if (!data || typeof data !== "object") throw new Error("otp_pending_counts returned no data")
 
-    return NextResponse.json({ success: true, data })
+    // Certi. Hardcopy is counted here rather than inside otp_pending_counts: that function also
+    // feeds the Dashboard summary, which must not show this stage. Same location rule as above.
+    let hardcopyQuery = supabase.from("otp_v_certi_hardcopy_pending").select("id", { count: "exact", head: true })
+    if (location) hardcopyQuery = hardcopyQuery.or(`order_location.is.null,order_location.eq."${String(location).replace(/"/g, "")}"`)
+    const { count: hardcopyCount, error: hardcopyError } = await hardcopyQuery
+    if (hardcopyError) throw hardcopyError
+
+    return NextResponse.json({ success: true, data: { ...data, "certificate-hardcopy": hardcopyCount ?? 0 } })
   } catch (err: any) {
     console.error("GET /api/otp-supabase/pending-counts exception:", err)
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

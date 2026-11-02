@@ -39,7 +39,10 @@ async function loadAsset({ src, maxPx, mime }) {
   }
 }
 
-export async function loadAssets() {
+// hardcopy: the page is printed on pre-printed letterhead stock, so the letterhead image and the
+// seal stay off the PDF (the stamp is applied on paper). Layout positions do not change.
+export async function loadAssets({ hardcopy = false } = {}) {
+  if (hardcopy) return { letterhead: null, seal: null, signature: await loadAsset(SIGNATURE) }
   const [letterhead, seal, signature] = await Promise.all([loadAsset(LETTERHEAD), loadAsset(SEAL), loadAsset(SIGNATURE)])
   return { letterhead, seal, signature }
 }
@@ -54,6 +57,26 @@ export function fmtDate(iso) {
 export const pageBox = (doc) => {
   const W = doc.internal.pageSize.getWidth()
   return { W, H: doc.internal.pageSize.getHeight(), M: MARGIN_LEFT, RIGHT: W - MARGIN_RIGHT }
+}
+
+// Adaptive spacing. A layout that can run long (a CTM with a three-line address, a sieve with
+// dozens of apertures) takes a spacing factor `k` as its last argument. drawFitted draws it
+// once off-page at k = 1 and, if the content would run into the seal, tries tighter factors
+// until it fits. Vertical gaps scale with k; fonts shrink more gently (fontFactor) so the
+// text stays readable.
+export const FIT_LEVELS = [1, 0.92, 0.84, 0.76, 0.68]
+export const fontFactor = (k) => Math.max(0.84, k)
+
+export async function drawFitted(JsPDF, doc, assets, draw) {
+  let chosen = FIT_LEVELS[FIT_LEVELS.length - 1]
+  for (const k of FIT_LEVELS) {
+    const probe = new JsPDF({ unit: "mm", format: "a4" })
+    if ((await draw(probe, {}, k)) <= CONTENT_BOTTOM) {
+      chosen = k
+      break
+    }
+  }
+  return draw(doc, assets, chosen)
 }
 
 // Letterhead background + the centred title. Returns the y of the title baseline.
@@ -72,13 +95,14 @@ export function drawPageStart(doc, assets) {
 // Customer / address, then the numbered detail rows. A field left blank in the form is
 // left off the certificate entirely and the numbered rows renumber themselves.
 // compact tightens line height and spacing for layouts that carry a table.
-export function drawDetails(doc, startY, party, details, { compact = false } = {}) {
+export function drawDetails(doc, startY, party, details, { compact = false, k = 1 } = {}) {
   const { M, RIGHT } = pageBox(doc)
-  const LH = compact ? 4.3 : 5.4
+  const f = fontFactor(k)
+  const LH = (compact ? 4.3 : 5.4) * f
   let y = startY
   const row = (label, value, labelX, colonX, valueX) => {
     doc.setFont(FONT, "normal")
-    doc.setFontSize(compact ? 10.5 : 11.5)
+    doc.setFontSize((compact ? 10.5 : 11.5) * f)
     doc.text(label, labelX, y)
     doc.text(":", colonX, y)
     const lines = doc.splitTextToSize(String(value).trim(), RIGHT - valueX)
@@ -87,23 +111,27 @@ export function drawDetails(doc, startY, party, details, { compact = false } = {
   }
 
   const p = party.filter(([, v]) => filled(v))
-  if (p.length) y += compact ? 8 : 13
+  if (p.length) y += (compact ? 8 : 13) * k
   p.forEach(([label, v], i) => {
-    if (i > 0) y += compact ? 1.5 : 4
+    if (i > 0) y += (compact ? 1.5 : 4) * k
     row(label, v, M + 2, M + 42, M + 50)
   })
 
   const d = details.filter(([, v]) => filled(v))
   const colon = M + 55
-  if (d.length) y += p.length ? (compact ? 4.5 : 8) : compact ? 8 : 13
+  if (d.length) y += (p.length ? (compact ? 4.5 : 8) : compact ? 8 : 13) * k
   d.forEach(([label, v], i) => row(`${i + 1}. ${label}`, v, M, colon, colon + 8))
   return y
 }
 
 // notes: [[{ t, b? }, ...], ...]; segments allow a bold word inside a wrapped paragraph.
-export function drawNotes(doc, startY, notes, { fontSize = 10.5, lineHeight = 5.4, gap = 2.5 } = {}) {
+export function drawNotes(doc, startY, notes, { fontSize = 10.5, lineHeight = 5.4, gap = 2.5, k = 1 } = {}) {
   const { M, RIGHT } = pageBox(doc)
   let y = startY
+  const f = fontFactor(k)
+  fontSize *= f
+  lineHeight *= f
+  gap *= k
   doc.setFontSize(fontSize)
   const indent = M + 8
   const maxW = RIGHT - indent

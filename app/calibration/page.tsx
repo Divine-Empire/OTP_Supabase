@@ -11,10 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RefreshCw, Eye, Filter, FileText } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CertificateDialog } from "./certificate-formats/certificate-dialog"
-import { BatchCertificateDialog } from "./certificate-formats/batch-certificate-dialog"
+import { BatchCertificateDialog, type CertificateSnapshot } from "./certificate-formats/batch-certificate-dialog"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapCalibrationPendingRowToUI, mapCalibrationHistoryRowToUI } from "@/lib/otp-utils"
+import { invalidateSidebarPendingCounts } from "@/components/layout/sidebar"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
 import { toast } from "sonner"
@@ -33,6 +34,9 @@ const pendingColumns = [
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "calibrationType", label: "Type", searchable: true },
+  { key: "certHardcopyRequired", label: "Cert. Hardcopy Req.", searchable: true },
+  { key: "hardcopyDeliveryType", label: "Hardcopy Delivery Add.", searchable: true },
+  { key: "hardcopyDeliveryAddress", label: "Hardcopy Address", searchable: true },
   { key: "itemList", label: "Items Packed", searchable: false },
   { key: "accessories", label: "Accessories", searchable: true },
   { key: "planned", label: "Planned", searchable: true },
@@ -70,7 +74,7 @@ export default function CalibrationPage() {
   const [certificateDialogOpen, setCertificateDialogOpen] = useState(false)
   const [generateOrder, setGenerateOrder] = useState<any>(null)
   // PDF made by Generate Certificate, keyed by make-invoice id; pre-attached in that order's Process form.
-  const [generatedPdfs, setGeneratedPdfs] = useState<Record<string, { file: File; numbers: string[] }>>({})
+  const [generatedPdfs, setGeneratedPdfs] = useState<Record<string, { file: File; numbers: string[]; snapshot: CertificateSnapshot }>>({})
   const [usingGeneratedPdf, setUsingGeneratedPdf] = useState(false)
   const [certificateNumber, setCertificateNumber] = useState("")
   const [certificateType, setCertificateType] = useState("")
@@ -182,6 +186,27 @@ export default function CalibrationPage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
+    if (!certificateNumber.trim()) {
+      toast.error("Certificate Number is required")
+      return
+    }
+    if (!certificateType.trim()) {
+      toast.error("Certificate Type is required")
+      return
+    }
+    if (!certificateUploadFile) {
+      toast.error("Certificate Upload is required")
+      return
+    }
+    // The hardcopy stage prefills from what Generate Certificate produced, so a wave that
+    // needs a hardcopy cannot be processed with a hand-picked file only.
+    const generated = generatedPdfs[selectedOrder.makeInvoiceId || selectedOrder.id]
+    const wantsHardcopy = selectedOrder.certHardcopyRequired === "YES"
+    if (wantsHardcopy && !generated) {
+      toast.error("Cert. Hardcopy is required for this order. Use Generate Certificate first.")
+      return
+    }
+
     setIsSubmitting(true)
     try {
       let certificateUploadUrl = ""
@@ -209,6 +234,7 @@ export default function CalibrationPage() {
           certificateType,
           certificateUploadUrl,
           remarks,
+          certificateSnapshot: wantsHardcopy ? generated?.snapshot : undefined,
           createdBy: currentUser?.fullName || currentUser?.username || "Admin",
         }),
       })
@@ -221,6 +247,7 @@ export default function CalibrationPage() {
           return rest
         })
         setSelectedOrder(null)
+        invalidateSidebarPendingCounts() // a hardcopy wave just became Pending in Certi. Hardcopy
         await fetchOrders()
         toast.success(`Order ${selectedOrder.orderNo} — calibration certificate recorded.`)
       } else {
@@ -257,6 +284,8 @@ export default function CalibrationPage() {
             </Button>
           </div>
         )
+      case "certHardcopyRequired":
+        return value ? <StatusBadge tone={value === "YES" ? "success" : "neutral"}>{value}</StatusBadge> : ""
       case "itemList":
         return (
           <Button
@@ -433,8 +462,9 @@ export default function CalibrationPage() {
           onOpenChange={(o) => !o && setGenerateOrder(null)}
           makeInvoiceId={generateOrder ? generateOrder.makeInvoiceId || generateOrder.id : null}
           orderNo={generateOrder?.orderNo || ""}
-          onGenerated={(file, numbers) =>
-            generateOrder && setGeneratedPdfs((prev) => ({ ...prev, [generateOrder.makeInvoiceId || generateOrder.id]: { file, numbers } }))
+          invoiceNumber={generateOrder?.invoiceNumber || ""}
+          onGenerated={(file, numbers, snapshot) =>
+            generateOrder && setGeneratedPdfs((prev) => ({ ...prev, [generateOrder.makeInvoiceId || generateOrder.id]: { file, numbers, snapshot } }))
           }
         />
 
@@ -525,7 +555,13 @@ export default function CalibrationPage() {
               <DialogTitle>Process Calibration Certificate</DialogTitle>
               <DialogDescription>Record the calibration certificate details for this order</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                handleSubmit()
+              }}
+              className="space-y-4"
+            >
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="orderNo">Order No.</Label>
@@ -539,31 +575,44 @@ export default function CalibrationPage() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="certificateNumber">Certificate Number</Label>
+                  <Label htmlFor="certificateNumber">
+                    Certificate Number <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="certificateNumber"
                     value={certificateNumber}
                     onChange={(e) => setCertificateNumber(e.target.value)}
                     placeholder="Enter certificate number"
+                    required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="certificateType">Certificate Type</Label>
+                  <Label htmlFor="certificateType">
+                    Certificate Type <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     id="certificateType"
                     value={certificateType}
                     onChange={(e) => setCertificateType(e.target.value)}
                     placeholder="Enter certificate type"
+                    required
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="certificateUpload">Certificate Upload</Label>
-                <Input id="certificateUpload" type="file" onChange={(e) => {
+                <Label htmlFor="certificateUpload">
+                  Certificate Upload <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="certificateUpload"
+                  type="file"
+                  required={!certificateUploadFile}
+                  onChange={(e) => {
                     setCertificateUploadFile(e.target.files?.[0] || null)
                     setUsingGeneratedPdf(false) // a hand-picked file replaces the generated one
-                  }} />
+                  }}
+                />
                 {certificateUploadFile && (
                   <p className="text-sm text-muted-foreground">
                     {usingGeneratedPdf ? "Generated certificate attached: " : "Selected: "}
@@ -579,10 +628,10 @@ export default function CalibrationPage() {
               </div>
 
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={isSubmitting}>
+                <Button type="submit" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <>
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
@@ -593,7 +642,7 @@ export default function CalibrationPage() {
                   )}
                 </Button>
               </div>
-            </div>
+            </form>
           </DialogContent>
         </Dialog>
 

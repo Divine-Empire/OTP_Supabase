@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { useServerHistory } from "@/hooks/use-server-history"
 
@@ -46,6 +46,7 @@ export interface UseStageListOptions<T = any> {
   extraFilters?: ExtraFilterDef[]
   // Show a "Search: ..." chip next to the filter chips.
   searchChip?: boolean
+  stageKey?: string
 }
 
 const matchesSearch = (row: any, cols: ColumnDef[], term: string) => {
@@ -64,6 +65,7 @@ export function useStageList<T extends Record<string, any>>({
   defaultHiddenColumns,
   extraFilters = [],
   searchChip = false,
+  stageKey,
 }: UseStageListOptions<T>) {
   const [currentTab, setCurrentTab] = useState<string>("pending")
   const [searchTerm, setSearchTermRaw] = useState("")
@@ -74,10 +76,94 @@ export function useStageList<T extends Record<string, any>>({
   const [historyPage, setHistoryPage] = useState(1)
   const [historyPageSize, setHistoryPageSize] = useState(defaultPageSize)
 
-  const initialVisibility = (cols: ColumnDef[]) =>
-    cols.reduce<Record<string, boolean>>((acc, c) => ({ ...acc, [c.key]: !defaultHiddenColumns?.has(c.key) }), {})
-  const [visiblePendingColumns, setVisiblePendingColumns] = useState(() => initialVisibility(pendingColumns))
-  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState(() => initialVisibility(historyColumns))
+  const getStageName = useCallback(() => {
+    if (stageKey) return stageKey
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname.replace(/^\/|\/$/g, "").replace(/\//g, "_")
+      if (path) return path
+    }
+    return "default_stage"
+  }, [stageKey])
+
+  const getStorageKey = useCallback(
+    (tab: "pending" | "history") => {
+      let uid = currentUser?.id || currentUser?.username
+      if (!uid && typeof window !== "undefined") {
+        try {
+          const savedUserStr = localStorage.getItem("otp-user")
+          if (savedUserStr) {
+            const u = JSON.parse(savedUserStr)
+            uid = u?.id || u?.username
+          }
+        } catch {}
+      }
+      return `otp_cols_${uid || "guest"}_${getStageName()}_${tab}`
+    },
+    [currentUser?.id, currentUser?.username, getStageName]
+  )
+
+  const initialVisibility = (cols: ColumnDef[], tab: "pending" | "history"): Record<string, boolean> => {
+    const defaults = cols.reduce<Record<string, boolean>>(
+      (acc, c) => ({ ...acc, [c.key]: !defaultHiddenColumns?.has(c.key) }),
+      {}
+    )
+    if (typeof window === "undefined") return defaults
+    try {
+      const key = getStorageKey(tab)
+      const saved = localStorage.getItem(key)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (parsed && typeof parsed === "object") {
+          return { ...defaults, ...parsed }
+        }
+      }
+    } catch {}
+    return defaults
+  }
+
+  const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(() =>
+    initialVisibility(pendingColumns, "pending")
+  )
+  const [visibleHistoryColumns, setVisibleHistoryColumns] = useState<Record<string, boolean>>(() =>
+    initialVisibility(historyColumns, "history")
+  )
+
+  // Sync saved column visibility once currentUser is available
+  useEffect(() => {
+    const uid = currentUser?.id || currentUser?.username
+    if (!uid) return
+    const pendingKey = getStorageKey("pending")
+    const historyKey = getStorageKey("history")
+    try {
+      const savedP = localStorage.getItem(pendingKey)
+      if (savedP) {
+        const parsed = JSON.parse(savedP)
+        if (parsed && typeof parsed === "object") {
+          setVisiblePendingColumns((prev) => ({ ...prev, ...parsed }))
+        }
+      }
+      const savedH = localStorage.getItem(historyKey)
+      if (savedH) {
+        const parsed = JSON.parse(savedH)
+        if (parsed && typeof parsed === "object") {
+          setVisibleHistoryColumns((prev) => ({ ...prev, ...parsed }))
+        }
+      }
+    } catch {}
+  }, [currentUser?.id, currentUser?.username, getStorageKey])
+
+  const saveVisibility = useCallback(
+    (tab: "pending" | "history", vis: Record<string, boolean>) => {
+      if (typeof window === "undefined") return
+      const key = getStorageKey(tab)
+      try {
+        localStorage.setItem(key, JSON.stringify(vis))
+      } catch (e) {
+        console.error("Failed to save column visibility to localStorage:", e)
+      }
+    },
+    [getStorageKey]
+  )
 
   // Any filter change starts over at page 1 (done in the setter, not an effect, so a
   // server-paged History makes one request, not a stale-page one plus a corrected one).
@@ -207,20 +293,48 @@ export function useStageList<T extends Record<string, any>>({
       return {
         columns: pendingColumns,
         visible: visiblePendingColumns,
-        toggle: (key: string) => setVisiblePendingColumns((prev) => ({ ...prev, [key]: !prev[key] })),
-        showAll: () => setVisiblePendingColumns(pendingColumns.reduce((acc, c) => ({ ...acc, [c.key]: true }), {})),
-        hideAll: () =>
-          setVisiblePendingColumns(pendingColumns.reduce((acc, c) => ({ ...acc, [c.key]: c.key === "actions" }), {})),
+        toggle: (key: string) =>
+          setVisiblePendingColumns((prev) => {
+            const next = { ...prev, [key]: !prev[key] }
+            saveVisibility("pending", next)
+            return next
+          }),
+        showAll: () => {
+          const next = pendingColumns.reduce<Record<string, boolean>>((acc, c) => ({ ...acc, [c.key]: true }), {})
+          setVisiblePendingColumns(next)
+          saveVisibility("pending", next)
+        },
+        hideAll: () => {
+          const next = pendingColumns.reduce<Record<string, boolean>>(
+            (acc, c) => ({ ...acc, [c.key]: c.key === "actions" }),
+            {}
+          )
+          setVisiblePendingColumns(next)
+          saveVisibility("pending", next)
+        },
       }
     }
     return {
       columns: historyColumns,
       visible: visibleHistoryColumns,
-      toggle: (key: string) => setVisibleHistoryColumns((prev) => ({ ...prev, [key]: !prev[key] })),
-      showAll: () => setVisibleHistoryColumns(historyColumns.reduce((acc, c) => ({ ...acc, [c.key]: true }), {})),
-      hideAll: () => setVisibleHistoryColumns(historyColumns.reduce((acc, c) => ({ ...acc, [c.key]: false }), {})),
+      toggle: (key: string) =>
+        setVisibleHistoryColumns((prev) => {
+          const next = { ...prev, [key]: !prev[key] }
+          saveVisibility("history", next)
+          return next
+        }),
+      showAll: () => {
+        const next = historyColumns.reduce<Record<string, boolean>>((acc, c) => ({ ...acc, [c.key]: true }), {})
+        setVisibleHistoryColumns(next)
+        saveVisibility("history", next)
+      },
+      hideAll: () => {
+        const next = historyColumns.reduce<Record<string, boolean>>((acc, c) => ({ ...acc, [c.key]: false }), {})
+        setVisibleHistoryColumns(next)
+        saveVisibility("history", next)
+      },
     }
-  }, [currentTab, pendingColumns, historyColumns, visiblePendingColumns, visibleHistoryColumns])
+  }, [currentTab, pendingColumns, historyColumns, visiblePendingColumns, visibleHistoryColumns, saveVisibility])
 
   const activeColumns = useMemo(
     () => columnPanel.columns.filter((c) => columnPanel.visible[c.key]),

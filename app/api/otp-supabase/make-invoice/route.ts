@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     if (mergeIds.length > 0) {
       const { data: waves, error: wavesError } = await supabase
         .from("otp_pre_invoice_queue")
-        .select("id, calibration_required, calibration_type")
+        .select("id, calibration_required, calibration_type, cert_hardcopy_required, hardcopy_delivery_type, hardcopy_delivery_address")
         .in("id", [queueId, ...mergeIds])
       if (wavesError) throw wavesError
 
@@ -125,6 +125,21 @@ export async function POST(request: Request) {
           .update({ calibration_required: true, calibration_type: calibrating.calibration_type })
           .eq("id", queueId)
         if (calError) throw calError
+      }
+
+      // Same for the hardcopy request: if any part wanted one and the primary
+      // wave didn't, the combined wave takes that part's delivery address.
+      const hardcopying = (waves || []).find((w: any) => w.cert_hardcopy_required && w.hardcopy_delivery_address)
+      if (hardcopying && !primary?.cert_hardcopy_required) {
+        const { error: hcError } = await supabase
+          .from("otp_pre_invoice_queue")
+          .update({
+            cert_hardcopy_required: true,
+            hardcopy_delivery_type: hardcopying.hardcopy_delivery_type,
+            hardcopy_delivery_address: hardcopying.hardcopy_delivery_address,
+          })
+          .eq("id", queueId)
+        if (hcError) throw hcError
       }
     }
 

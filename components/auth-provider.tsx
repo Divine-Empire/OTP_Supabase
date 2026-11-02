@@ -67,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.status === 401 && url.includes("/api/otp-supabase/") && !url.includes("/api/otp-supabase/users")) {
         localStorage.removeItem("otp-user")
         localStorage.removeItem("otp-authenticated")
+        try {
+          Object.keys(localStorage)
+            .filter((k) => k.startsWith("otp_cols_"))
+            .forEach((k) => localStorage.removeItem(k))
+        } catch {}
         setUser(null)
         setIsAuthenticated(false)
         router.push("/login")
@@ -121,6 +126,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("otp-authenticated")
     localStorage.removeItem("otp-orders")
     localStorage.removeItem("otp-cache")
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith("otp_cols_"))
+        .forEach((k) => localStorage.removeItem(k))
+    } catch {}
     router.push("/login")
   }
 

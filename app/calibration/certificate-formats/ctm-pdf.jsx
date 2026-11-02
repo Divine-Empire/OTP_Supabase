@@ -3,7 +3,9 @@
 // Addressee on the left, item name / certificate no. / SRN / dates on the right, a six-column readings table, the proving
 // ring statement, "Based On", the next due date and the notes. Anything left blank in the form
 // is left off the certificate, and fully blank table rows are dropped.
-import { FONT, drawNotes, drawPageStart, drawSignOff, filled, fmtDate, pageBox } from "./pdf-shared.jsx"
+// k is the adaptive spacing factor (see drawFitted in pdf-shared.jsx): a long address or item
+// name tightens the spacing instead of running into the seal.
+import { FONT, drawNotes, drawPageStart, drawSignOff, filled, fmtDate, fontFactor, pageBox } from "./pdf-shared.jsx"
 
 const NOTES = [
   [{ t: "M/s Divine Empire India Pvt. Ltd. is not responsible for any in calibration report I the gauge is tempered." }],
@@ -24,24 +26,25 @@ const COLUMNS = ["dial", "load", "indicated", "error", "percent"]
 const text = (v) => String(v ?? "").trim()
 
 // async: jspdf-autotable is loaded on demand so it stays out of the page bundle.
-export async function drawCtmPage(doc, values, assets) {
+export async function drawCtmPage(doc, values, assets, k = 1) {
   const { default: autoTable } = await import("jspdf-autotable")
   const { M, RIGHT } = pageBox(doc)
+  const f = fontFactor(k)
   const titleY = drawPageStart(doc, assets)
-  const top = titleY + 12
+  const top = titleY + 12 * k
 
   // Addressee (left).
   doc.setFont(FONT, "normal")
-  doc.setFontSize(11)
+  doc.setFontSize(11 * f)
   let leftY = top
   const party = [values.customerName, values.address].filter(filled)
   if (party.length) {
     doc.text("To,", M, leftY)
-    leftY += 9
+    leftY += 9 * k
     party.forEach((t) => {
       const lines = doc.splitTextToSize(text(t), 66)
       doc.text(lines, M + 8, leftY)
-      leftY += lines.length * 4.8 + 4
+      leftY += lines.length * 4.8 * f + 4 * k
     })
   }
 
@@ -54,20 +57,20 @@ export async function drawCtmPage(doc, values, assets) {
     filled(values.calibrationDate) ? `Date of Calibration: ${fmtDate(values.calibrationDate)}` : null,
     filled(values.nextCalibrationDate) ? `Next Calibration Due on: ${fmtDate(values.nextCalibrationDate)}` : null,
   ].filter(Boolean)
-  doc.setFontSize(10.5)
+  doc.setFontSize(10.5 * f)
   let rightY = top
   details.forEach((line) => {
     const lines = doc.splitTextToSize(line, RIGHT - rightX)
     doc.text(lines, rightX, rightY)
-    rightY += lines.length * 4.8
+    rightY += lines.length * 4.8 * f
   })
 
-  let y = Math.max(leftY, rightY) + 4
+  let y = Math.max(leftY, rightY) + 4 * k
 
   // Readings.
   const body = []
   for (let i = 1; i <= ROWS; i++) {
-    const cells = COLUMNS.map((k) => text(values[`${k}${i}`]))
+    const cells = COLUMNS.map((c) => text(values[`${c}${i}`]))
     if (cells.some(Boolean)) body.push([String(body.length + 1), ...cells])
   }
   if (body.length) {
@@ -77,7 +80,7 @@ export async function drawCtmPage(doc, values, assets) {
       head: [["Sl. No.", "Standard Dial Gauge Division", "Actual Load Applied in KN", "Indicated Load in KN", "Error Load", "Percentage Error"]],
       body,
       theme: "grid",
-      styles: { font: FONT, fontSize: 9, textColor: 0, lineColor: 0, lineWidth: 0.2, cellPadding: 0.9, halign: "center", valign: "middle" },
+      styles: { font: FONT, fontSize: 9 * f, textColor: 0, lineColor: 0, lineWidth: 0.2, cellPadding: 0.9 * k, halign: "center", valign: "middle" },
       headStyles: { fillColor: 255, textColor: 0, fontStyle: "normal" },
       columnStyles: { 0: { cellWidth: 14 } },
     })
@@ -86,8 +89,8 @@ export async function drawCtmPage(doc, values, assets) {
 
   // Proving ring statement, with the ring number in bold.
   if (filled(values.provingRingNo)) {
-    y += 6
-    doc.setFontSize(10)
+    y += 6 * k
+    doc.setFontSize(10 * f)
     const lead = "This Machine is calibrated by Certified Proving Ring No. "
     const ring = text(values.provingRingNo)
     const tail = " by CSIR National Physical Laboratory."
@@ -104,28 +107,28 @@ export async function drawCtmPage(doc, values, assets) {
   }
 
   if (filled(values.basedOn)) {
-    y += 6
+    y += 6 * k
     doc.setFont(FONT, "bold")
-    doc.setFontSize(10.5)
+    doc.setFontSize(10.5 * f)
     doc.text(`Based On ${text(values.basedOn)}`, M + 1, y)
   }
 
   if (filled(values.nextCalibrationDate)) {
-    y += 7
+    y += 7 * k
     doc.setFont(FONT, "normal")
-    doc.setFontSize(11.5)
+    doc.setFontSize(11.5 * f)
     const lead = "Next Calibration Due on: "
     doc.text(lead, M, y)
     doc.setFont(FONT, "bold")
     doc.text(fmtDate(values.nextCalibrationDate), M + doc.getTextWidth(lead), y)
   }
 
-  y += 9
+  y += 9 * k
   doc.setFont(FONT, "bold")
-  doc.setFontSize(11)
+  doc.setFontSize(11 * f)
   doc.text("Note:", M, y)
 
-  y = drawNotes(doc, y + 5.5, NOTES, { fontSize: 9, lineHeight: 3.9, gap: 1.1 })
+  y = drawNotes(doc, y + 5.5 * k, NOTES, { fontSize: 9, lineHeight: 3.9, gap: 1.1, k })
   drawSignOff(doc, assets)
   // The docx carries "Checked" bottom-left, opposite the seal and signature.
   doc.setFont(FONT, "bolditalic")

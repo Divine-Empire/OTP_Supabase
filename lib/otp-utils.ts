@@ -546,6 +546,9 @@ export function mapPreInvoiceRowToUI(row: any): any {
 
     calibrationRequired: row.calibration_required === true ? "YES" : row.calibration_required === false ? "NO" : "",
     calibrationType: row.calibration_type || "",
+    certHardcopyRequired: row.cert_hardcopy_required === true ? "YES" : row.cert_hardcopy_required === false ? "NO" : "",
+    hardcopyDeliveryType: row.hardcopy_delivery_type || "",
+    hardcopyDeliveryAddress: row.hardcopy_delivery_address || "",
     DeliveryNoteForInvoiceRequired:
       row.debit_note_for_invoice_required === true ? "YES" : row.debit_note_for_invoice_required === false ? "NO" : "",
     transportId: row.transport_id || "",
@@ -744,6 +747,16 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
   }
 }
 
+// The Cert. Hardcopy request captured at Pre-Invoice (see Database/84), as the
+// three UI columns Calibration Certificate and Certi. Hardcopy both show.
+export function mapHardcopyRequestToUI(queue: any) {
+  return {
+    certHardcopyRequired: queue?.cert_hardcopy_required === true ? "YES" : queue?.cert_hardcopy_required === false ? "NO" : "",
+    hardcopyDeliveryType: queue?.hardcopy_delivery_type || "",
+    hardcopyDeliveryAddress: queue?.hardcopy_delivery_address || "",
+  }
+}
+
 // Maps a Pending row from /api/otp-supabase/calibration (an
 // otp_make_invoice row, joined to its parent otp_orders) into the UI field
 // names calibration/page.tsx expects.
@@ -769,6 +782,7 @@ export function mapCalibrationPendingRowToUI(row: any): any {
     invoiceDate: row.invoice_date || "",
     invoiceCopyUrl: row.invoice_upload_url || "",
     calibrationType: row.queue?.calibration_type || "",
+    ...mapHardcopyRequestToUI(row.queue),
     planned: formatDateTime(row.calibration_planned),
     items: (row.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: row.items || [],
@@ -800,6 +814,7 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     invoiceDate: makeInvoice.invoice_date || "",
     invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
     calibrationType: makeInvoice.queue?.calibration_type || "",
+    ...mapHardcopyRequestToUI(makeInvoice.queue),
 
     certificateNumber: row.certificate_number || "",
     certificateType: row.certificate_type || "",
@@ -808,6 +823,43 @@ export function mapCalibrationHistoryRowToUI(row: any): any {
     createdBy: row.created_by || "",
     planned: formatDateTime(makeInvoice.calibration_planned),
     actual: formatDateTime(row.created_at),
+
+    items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
+    rawItems: makeInvoice.items || [],
+  }
+}
+
+// Maps a row from /api/otp-supabase/certi-hardcopy (status=pending|history): an
+// otp_calibration_certificate row joined to its order, make-invoice and queue
+// (Database/84). Both tabs have the same shape; `actual` / `hardcopyPdfUrl` are
+// only set once the hardcopy PDF has been generated.
+export function mapCertiHardcopyRowToUI(row: any): any {
+  if (!row) return {}
+
+  const order = row.order || {}
+  const makeInvoice = row.makeInvoice || {}
+
+  return {
+    id: row.id,
+    calibrationId: row.id,
+    orderId: order.id || row.order_id,
+    orderNo: order.order_no || "",
+    quotationNo: order.quotation_number || "",
+    timestamp: formatDateTime(row.created_at),
+    companyName: order.company_name || "",
+    crmName: order.crm_name || "",
+    orderLocation: order.order_location || "",
+    contactPersonName: order.contact_person || "",
+    contactNumber: order.phone_number || "",
+    invoiceNumber: makeInvoice.invoice_number || "",
+    invoiceDate: makeInvoice.invoice_date || "",
+    invoiceCopyUrl: makeInvoice.invoice_upload_url || "",
+    calibrationType: makeInvoice.queue?.calibration_type || "",
+    ...mapHardcopyRequestToUI(makeInvoice.queue),
+    certificateNumber: row.certificate_number || "",
+    planned: formatDateTime(row.hardcopy_planned),
+    actual: formatDateTime(row.hardcopy_created_at),
+    hardcopyPdfUrl: row.hardcopy_pdf_url || "",
 
     items: (makeInvoice.items || []).map((it: any) => ({ name: it.item_name, qty: it.qty, itemCode: it.item_code })),
     rawItems: makeInvoice.items || [],

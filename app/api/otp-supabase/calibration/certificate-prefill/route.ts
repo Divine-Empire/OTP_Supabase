@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     if (!access.userId) return NextResponse.json({ success: false, error: "Not signed in" }, { status: 401 })
 
     const supabase = getSupabaseAdmin()
-    const { data: row, error } = await supabase.from("otp_v_calibration_pending").select("id, items, invoice_date, order").eq("id", makeInvoiceId).maybeSingle()
+    const { data: row, error } = await supabase.from("otp_v_calibration_pending").select("id, items, invoice_date, invoice_number, order").eq("id", makeInvoiceId).maybeSingle()
     if (error) throw error
     if (!row || scopeRowsByAccess([row], access).length === 0) {
       return NextResponse.json({ success: false, error: "Calibration record not found" }, { status: 404 })
@@ -67,6 +67,7 @@ export async function GET(request: Request) {
         companyName: order.company_name || "",
         shippingAddress: order.shipping_address || "",
         invoiceDate: row.invoice_date || "",
+        invoiceNumber: (row as any).invoice_number || order.invoice_number || "",
         items,
         nextCertificateNumber: peek.data as string,
       },

@@ -6,9 +6,14 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CERTIFICATE_FORMATS, addMonths, getCertificateFormat, type CertificateValues } from "./formats"
+import { CERTIFICATE_FORMATS, addMonths, cleanSieveInstrumentName, getCertificateFormat, type CertificateValues } from "./formats"
 import { CertificateFields } from "./certificate-fields"
 import { certificatesPdfBlob, downloadBlob } from "./certificates-pdf.jsx"
+
+// Stored on otp_calibration_certificate.certificate_snapshot (hardcopy waves only).
+export interface CertificateSnapshot {
+  certs: { itemName: string; itemCode: string | null; formatId: string; values: CertificateValues }[]
+}
 
 interface PrefillItem {
   itemName: string
@@ -21,6 +26,7 @@ interface Prefill {
   companyName: string
   shippingAddress: string
   invoiceDate: string
+  invoiceNumber?: string
   items: PrefillItem[]
   nextCertificateNumber: string
 }
@@ -44,7 +50,9 @@ function parseNumber(next: string) {
 // otherwise a single certificate for the whole quantity.
 function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: boolean, formatId: string): Cert[] {
   const count = each ? item.qty : 1
-  const base = getCertificateFormat(formatId)?.getDefaults(item.itemName) ?? {}
+  const certQty = each ? 1 : item.qty
+  const base = getCertificateFormat(formatId)?.getDefaults(item.itemName, certQty) ?? {}
+  const instrumentName = formatId === "test_sieve" ? cleanSieveInstrumentName(item.itemName) : item.itemName
   return Array.from({ length: count }, (_, k) => ({
     id: `${itemIdx}-${k}-${Math.random().toString(36).slice(2, 7)}`,
     itemIdx,
@@ -54,10 +62,10 @@ function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: bo
       customerName: p.companyName,
       address: p.shippingAddress,
       certificateNo: "",
-      instrumentName: item.itemName,
+      instrumentName,
       calibrationDate: p.invoiceDate,
       nextCalibrationDate: addMonths(p.invoiceDate, formatId === "test_sieve" ? 12 : 6),
-      quantity: nos(each ? 1 : item.qty),
+      quantity: nos(certQty),
       // The certificate already prints "Based On", so a stored "Based On 9259 ..." drops the prefix.
       // An item with no stored IS value keeps the format's own default (the CTM formats carry one).
       basedOn: (item.isValue || "").replace(/^\s*based on\s*/i, "").trim() || base.basedOn || "",
@@ -72,19 +80,22 @@ export function BatchCertificateDialog({
   onOpenChange,
   makeInvoiceId,
   orderNo,
+  invoiceNumber,
   onGenerated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   makeInvoiceId: string | null
   orderNo: string
-  onGenerated: (file: File, certificateNumbers: string[]) => void
+  invoiceNumber?: string
+  onGenerated: (file: File, certificateNumbers: string[], snapshot: CertificateSnapshot) => void
 }) {
   const [prefill, setPrefill] = useState<Prefill | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [formats, setFormats] = useState<(string | null)[]>([])
   const [each, setEach] = useState<boolean[]>([])
+  const [skipped, setSkipped] = useState<boolean[]>([])
   const [certs, setCerts] = useState<Cert[]>([])
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
   const [step, setStep] = useState<Step>("edit")
@@ -121,9 +132,11 @@ export function BatchCertificateDialog({
         if (!json.success) throw new Error(json.error || "Could not load certificate details")
         const p: Prefill = json.data
         setPrefill(p)
+        const eachArr = p.items.map((it) => it.format !== "test_sieve")
         setFormats(p.items.map((it) => it.format))
-        setEach(p.items.map(() => true)) // most orders need one certificate per unit
-        const initial = p.items.flatMap((it, i) => (it.format ? buildItemCerts(i, it, p, true, it.format!) : []))
+        setEach(eachArr)
+        setSkipped(p.items.map(() => false))
+        const initial = p.items.flatMap((it, i) => (it.format ? buildItemCerts(i, it, p, eachArr[i], it.format!) : []))
         setCerts(initial)
         setOpenIds(new Set(initial.slice(0, 1).map((c) => c.id)))
       })
@@ -149,7 +162,15 @@ export function BatchCertificateDialog({
 
   const setFormat = (i: number, format: string) => {
     setFormats((f) => f.map((v, k) => (k === i ? format : v)))
-    rebuildItem(i, format, each[i])
+    setSkipped((s) => s.map((v, k) => (k === i ? false : v)))
+    const nextEach = format === "test_sieve" ? false : each[i]
+    setEach((e) => e.map((v, k) => (k === i ? nextEach : v)))
+    rebuildItem(i, format, nextEach)
+  }
+  const toggleSkip = (i: number) => {
+    setSkipped((prev) => prev.map((s, idx) => (idx === i ? !s : s)))
+    releasePreview()
+    setStep("edit")
   }
   const setEachQty = (i: number, value: boolean) => {
     setEach((e) => e.map((v, k) => (k === i ? value : v)))
@@ -187,7 +208,8 @@ export function BatchCertificateDialog({
     }))
   }, [certs, prefill, reserved])
 
-  const missing = (prefill?.items || []).map((_, i) => i).filter((i) => !formats[i])
+  const missing = (prefill?.items || []).map((_, i) => i).filter((i) => !formats[i] && !skipped[i])
+  const skippedCount = skipped.filter(Boolean).length
   const tooMany = certs.length > 500
 
   const toPdfInput = (list: typeof numbered) => list.map((c) => ({ formatId: formats[c.itemIdx] as string, values: c.values }))
@@ -224,9 +246,20 @@ export function BatchCertificateDialog({
       }
       const final = numbered.map((c, idx) => ({ ...c, values: { ...c.values, certificateNo: reservedRef.current[idx] } }))
       const blob = await certificatesPdfBlob(toPdfInput(final))
-      const filename = `Calibration_Certificates_${String(orderNo || "order").replace(/[^a-z0-9]+/gi, "_")}.pdf`
+      const inv = prefill?.invoiceNumber || invoiceNumber || orderNo || "order"
+      const safeInvoiceNo = String(inv).trim().replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_")
+      const filename = `calibration_certificate_${safeInvoiceNo}.pdf`
       downloadBlob(blob, filename)
-      onGenerated(new File([blob], filename, { type: "application/pdf" }), final.map((c) => c.values.certificateNo))
+      // What the Certi. Hardcopy stage prefills from: each certificate exactly as it was printed.
+      const snapshot: CertificateSnapshot = {
+        certs: final.map((c) => ({
+          itemName: prefill?.items[c.itemIdx]?.itemName || "",
+          itemCode: prefill?.items[c.itemIdx]?.itemCode || null,
+          formatId: formats[c.itemIdx] as string,
+          values: c.values,
+        })),
+      }
+      onGenerated(new File([blob], filename, { type: "application/pdf" }), final.map((c) => c.values.certificateNo), snapshot)
       toast.success(`${final.length} certificate${final.length === 1 ? "" : "s"} generated. The PDF is attached to the Process form.`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not generate the PDF")
@@ -258,11 +291,18 @@ export function BatchCertificateDialog({
             {prefill.items.map((item, i) => {
               const itemCerts = numbered.filter((c) => c.itemIdx === i)
               return (
-                <div key={i} className="rounded-lg border">
+                <div key={i} className={`rounded-lg border ${skipped[i] ? "border-muted bg-muted/10 opacity-70" : ""}`}>
                   <div className="space-y-2 border-b bg-muted/40 p-3">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <p className="text-sm font-semibold">{item.itemName}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold">{item.itemName}</p>
+                          {skipped[i] && (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                              Skipped
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {item.itemCode || "No item code"} · Qty {item.qty}
                           {formats[i] ? ` · ${formatName(formats[i])}` : ""}
@@ -286,22 +326,47 @@ export function BatchCertificateDialog({
                         </div>
                       )}
                     </div>
-                    {!formats[i] && (
+                    {!formats[i] && !skipped[i] && (
                       <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                         <AlertTriangle className="h-4 w-4 shrink-0" />
-                        <span>No certificate format is set for this item. Select one to continue.</span>
-                        <Select onValueChange={(v) => setFormat(i, v)}>
-                          <SelectTrigger className="ml-auto h-8 w-44 bg-white text-xs">
-                            <SelectValue placeholder="Select format" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {CERTIFICATE_FORMATS.map((f) => (
-                              <SelectItem key={f.id} value={f.id} className="text-xs">
-                                {f.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <span>No certificate format is set for this item. Select one or skip to continue.</span>
+                        <div className="ml-auto flex items-center gap-2">
+                          <Select onValueChange={(v) => setFormat(i, v)}>
+                            <SelectTrigger className="h-8 w-44 bg-white text-xs">
+                              <SelectValue placeholder="Select format" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {CERTIFICATE_FORMATS.map((f) => (
+                                <SelectItem key={f.id} value={f.id} className="text-xs">
+                                  {f.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => toggleSkip(i)}
+                            className="h-8 border-amber-300 bg-white text-xs hover:bg-amber-100"
+                          >
+                            Skip
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {!formats[i] && skipped[i] && (
+                      <div className="flex items-center justify-between rounded-md border border-dashed border-muted-foreground/30 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                        <span className="italic">Item skipped — no certificate will be generated.</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => toggleSkip(i)}
+                          className="h-7 text-xs text-primary hover:underline"
+                        >
+                          Unskip
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -353,6 +418,7 @@ export function BatchCertificateDialog({
                 <p className="text-xs text-muted-foreground">
                   {certs.length} certificate{certs.length === 1 ? "" : "s"}
                   {missing.length > 0 && ` · ${missing.length} item${missing.length === 1 ? "" : "s"} need a format`}
+                  {skippedCount > 0 && ` · ${skippedCount} skipped`}
                   {tooMany && " · too many for one PDF (max 500)"}
                 </p>
                 <Button onClick={handlePreview} disabled={busy || certs.length === 0 || missing.length > 0 || tooMany}>

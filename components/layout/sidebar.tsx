@@ -16,6 +16,7 @@ import {
   Receipt,
   FileSpreadsheet,
   Award,
+  FileCheck,
   Settings,
   LogOut,
   Menu,
@@ -99,6 +100,12 @@ const menuItems = [
     label: "Calibration Certificate",
     icon: Award,
     step: "calibration",
+  },
+  {
+    href: "/certificate-hardcopy",
+    label: "Certi. Hardcopy",
+    icon: FileCheck,
+    step: "certificate-hardcopy",
   },
   {
     href: "/packaging-transport",

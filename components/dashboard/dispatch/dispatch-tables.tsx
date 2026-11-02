@@ -122,7 +122,7 @@ const ALL_DISPATCH_COLUMNS = [
   { key: 'qty', label: 'Qty', defaultVisible: false },
   { key: 'amount', label: 'Amount', defaultVisible: true },
   { key: 'approvedName', label: 'Approved Name', defaultVisible: false },
-  { key: 'calibrationCertificateRequired', label: 'Calibration Certificate Required', defaultVisible: false },
+  { key: 'calibrationCertificateRequired', label: 'Calib. Certificate Req.', defaultVisible: false },
   { key: 'certificateCategory', label: 'Certificate Category', defaultVisible: false },
   { key: 'installationRequired', label: 'Installation Required', defaultVisible: false },
   { key: 'ewayBillDetails', label: 'Eway Bill Details', defaultVisible: false },

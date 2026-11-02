@@ -22,7 +22,7 @@ export interface CertificateFormat {
   thumbnail: "common" | "table"
   fields: CertificateField[]
   table?: TableSpec
-  getDefaults: (itemName?: string) => CertificateValues
+  getDefaults: (itemName?: string, qty?: number) => CertificateValues
 }
 
 const YEAR = () => new Date().getFullYear()
@@ -297,13 +297,17 @@ export function resolveWeightBalanceCapacity(itemName: string): string | null {
 
 export function getWeightBalanceDefaults(itemName?: string): CertificateValues {
   const key = itemName ? resolveWeightBalanceCapacity(itemName) : null
-  const spec = (key && WB_READINGS_BY_CAPACITY[key]) || WB_READINGS_BY_CAPACITY["5kg"]
-  const rows = spec.rows
+  // A capacity with no table (e.g. 6 kg, 20 kg, 60 kg) starts with an empty readings table to be
+  // filled in by hand. It never borrows another capacity's readings, which would print wrong numbers.
+  // The blank Certificate tool (no item) shows the 5 kg sample from the docx.
+  const spec = !itemName ? WB_READINGS_BY_CAPACITY["5kg"] : key ? WB_READINGS_BY_CAPACITY[key] : undefined
+  const rows = spec?.rows ?? []
+  const unit = spec?.unit ?? (itemName && /\d\s*(?:gm|gms|gram|g)\b/i.test(itemName) && !/kg/i.test(itemName) ? "g" : "kg")
   return {
     ...PARTY_DEFAULTS(),
     instrumentName: itemName || "WEIGHING BALANCE",
     idNo: "",
-    wbUnit: spec.unit,
+    wbUnit: unit,
     basedOn: "IS OIML R-76-1",
     ...Object.fromEntries(
       Array.from({ length: 10 }, (_, i) => WB_COLUMN_KEYS.map((k, c) => [`${k}${i + 1}`, rows[i]?.[c] ?? ""])).flat()
@@ -347,20 +351,37 @@ const SIEVE_FIELDS: CertificateField[] = [
   { key: "basedOn", label: "Standard / Based On" },
 ]
 
-function getSieveSpec(itemName: string): string {
+export function cleanSieveInstrumentName(itemName: string): string {
+  const m = itemName.match(/^(.+?\bDIA\b)/i)
+  return m ? m[1].trim() : itemName
+}
+
+export function extractSieveAperture(itemName: string): string | null {
+  const m = itemName.match(/\bDIA\b\s*[-–:]?\s*(.+)$/i)
+  return m ? m[1].trim() : null
+}
+
+export function getSieveSpec(itemName: string, qty: number = 1): string {
+  const aperture = extractSieveAperture(itemName)
+  const repeatCount = Math.max(1, qty || 1)
+  const aperturesText = aperture ? Array(repeatCount).fill(aperture).join(", ") : ""
+
   if (/GI[- ]*300/i.test(itemName)) {
-    const m = itemName.match(/DIA-?\s*(.+)$/i)
-    return m ? `GI Sieves 300 mm Dia– ${m[1].trim()}` : "GI Sieves 300 mm Dia– 37.5mm, 31.5mm, 22.4mm, 16mm, 13.2mm, 12.50mm, 11.2mm, 10mm, 9.5mm, 2.36mm, 2.36mm"
+    return aperturesText
+      ? `GI Sieves 300 mm Dia– ${aperturesText}`
+      : "GI Sieves 300 mm Dia– 37.5mm, 31.5mm, 22.4mm, 16mm, 13.2mm, 12.50mm, 11.2mm, 10mm, 9.5mm, 2.36mm, 2.36mm"
   }
   if (/GI[- ]*450/i.test(itemName)) {
-    const m = itemName.match(/DIA-?\s*(.+)$/i)
-    return m ? `GI Sieves 450 mm Dia– ${m[1].trim()}` : "GI Sieves 450 mm Dia– 37.5mm, 31.5mm, 22.4mm, 16mm, 13.2mm, 12.50mm, 11.2mm, 10mm, 9.5mm, 2.36mm, 2.36mm"
+    return aperturesText
+      ? `GI Sieves 450 mm Dia– ${aperturesText}`
+      : "GI Sieves 450 mm Dia– 37.5mm, 31.5mm, 22.4mm, 16mm, 13.2mm, 12.50mm, 11.2mm, 10mm, 9.5mm, 2.36mm, 2.36mm"
   }
   if (/BRASS/i.test(itemName)) {
-    const m = itemName.match(/DIA-?\s*(.+)$/i)
-    return m ? `Brass Sieves 200 mm Dia– ${m[1].trim()}` : "Brass Sieves 200 mm Dia – 4.75mm, 2mm, 2mm, 1.7mm, 1mm, 1mm, 1mm, 1mm, 600 micron, 600 micron, 600 micron, 600 micron, 425 micron, 425 micron, 425 micron, 212 micron, 212 micron, 90 micron, 90 micron, 500 micron"
+    return aperturesText
+      ? `Brass Sieves 200 mm Dia– ${aperturesText}`
+      : "Brass Sieves 200 mm Dia – 4.75mm, 2mm, 2mm, 1.7mm, 1mm, 1mm, 1mm, 1mm, 600 micron, 600 micron, 600 micron, 600 micron, 425 micron, 425 micron, 425 micron, 212 micron, 212 micron, 90 micron, 90 micron, 500 micron"
   }
-  return ""
+  return aperturesText
 }
 
 export const TEST_SIEVE_FORMAT: CertificateFormat = {
@@ -368,10 +389,10 @@ export const TEST_SIEVE_FORMAT: CertificateFormat = {
   name: "Test Sieve",
   thumbnail: "common",
   fields: SIEVE_FIELDS,
-  getDefaults: (itemName?: string) => ({
+  getDefaults: (itemName?: string, qty?: number) => ({
     ...PARTY_DEFAULTS(),
-    instrumentName: itemName || "TEST SIEVE",
-    sieveSpecification: itemName ? getSieveSpec(itemName) : "",
+    instrumentName: itemName ? cleanSieveInstrumentName(itemName) : "TEST SIEVE",
+    sieveSpecification: itemName ? getSieveSpec(itemName, qty) : "",
     basedOn: "IS: 460 Part-I, Part-II & Part-III",
   }),
 }

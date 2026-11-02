@@ -41,8 +41,11 @@ const historyColumns = [
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "actual", label: "Actual", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
-  { key: "calibrationRequired", label: "Calibration Required", searchable: true },
+  { key: "calibrationRequired", label: "Calib. Certificate Req.", searchable: true },
   { key: "calibrationType", label: "Calibration Type", searchable: true },
+  { key: "certHardcopyRequired", label: "Cert. Hardcopy Req.", searchable: true },
+  { key: "hardcopyDeliveryType", label: "Hardcopy Delivery Add.", searchable: true },
+  { key: "hardcopyDeliveryAddress", label: "Hardcopy Address", searchable: true },
   { key: "DeliveryNoteForInvoiceRequired", label: "Delivery Note (Inv.) Required", searchable: true },
   { key: "transportId", label: "Transport Id/Name", searchable: true },
   { key: "gstNumber", label: "GST Number", searchable: true },
@@ -120,6 +123,10 @@ export default function PreInvoicePage() {
   const [srnAttachmentFile, setSrnAttachmentFile] = useState<File | null>(null)
   const [calibrationRequired, setCalibrationRequired] = useState("")
   const [calibrationType, setCalibrationType] = useState("")
+  const [certHardcopyRequired, setCertHardcopyRequired] = useState("")
+  const [hardcopyDeliveryType, setHardcopyDeliveryType] = useState("")
+  const [hardcopyOtherAddress, setHardcopyOtherAddress] = useState("")
+  const hardcopyRequested = calibrationRequired === "YES" && certHardcopyRequired === "YES"
   const [DeliveryNoteForInvoiceRequired, setDeliveryNoteForInvoiceRequired] = useState("")
   const [transportId, setTransportId] = useState("")
   const [gstNumber, setGstNumber] = useState("")
@@ -229,6 +236,9 @@ export default function PreInvoicePage() {
     setSelectedOrder(order)
     setCalibrationRequired("")
     setCalibrationType("")
+    setCertHardcopyRequired("")
+    setHardcopyDeliveryType("")
+    setHardcopyOtherAddress("")
     setDeliveryNoteForInvoiceRequired("")
     setTransportId("")
     setGstNumber("")
@@ -304,6 +314,23 @@ export default function PreInvoicePage() {
       return
     }
 
+    if (calibrationRequired === "YES") {
+      if (!certHardcopyRequired) {
+        toast.error("Please select whether a Cert. Hardcopy is required.")
+        return
+      }
+      if (certHardcopyRequired === "YES") {
+        if (!hardcopyDeliveryType) {
+          toast.error("Please select the Hardcopy Delivery Add.")
+          return
+        }
+        if (hardcopyDeliveryType === "Other" && !hardcopyOtherAddress.trim()) {
+          toast.error("Please enter the hardcopy delivery address.")
+          return
+        }
+      }
+    }
+
     const missingReasons = Array.from(reducedNames).filter((key) => !reductionReasons[key]?.trim())
     if (missingReasons.length > 0) {
       toast.error("Please enter a reason for every item whose qty was reduced below what was queued.")
@@ -343,6 +370,16 @@ export default function PreInvoicePage() {
           })),
           calibrationRequired: calibrationRequired || "",
           calibrationType: calibrationRequired === "YES" ? calibrationType : "",
+          certHardcopyRequired: calibrationRequired === "YES" ? certHardcopyRequired : "",
+          // Billing/Shipping are snapshotted from the order now, so a later address edit can't change where this hardcopy goes.
+          hardcopyDeliveryType: hardcopyRequested ? hardcopyDeliveryType : "",
+          hardcopyDeliveryAddress: hardcopyRequested
+            ? hardcopyDeliveryType === "Billing Address"
+              ? selectedOrder.billingAddress || ""
+              : hardcopyDeliveryType === "Shipping Address"
+                ? selectedOrder.shippingAddress || ""
+                : hardcopyOtherAddress.trim()
+            : "",
           transportId,
           gstNumber,
           vehicleNumber,
@@ -514,6 +551,7 @@ export default function PreInvoicePage() {
         )
       }
       case "calibrationRequired":
+      case "certHardcopyRequired":
       case "DeliveryNoteForInvoiceRequired":
         return value ? (
           <StatusBadge tone={value === "YES" ? "success" : "neutral"}>
@@ -806,8 +844,18 @@ export default function PreInvoicePage() {
               {/* Row 1: Calibration Required, Dispatch Location, Delivery Note (Inv.) Required */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="calibration">Calibration Certificate Required</Label>
-                  <Select value={calibrationRequired} onValueChange={setCalibrationRequired}>
+                  <Label htmlFor="calibration">Calib. Certificate Req.</Label>
+                  <Select
+                    value={calibrationRequired}
+                    onValueChange={(v) => {
+                      setCalibrationRequired(v)
+                      if (v !== "YES") {
+                        setCertHardcopyRequired("")
+                        setHardcopyDeliveryType("")
+                        setHardcopyOtherAddress("")
+                      }
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
@@ -860,6 +908,61 @@ export default function PreInvoicePage() {
                         <SelectItem value="Both">Both</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                )}
+                {calibrationRequired === "YES" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="certHardcopyRequired">Cert. Hardcopy Req.</Label>
+                    <Select
+                      value={certHardcopyRequired}
+                      onValueChange={(v) => {
+                        setCertHardcopyRequired(v)
+                        if (v !== "YES") {
+                          setHardcopyDeliveryType("")
+                          setHardcopyOtherAddress("")
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="YES">Yes</SelectItem>
+                        <SelectItem value="NO">No</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {hardcopyRequested && (
+                  <div className="space-y-2">
+                    <Label htmlFor="hardcopyDeliveryType">Hardcopy Delivery Add.</Label>
+                    <Select
+                      value={hardcopyDeliveryType}
+                      onValueChange={(v) => {
+                        setHardcopyDeliveryType(v)
+                        if (v !== "Other") setHardcopyOtherAddress("")
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select address" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Billing Address">Billing Address</SelectItem>
+                        <SelectItem value="Shipping Address">Shipping Address</SelectItem>
+                        <SelectItem value="Other">Other</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {hardcopyRequested && hardcopyDeliveryType === "Other" && (
+                  <div className="space-y-2 col-span-3">
+                    <Label htmlFor="hardcopyOtherAddress">Hardcopy Delivery Address</Label>
+                    <Input
+                      id="hardcopyOtherAddress"
+                      value={hardcopyOtherAddress}
+                      onChange={(e) => setHardcopyOtherAddress(e.target.value)}
+                      placeholder="Type the delivery address"
+                    />
                   </div>
                 )}
               </div>

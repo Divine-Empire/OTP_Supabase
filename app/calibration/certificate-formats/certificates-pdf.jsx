@@ -6,7 +6,11 @@ import { drawProvingRing50Page } from "./proving-ring-50-pdf.jsx"
 import { drawCtmPage } from "./ctm-pdf.jsx"
 import { drawWeightBalancePage } from "./weight-balance-pdf.jsx"
 import { drawTestSieveGi300Page } from "./test-sieve-gi-300-pdf.jsx"
-import { loadAssets } from "./pdf-shared.jsx"
+import { drawFitted, loadAssets } from "./pdf-shared.jsx"
+
+// Layouts that can outgrow the page (long address / item name / aperture list) and so accept the
+// adaptive spacing factor as their last argument; see drawFitted in pdf-shared.jsx.
+const ADAPTIVE = new Set(["ctm_1000", "ctm_1500", "ctm_2000", "test_sieve"])
 
 export const DRAWERS = {
   common_format: drawCommonPage,
@@ -19,20 +23,25 @@ export const DRAWERS = {
 }
 
 // certs: [{ formatId, values }] -> jsPDF document.
-export async function buildCertificatesPdf(certs) {
-  const [{ jsPDF }, assets] = await Promise.all([import("jspdf"), loadAssets()])
+// options.hardcopy: no letterhead / seal (see loadAssets).
+export async function buildCertificatesPdf(certs, options = {}) {
+  const [{ jsPDF }, assets] = await Promise.all([import("jspdf"), loadAssets(options)])
   const doc = new jsPDF({ unit: "mm", format: "a4", compress: true })
   for (const [i, cert] of certs.entries()) {
     if (i > 0) doc.addPage()
     const draw = DRAWERS[cert.formatId]
     if (!draw) throw new Error(`No certificate layout for format "${cert.formatId}"`)
-    await draw(doc, cert.values, assets)
+    if (ADAPTIVE.has(cert.formatId)) {
+      await drawFitted(jsPDF, doc, assets, (d, a, k) => draw(d, cert.values, a, k))
+    } else {
+      await draw(doc, cert.values, assets)
+    }
   }
   return doc
 }
 
-export async function certificatesPdfBlob(certs) {
-  return (await buildCertificatesPdf(certs)).output("blob")
+export async function certificatesPdfBlob(certs, options = {}) {
+  return (await buildCertificatesPdf(certs, options)).output("blob")
 }
 
 export function downloadBlob(blob, filename) {

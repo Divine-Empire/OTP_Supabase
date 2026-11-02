@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase"
 import { fetchAllRows } from "@/lib/fetch-all"
 import { parseHistoryParams, applyHistoryFilters, pageJson , crmFacet } from "@/lib/history-filters"
 import { requestAccess, scopeRowsByAccess } from "@/lib/request-access"
+import { addTatMinutes, getStageTatMinutes } from "@/lib/tat"
 
 // Stage — Calibration Certificate.
 //
@@ -72,12 +73,13 @@ export async function POST(request: Request) {
   try {
     const { actorName } = await requestAccess(request)
     const body = await request.json()
-    const { makeInvoiceId, certificateNumber, certificateType, certificateUploadUrl, remarks } = body as {
+    const { makeInvoiceId, certificateNumber, certificateType, certificateUploadUrl, remarks, certificateSnapshot } = body as {
       makeInvoiceId: string
       certificateNumber?: string
       certificateType?: string
       certificateUploadUrl?: string
       remarks?: string
+      certificateSnapshot?: { certs?: unknown[] }
     }
 
     if (!makeInvoiceId) {
@@ -88,12 +90,34 @@ export async function POST(request: Request) {
 
     const { data: makeInvoiceRow, error: miError } = await supabase
       .from("otp_make_invoice")
-      .select("order_id")
+      .select("order_id, pre_invoice_queue_id")
       .eq("id", makeInvoiceId)
       .maybeSingle()
     if (miError) throw miError
     if (!makeInvoiceRow) {
       return NextResponse.json({ success: false, error: "Make Invoice record not found" }, { status: 404 })
+    }
+
+    // Cert. Hardcopy Req. = Yes (captured at Pre-Invoice): this Process also opens the
+    // Certi. Hardcopy stage by setting hardcopy_planned (now + that stage's TAT). Waves
+    // without the request keep these columns NULL and never reach that stage.
+    let hardcopyColumns: Record<string, unknown> = {}
+    if (makeInvoiceRow.pre_invoice_queue_id) {
+      const { data: queueRow, error: queueError } = await supabase
+        .from("otp_pre_invoice_queue")
+        .select("cert_hardcopy_required")
+        .eq("id", makeInvoiceRow.pre_invoice_queue_id)
+        .maybeSingle()
+      if (queueError) throw queueError
+      if (queueRow?.cert_hardcopy_required === true) {
+        if (!Array.isArray(certificateSnapshot?.certs) || certificateSnapshot.certs.length === 0) {
+          return NextResponse.json({ success: false, error: "Cert. Hardcopy is required: generate the certificates first" }, { status: 400 })
+        }
+        hardcopyColumns = {
+          hardcopy_planned: addTatMinutes(new Date(), await getStageTatMinutes("certi_hardcopy")),
+          certificate_snapshot: certificateSnapshot,
+        }
+      }
     }
 
     const { data, error } = await supabase
@@ -106,8 +130,9 @@ export async function POST(request: Request) {
         certificate_upload_url: certificateUploadUrl || null,
         remarks: remarks || null,
         created_by: actorName,
+        ...hardcopyColumns,
       })
-      .select()
+      .select("id, make_invoice_id, order_id, certificate_number, certificate_type, certificate_upload_url, remarks, created_by, created_at, hardcopy_planned")
       .single()
 
     if (error) throw error

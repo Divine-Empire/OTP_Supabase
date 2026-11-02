@@ -47,6 +47,10 @@ const PAGE_METADATA: Record<string, { title: string; description: string }> = {
     title: "Calibration Certificate",
     description: "Track testing certifications and quality approvals",
   },
+  "/certificate-hardcopy": {
+    title: "Certi. Hardcopy",
+    description: "Print-ready certificate copies for orders that need a hardcopy",
+  },
   "/packaging-transport": {
     title: "Packaging and Dispatch",
     description: "Driver assignment, photo verification, and freight preparation",
