@@ -68,7 +68,6 @@ export async function POST(request: Request) {
     const {
       indentId,
       customerWantsMaterialAs,
-      createdBy,
       warehouseLocation,
       receivingLeadTime,
       inventoryPhotoUrl,
@@ -76,7 +75,6 @@ export async function POST(request: Request) {
     } = body as {
       indentId: string
       customerWantsMaterialAs?: string
-      createdBy?: string
       warehouseLocation?: string
       receivingLeadTime?: number | string
       inventoryPhotoUrl?: string
@@ -87,11 +85,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Missing indentId" }, { status: 400 })
     }
 
+    if (!warehouseLocation || !(Number(receivingLeadTime) > 0)) {
+      return NextResponse.json({ success: false, error: "Warehouse location and Lead Time are required" }, { status: 400 })
+    }
+
     const supabase = getSupabaseAdmin()
 
     const { data: indentRow, error: fetchError } = await supabase
       .from("otp_indent_creation")
-      .select("order_id, items, indent_created_at, material_received, order:otp_orders(order_no)")
+      .select("order_id, items, indent_created_at, material_received, order:otp_orders(order_no, crm_name)")
       .eq("id", indentId)
       .maybeSingle()
     if (fetchError) throw fetchError
@@ -117,6 +119,9 @@ export async function POST(request: Request) {
     // PFMS_CREATE_INDENT_URL is unset, same as before.
     const generatedIndentNos = await tryCreatePfmsIndent({
       orderNo: (indentRow as any).order?.order_no || "",
+      // pfms_indent_generation.createdBy = the order's CRM; .attachment = the Inventory Photo url.
+      createdBy: (indentRow as any).order?.crm_name || null,
+      attachmentUrl: inventoryPhotoUrl || null,
       warehouseLocation: warehouseLocation || null,
       leadTime: receivingLeadTime ? Number(receivingLeadTime) : null,
       items: liveItems.map((it: any) => ({ item_code: it.item_code, item_name: it.item_name, qty: it.qty })),
@@ -126,7 +131,7 @@ export async function POST(request: Request) {
       .from("otp_indent_creation")
       .update({
         customer_wants_material_as: customerWantsMaterialAs || null,
-        created_by: createdBy || actorName,
+        created_by: actorName,
         warehouse_location: warehouseLocation || null,
         receiving_lead_time: receivingLeadTime ? Number(receivingLeadTime) : null,
         inventory_photo_url: inventoryPhotoUrl || null,

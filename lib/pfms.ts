@@ -46,6 +46,11 @@ async function resolveItemCategories(baseUrl: string, _itemNames: string[]): Pro
 
 export async function tryCreatePfmsIndent(params: {
   orderNo: string
+  // Becomes pfms_indent_generation.createdBy (the order's CRM name); falls back to the old
+  // "OTP System (auto)" marker when the order has no CRM.
+  createdBy: string | null
+  // Becomes pfms_indent_generation.attachment (a public url, stored as given by PFMS).
+  attachmentUrl: string | null
   warehouseLocation: string | null
   leadTime: number | null
   items: { item_code: string; item_name: string; qty: number }[]
@@ -65,10 +70,10 @@ export async function tryCreatePfmsIndent(params: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "insertIndent",
-        createdBy: "OTP System (auto)",
+        createdBy: params.createdBy?.trim() || "OTP System (auto)",
         warehouseLocation: params.warehouseLocation || "",
         leadTime: params.leadTime,
-        attachment: null,
+        attachment: params.attachmentUrl || null,
         items: params.items.map((it) => ({
           category: categoryByName.get(it.item_name.trim().toLowerCase()) || "",
           itemName: it.item_name,

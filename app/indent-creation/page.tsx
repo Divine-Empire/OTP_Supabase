@@ -72,7 +72,6 @@ export default function IndentCreationPage() {
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [customerWantsMaterialAs, setCustomerWantsMaterialAs] = useState("")
-  const [createdByPerson, setCreatedByPerson] = useState("")
   const [warehouseLocationValue, setWarehouseLocationValue] = useState("")
   const [receivingLeadTime, setReceivingLeadTime] = useState("")
   const [inventoryPhotoFile, setInventoryPhotoFile] = useState<File | null>(null)
@@ -225,7 +224,6 @@ export default function IndentCreationPage() {
   const handleProcess = (order: any) => {
     setSelectedOrder(order)
     setCustomerWantsMaterialAs("")
-    setCreatedByPerson("")
     setWarehouseLocationValue("")
     setReceivingLeadTime("")
     setInventoryPhotoFile(null)
@@ -250,6 +248,15 @@ export default function IndentCreationPage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
+    if (!warehouseLocationValue) {
+      toast.error("Warehouse location is required")
+      return
+    }
+    if (!(Number(receivingLeadTime) > 0)) {
+      toast.error("Lead Time is required (number of days)")
+      return
+    }
+
     setIsSubmitting(true)
     try {
       let inventoryPhotoUrl = ""
@@ -259,7 +266,9 @@ export default function IndentCreationPage() {
         formData.append("folder", "indent-creation")
         const uploadRes = await fetch("/api/otp-supabase/attachments", { method: "POST", body: formData })
         const uploadJson = await uploadRes.json()
-        if (uploadJson.success) inventoryPhotoUrl = uploadJson.url
+        // The same URL goes to PFMS as the indent's attachment, so a failed upload must not pass silently.
+        if (!uploadJson.success) throw new Error(uploadJson.error || "Inventory photo upload failed")
+        inventoryPhotoUrl = uploadJson.url
       }
 
       const response = await fetch("/api/otp-supabase/indent-creation", {
@@ -268,7 +277,6 @@ export default function IndentCreationPage() {
         body: JSON.stringify({
           indentId: selectedOrder.indentId || selectedOrder.id,
           customerWantsMaterialAs,
-          createdBy: createdByPerson || currentUser?.fullName || currentUser?.username || "Admin",
           warehouseLocation: warehouseLocationValue,
           receivingLeadTime,
           inventoryPhotoUrl,
@@ -748,24 +756,11 @@ export default function IndentCreationPage() {
                 </Select>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="createdBy">Created by</Label>
-                  <Select value={createdByPerson} onValueChange={setCreatedByPerson}>
-                    <SelectTrigger id="createdBy">
-                      <SelectValue placeholder="Select name" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {crmNameOptions.map((name) => (
-                        <SelectItem key={name} value={name}>
-                          {name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="warehouseLocation">Warehouse location</Label>
+                  <Label htmlFor="warehouseLocation">
+                    Warehouse location <span className="text-destructive">*</span>
+                  </Label>
                   <Select value={warehouseLocationValue} onValueChange={setWarehouseLocationValue}>
                     <SelectTrigger id="warehouseLocation">
                       <SelectValue placeholder="Select location" />
@@ -779,9 +774,12 @@ export default function IndentCreationPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="leadTime">Receiving lead time</Label>
+                  <Label htmlFor="leadTime">
+                    Lead Time <span className="text-destructive">*</span>
+                  </Label>
                   <Input
                     type="number"
+                    min={1}
                     id="leadTime"
                     value={receivingLeadTime}
                     onChange={(e) => setReceivingLeadTime(e.target.value)}

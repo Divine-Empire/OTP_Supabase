@@ -190,6 +190,12 @@ export async function POST(request: Request) {
     }
 
     // Checked up front: the merge and stock release below can't be undone.
+    if (!paymentMode || !dispatchLocation || !calibrationRequired || !DeliveryNoteForInvoiceRequired || (calibrationRequired === "YES" && !calibrationType)) {
+      return NextResponse.json(
+        { success: false, error: "Payment Mode, Dispatch Location, Calib. Certificate Req., Calibration Type (when required) and Delivery Note (Inv.) Required are mandatory" },
+        { status: 400 }
+      )
+    }
     const hardcopyWanted = calibrationRequired === "YES" && certHardcopyRequired === "YES"
     if (hardcopyWanted && (!hardcopyDeliveryType || !hardcopyDeliveryAddress?.trim())) {
       return NextResponse.json({ success: false, error: "Hardcopy Delivery Add. is required when Cert. Hardcopy Req. is Yes" }, { status: 400 })

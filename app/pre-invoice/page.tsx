@@ -14,6 +14,8 @@ import { RefreshCw, Eye, Plus, Trash2 } from "lucide-react"
 import { useStageList } from "@/hooks/use-stage-list"
 import { useAuth } from "@/components/auth-provider"
 import { mapPreInvoiceRowToUI } from "@/lib/otp-utils"
+import { invalidateSidebarPendingCounts } from "@/components/layout/sidebar"
+import { EditCalibrationDialog } from "./edit-calibration-dialog"
 import { MobileRecordCard } from "@/components/mobile-record-card"
 import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
 import { toast } from "sonner"
@@ -38,6 +40,7 @@ const pendingColumns = [
 
 // Column definitions for History tab
 const historyColumns = [
+  { key: "editCalibration", label: "Actions", searchable: false }, // admin only, see shownColumns
   ...pendingColumns.filter((col) => col.key !== "actions"),
   { key: "actual", label: "Actual", searchable: true },
   { key: "paymentMode", label: "Payment Mode", searchable: true },
@@ -186,6 +189,11 @@ export default function PreInvoicePage() {
   const processedLoading = history.loading
   const loadProcessedOrders = history.reload
 
+  // Only an admin may edit a processed wave's calibration request; others never see that column.
+  const isAdmin = currentUser?.role === "admin"
+  const shownColumns = activeColumns.filter((c) => c.key !== "editCalibration" || isAdmin)
+  const [editCalibrationOrder, setEditCalibrationOrder] = useState<any>(null)
+
   const fetchOrders = async () => {
     setLoading(true)
     setError(null)
@@ -309,12 +317,28 @@ export default function PreInvoicePage() {
   const handleSubmit = async () => {
     if (!selectedOrder) return
 
+    if (!paymentMode) {
+      toast.error("Please select the Payment Mode.")
+      return
+    }
+    if (!calibrationRequired) {
+      toast.error("Please select whether a Calib. Certificate is required.")
+      return
+    }
+    if (!dispatchLocation) {
+      toast.error("Please select the Dispatch Location.")
+      return
+    }
     if (!DeliveryNoteForInvoiceRequired) {
       toast.error("Please select whether Delivery Note (Inv.) is required.")
       return
     }
 
     if (calibrationRequired === "YES") {
+      if (!calibrationType) {
+        toast.error("Please select the Calibration Type.")
+        return
+      }
       if (!certHardcopyRequired) {
         toast.error("Please select whether a Cert. Hardcopy is required.")
         return
@@ -503,6 +527,18 @@ export default function PreInvoicePage() {
             </Button>
           </div>
         )
+      case "editCalibration":
+        if (!isAdmin) return null
+        return (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs border-input bg-card hover:bg-accent"
+            onClick={() => setEditCalibrationOrder(order)}
+          >
+            Edit Calibration
+          </Button>
+        )
       case "itemList":
         return (
           <Button
@@ -681,12 +717,14 @@ export default function PreInvoicePage() {
         {/* Unified Enterprise DataTable */}
         <div className="flex-1 flex flex-col min-h-0">
           <DataTable
-            headers={activeColumns.map((col) => ({
+            headers={shownColumns.map((col) => ({
               key: col.key,
               label: col.label,
               minWidth:
                 col.key === "actions"
                   ? "170px"
+                  : col.key === "editCalibration"
+                  ? "140px"
                   : col.key === "itemList"
                   ? "75px"
                   : col.key === "companyName"
@@ -727,7 +765,7 @@ export default function PreInvoicePage() {
                 key={order.id || order.queueId || order.orderId || order.orderNo}
                 className="hover:bg-secondary/50 transition-colors"
               >
-                {activeColumns.map((column) => (
+                {shownColumns.map((column) => (
                   <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
                     {(() => {
                       const content = renderCellContent(order, column.key)
@@ -753,6 +791,15 @@ export default function PreInvoicePage() {
             )}
           />
         </div>
+
+        <EditCalibrationDialog
+          order={editCalibrationOrder}
+          onOpenChange={(o) => !o && setEditCalibrationOrder(null)}
+          onSaved={() => {
+            invalidateSidebarPendingCounts() // Calibration / Certi. Hardcopy pending can change
+            loadProcessedOrders()
+          }}
+        />
 
         {/* Edit Items Dialog (pending only, reduce-only) */}
         <Dialog open={!!editItemsOrder} onOpenChange={(open) => !open && setEditItemsOrder(null)}>
@@ -825,7 +872,9 @@ export default function PreInvoicePage() {
                   <Input id="companyName" value={selectedOrder?.companyName || ""} disabled />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="paymentMode">Payment Mode</Label>
+                  <Label htmlFor="paymentMode">
+                    Payment Mode <span className="text-destructive">*</span>
+                  </Label>
                   <Select value={paymentMode} onValueChange={setPaymentMode}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select payment mode" />
@@ -844,7 +893,9 @@ export default function PreInvoicePage() {
               {/* Row 1: Calibration Required, Dispatch Location, Delivery Note (Inv.) Required */}
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="calibration">Calib. Certificate Req.</Label>
+                  <Label htmlFor="calibration">
+                    Calib. Certificate Req. <span className="text-destructive">*</span>
+                  </Label>
                   <Select
                     value={calibrationRequired}
                     onValueChange={(v) => {
@@ -866,7 +917,9 @@ export default function PreInvoicePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dispatchLocation">Dispatch Location</Label>
+                  <Label htmlFor="dispatchLocation">
+                    Dispatch Location <span className="text-destructive">*</span>
+                  </Label>
                   <Select value={dispatchLocation} onValueChange={setDispatchLocation}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select dispatch location" />
@@ -881,7 +934,9 @@ export default function PreInvoicePage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="DeliveryNoteForInvoiceRequired">Delivery Note (Inv.) Required</Label>
+                  <Label htmlFor="DeliveryNoteForInvoiceRequired">
+                    Delivery Note (Inv.) Required <span className="text-destructive">*</span>
+                  </Label>
                   <Select value={DeliveryNoteForInvoiceRequired} onValueChange={setDeliveryNoteForInvoiceRequired}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select" />
@@ -897,7 +952,9 @@ export default function PreInvoicePage() {
                 </div>
                 {calibrationRequired === "YES" && (
                   <div className="space-y-2">
-                    <Label htmlFor="calibrationType">Calibration Type</Label>
+                    <Label htmlFor="calibrationType">
+                      Calibration Type <span className="text-destructive">*</span>
+                    </Label>
                     <Select value={calibrationType} onValueChange={setCalibrationType}>
                       <SelectTrigger>
                         <SelectValue placeholder="Select calibration type" />
@@ -912,7 +969,9 @@ export default function PreInvoicePage() {
                 )}
                 {calibrationRequired === "YES" && (
                   <div className="space-y-2">
-                    <Label htmlFor="certHardcopyRequired">Cert. Hardcopy Req.</Label>
+                    <Label htmlFor="certHardcopyRequired">
+                      Cert. Hardcopy Req. <span className="text-destructive">*</span>
+                    </Label>
                     <Select
                       value={certHardcopyRequired}
                       onValueChange={(v) => {
@@ -935,7 +994,9 @@ export default function PreInvoicePage() {
                 )}
                 {hardcopyRequested && (
                   <div className="space-y-2">
-                    <Label htmlFor="hardcopyDeliveryType">Hardcopy Delivery Add.</Label>
+                    <Label htmlFor="hardcopyDeliveryType">
+                      Hardcopy Delivery Add. <span className="text-destructive">*</span>
+                    </Label>
                     <Select
                       value={hardcopyDeliveryType}
                       onValueChange={(v) => {
@@ -956,7 +1017,9 @@ export default function PreInvoicePage() {
                 )}
                 {hardcopyRequested && hardcopyDeliveryType === "Other" && (
                   <div className="space-y-2 col-span-3">
-                    <Label htmlFor="hardcopyOtherAddress">Hardcopy Delivery Address</Label>
+                    <Label htmlFor="hardcopyOtherAddress">
+                      Hardcopy Delivery Address <span className="text-destructive">*</span>
+                    </Label>
                     <Input
                       id="hardcopyOtherAddress"
                       value={hardcopyOtherAddress}
