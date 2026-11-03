@@ -30,6 +30,7 @@ const pendingColumns = [
   { key: "invoiceCopy", label: "Invoice Copy", searchable: false },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
   { key: "certificateNumber", label: "Certificate Number", searchable: true },
+  { key: "certificateCopy", label: "Certificate Copy", searchable: false },
   { key: "certHardcopyRequired", label: "Cert. Hardcopy Req.", searchable: true },
   { key: "hardcopyDeliveryType", label: "Hardcopy Delivery Add.", searchable: true },
   { key: "hardcopyDeliveryAddress", label: "Hardcopy Address", searchable: true },
@@ -160,6 +161,8 @@ export default function CertificateHardcopyPage() {
         )
       case "invoiceCopy":
         return link(order.invoiceCopyUrl)
+      case "certificateCopy":
+        return link(order.certificateUploadUrl)
       case "hardcopyUpload":
         return link(order.hardcopyPdfUrl)
       default:

@@ -857,6 +857,7 @@ export function mapCertiHardcopyRowToUI(row: any): any {
     calibrationType: makeInvoice.queue?.calibration_type || "",
     ...mapHardcopyRequestToUI(makeInvoice.queue),
     certificateNumber: row.certificate_number || "",
+    certificateUploadUrl: row.certificate_upload_url || "",
     planned: formatDateTime(row.hardcopy_planned),
     actual: formatDateTime(row.hardcopy_created_at),
     hardcopyPdfUrl: row.hardcopy_pdf_url || "",

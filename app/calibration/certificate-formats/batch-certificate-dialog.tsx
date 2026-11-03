@@ -84,6 +84,18 @@ function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: bo
   }))
 }
 
+// Test Sieve items of one kind (same instrument name, e.g. "TEST SIEVES-GI-450 DIA") that could
+// share a certificate: groups of item indexes, two or more each.
+function findSieveGroups(formats: (string | null)[], skipped: boolean[], p: Prefill): number[][] {
+  const groups = new Map<string, number[]>()
+  p.items.forEach((it, i) => {
+    if (formats[i] !== "test_sieve" || skipped[i]) return
+    const key = cleanSieveInstrumentName(it.itemName).trim().toLowerCase()
+    groups.set(key, [...(groups.get(key) || []), i])
+  })
+  return [...groups.values()].filter((g) => g.length >= 2)
+}
+
 // One certificate for several sieve items of the same kind: common instrument name, every
 // aperture on the specification line, total quantity. Standard comes from the first item that has one.
 function buildMergedCert(idxs: number[], p: Prefill, months: number): Cert {
@@ -180,7 +192,14 @@ export function BatchCertificateDialog({
         setFormats(p.items.map((it) => it.format))
         setEach(eachArr)
         setSkipped(p.items.map(() => false))
-        const initial = p.items.flatMap((it, i) => (it.format ? buildItemCerts(i, it, p, eachArr[i], it.format!, DEFAULT_WARRANTY_MONTHS) : []))
+        // Sieves of the same kind start merged into one certificate (the checkbox can undo it).
+        const groups = findSieveGroups(p.items.map((it) => it.format), p.items.map(() => false), p)
+        const grouped = new Set(groups.flat())
+        const initial = [
+          ...p.items.flatMap((it, i) => (it.format && !grouped.has(i) ? buildItemCerts(i, it, p, eachArr[i], it.format!, DEFAULT_WARRANTY_MONTHS) : [])),
+          ...groups.map((g) => buildMergedCert(g, p, DEFAULT_WARRANTY_MONTHS)),
+        ].sort((a, b) => a.itemIdx - b.itemIdx)
+        setMerged(groups)
         setCerts(initial)
         setOpenIds(new Set(initial.slice(0, 1).map((c) => c.id)))
       })
@@ -245,15 +264,7 @@ export function BatchCertificateDialog({
   }
 
   // Sieve items of one kind (same instrument name) that could share a certificate.
-  const mergeCandidates = useMemo(() => {
-    const groups = new Map<string, number[]>()
-    prefill?.items.forEach((it, i) => {
-      if (formats[i] !== "test_sieve" || skipped[i]) return
-      const key = cleanSieveInstrumentName(it.itemName).trim().toLowerCase()
-      groups.set(key, [...(groups.get(key) || []), i])
-    })
-    return [...groups.values()].filter((g) => g.length >= 2)
-  }, [prefill, formats, skipped])
+  const mergeCandidates = useMemo(() => (prefill ? findSieveGroups(formats, skipped, prefill) : []), [prefill, formats, skipped])
   const mergedGroupOf = (i: number) => merged.find((g) => g.includes(i))
 
   const toggleMerge = (group: number[], on: boolean) => {
