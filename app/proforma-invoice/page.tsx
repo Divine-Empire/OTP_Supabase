@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
+import { stageDeepLink } from "@/lib/deep-link"
 import { useAuth } from "@/components/auth-provider"
 import {
   mapProformaInvoicePendingRowToUI,
@@ -94,9 +95,9 @@ export default function ProformaInvoicePage() {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
+  const [searchTerm, setSearchTerm] = useState(() => stageDeepLink().q)
   const [crmNameFilter, setCrmNameFilter] = useState("all")
-  const [currentTab, setCurrentTab] = useState("pending")
+  const [currentTab, setCurrentTab] = useState(() => stageDeepLink().tab || "pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const DEFAULT_HIDDEN_COLUMNS = new Set(["offerShow", "conveyedForRegistration"])
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(

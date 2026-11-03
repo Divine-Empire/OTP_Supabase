@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
 import { useServerHistory } from "@/hooks/use-server-history"
+import { stageDeepLink } from "@/lib/deep-link"
 
 // Shared list state for the stage pages (Pending / History tabs): search, CRM
 // filter, optional extra select filters, filter chips, column visibility and
@@ -67,8 +68,8 @@ export function useStageList<T extends Record<string, any>>({
   searchChip = false,
   stageKey,
 }: UseStageListOptions<T>) {
-  const [currentTab, setCurrentTab] = useState<string>("pending")
-  const [searchTerm, setSearchTermRaw] = useState("")
+  const [currentTab, setCurrentTab] = useState<string>(() => stageDeepLink().tab || "pending")
+  const [searchTerm, setSearchTermRaw] = useState(() => stageDeepLink().q)
   const [crmNameFilter, setCrmNameFilterRaw] = useState("all")
   const [extraValues, setExtraValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(extraFilters.map((f) => [f.key, "all"]))

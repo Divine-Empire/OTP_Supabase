@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
+import { stageDeepLink } from "@/lib/deep-link"
 import { toast } from "sonner"
 import { useAuth } from "@/components/auth-provider"
 import { mapIndentCreationRowToUI } from "@/lib/otp-utils"
@@ -88,9 +89,9 @@ export default function IndentCreationPage() {
 
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
+  const [searchTerm, setSearchTerm] = useState(() => stageDeepLink().q)
   const [crmNameFilter, setCrmNameFilter] = useState("all")
-  const [currentTab, setCurrentTab] = useState("pending")
+  const [currentTab, setCurrentTab] = useState(() => stageDeepLink().tab || "pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   const [visiblePendingColumns, setVisiblePendingColumns] = useState<Record<string, boolean>>(

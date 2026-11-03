@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Trash2, RefreshCw, Eye, ScanLine, ArrowLeftRight, Bell } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
+import { stageDeepLink } from "@/lib/deep-link"
 import { useAuth } from "@/components/auth-provider"
 import { mapCheckInventoryRowToUI } from "@/lib/otp-utils"
 import { filterByAccess, crmNameOptionsFrom } from "@/lib/access"
@@ -292,8 +293,8 @@ export default function CheckInventoryPage() {
         .map((it) => ({ itemCode: it.item_code, itemName: it.item_name, qty: Number(it.scanned_qty) })),
     [packedDialogOrder]
   )
-  const [searchTerm, setSearchTerm] = useState("")
-  const [currentTab, setCurrentTab] = useState("pending")
+  const [searchTerm, setSearchTerm] = useState(() => stageDeepLink().q)
+  const [currentTab, setCurrentTab] = useState(() => stageDeepLink().tab || "pending")
   const [selectedColumn] = useState("all")
   const [availabilityFilter, setAvailabilityFilter] = useState<string>("all")
   // History: show only waves not yet processed downstream (still editable)

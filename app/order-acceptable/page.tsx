@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { RefreshCw, Eye } from "lucide-react"
 import { useServerHistory } from "@/hooks/use-server-history"
+import { stageDeepLink } from "@/lib/deep-link"
 import { useAuth } from "@/components/auth-provider"
 
 import { mapOrderAcceptableRowToUI } from "@/lib/otp-utils"
@@ -78,8 +79,8 @@ export default function OrderAcceptablePage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [itemListDialogOpen, setItemListDialogOpen] = useState(false)
   const [itemListDialogItems, setItemListDialogItems] = useState<any[]>([])
-  const [searchTerm, setSearchTerm] = useState("")
-  const [currentTab, setCurrentTab] = useState("pending")
+  const [searchTerm, setSearchTerm] = useState(() => stageDeepLink().q)
+  const [currentTab, setCurrentTab] = useState(() => stageDeepLink().tab || "pending")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [pendingCreFilter, setPendingCreFilter] = useState("all")
   const [historyPage, setHistoryPage] = useState(1)

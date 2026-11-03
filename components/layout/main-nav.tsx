@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GlobalSearch } from "@/components/layout/global-search";
 
 function initials(name?: string) {
   const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -132,6 +133,7 @@ export function MainNav({ onOpenMobileMenu }: MainNavProps) {
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">
+        {isAdmin && <GlobalSearch />}
         <span
           className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground shadow-sm"
           aria-hidden="true"
