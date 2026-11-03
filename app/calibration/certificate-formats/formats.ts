@@ -33,7 +33,7 @@ const PARTY_FIELDS: CertificateField[] = [
   { key: "certificateNo", label: "Certificate No." },
   { key: "instrumentName", label: "Instrument Name" },
   { key: "calibrationDate", label: "Calibration Date", type: "date" },
-  { key: "nextCalibrationDate", label: "Next Calibration Date", type: "date", hint: "Auto-set to 6 months after the calibration date; editable" },
+  { key: "nextCalibrationDate", label: "Next Calibration Date", type: "date", hint: "Auto-set from the calibration date and Warranty Duration; editable" },
 ]
 
 const PARTY_DEFAULTS = (): CertificateValues => ({
@@ -118,7 +118,7 @@ function createCtmFormat(range: 1000 | 1500 | 2000): CertificateFormat {
       { key: "certificateNo", label: "Certificate No." },
       { key: "serialNo", label: "SRN" },
       { key: "calibrationDate", label: "Date of Calibration", type: "date" },
-      { key: "nextCalibrationDate", label: "Next Calibration Due on", type: "date", hint: "Auto-set to 6 months after the calibration date; editable" },
+      { key: "nextCalibrationDate", label: "Next Calibration Due on", type: "date", hint: "Auto-set from the calibration date and Warranty Duration; editable" },
       { key: "provingRingNo", label: "Proving Ring No." },
       { key: "basedOn", label: "Based On" },
     ],
@@ -345,7 +345,7 @@ const SIEVE_FIELDS: CertificateField[] = [
   { key: "certificateNo", label: "Certificate No." },
   { key: "instrumentName", label: "Instrument Name" },
   { key: "calibrationDate", label: "Calibration Date", type: "date" },
-  { key: "nextCalibrationDate", label: "Next Calibration Date", type: "date", hint: "Auto-set to 12 months after the calibration date; editable" },
+  { key: "nextCalibrationDate", label: "Next Calibration Date", type: "date", hint: "Auto-set from the calibration date and Warranty Duration; editable" },
   { key: "quantity", label: "Quantity" },
   { key: "sieveSpecification", label: "Sieve Specification / Sizes", type: "textarea", hint: "Appears bold below the certification statement" },
   { key: "basedOn", label: "Standard / Based On" },
@@ -384,6 +384,33 @@ export function getSieveSpec(itemName: string, qty: number = 1): string {
   return aperturesText
 }
 
+// One sieve's aperture as a number of mm, for ordering ("2.36MM" -> 2.36, "600 micron" -> 0.6).
+function apertureMm(aperture: string): number {
+  const n = parseFloat(aperture.replace(/,/g, ""))
+  if (!Number.isFinite(n)) return -1
+  return /micron|µ/i.test(aperture) ? n / 1000 : n
+}
+
+// Sieve Specification for ONE certificate covering several sieve items of the same kind
+// (e.g. GI-450 sieves of different apertures): the kind's heading once, then every aperture,
+// biggest first, each repeated by its item's qty. The heading comes from the first item.
+export function getMergedSieveSpec(items: { itemName: string; qty: number }[]): string {
+  const apertures = items.flatMap((it) => {
+    const a = extractSieveAperture(it.itemName)
+    return a ? Array(Math.max(1, it.qty || 1)).fill(a) : []
+  })
+  apertures.sort((a, b) => apertureMm(b) - apertureMm(a))
+  const heading = items.length ? sieveHeading(items[0].itemName) : ""
+  return heading ? `${heading}– ${apertures.join(", ")}` : apertures.join(", ")
+}
+
+function sieveHeading(itemName: string): string {
+  if (/GI[- ]*300/i.test(itemName)) return "GI Sieves 300 mm Dia"
+  if (/GI[- ]*450/i.test(itemName)) return "GI Sieves 450 mm Dia"
+  if (/BRASS/i.test(itemName)) return "Brass Sieves 200 mm Dia"
+  return ""
+}
+
 export const TEST_SIEVE_FORMAT: CertificateFormat = {
   id: "test_sieve",
   name: "Test Sieve",
@@ -408,6 +435,26 @@ export const CERTIFICATE_FORMATS: CertificateFormat[] = [
 ]
 
 export const getCertificateFormat = (id: string | null | undefined) => CERTIFICATE_FORMATS.find((f) => f.id === id) ?? null
+
+// Warranty Duration choices of the Generate Certificate dialogs; 6 months is the default.
+export const WARRANTY_OPTIONS = [
+  { label: "3 month", months: 3 },
+  { label: "6 month", months: 6 },
+  { label: "1 year", months: 12 },
+  { label: "2 year", months: 24 },
+]
+export const DEFAULT_WARRANTY_MONTHS = 6
+
+// Next Calibration Date = calibration date + the warranty duration - 1 day
+// (3 months from 10-05-2026 is 09-08-2026, not 10-08-2026).
+export function calibrationDueDate(isoDate: string, months: number): string {
+  const start = addMonths(isoDate, months)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(start)
+  if (!m) return ""
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) - 1)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 
 export function addMonths(isoDate: string, months: number): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)

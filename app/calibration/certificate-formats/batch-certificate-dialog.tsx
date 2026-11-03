@@ -6,7 +6,16 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CERTIFICATE_FORMATS, addMonths, cleanSieveInstrumentName, getCertificateFormat, type CertificateValues } from "./formats"
+import {
+  CERTIFICATE_FORMATS,
+  DEFAULT_WARRANTY_MONTHS,
+  WARRANTY_OPTIONS,
+  calibrationDueDate,
+  cleanSieveInstrumentName,
+  getCertificateFormat,
+  getMergedSieveSpec,
+  type CertificateValues,
+} from "./formats"
 import { CertificateFields } from "./certificate-fields"
 import { certificatesPdfBlob, downloadBlob } from "./certificates-pdf.jsx"
 
@@ -35,6 +44,8 @@ interface Cert {
   itemIdx: number
   values: CertificateValues
   nextEdited: boolean
+  // Set on a certificate that stands for several sieve items (item indexes, first = itemIdx).
+  mergedIdx?: number[]
 }
 
 const nos = (n: number) => `${String(n).padStart(2, "0")} Nos`
@@ -48,7 +59,7 @@ function parseNumber(next: string) {
 
 // One certificate per unit when `each` is on (qty 5 -> 5 certificates of "01 Nos"),
 // otherwise a single certificate for the whole quantity.
-function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: boolean, formatId: string): Cert[] {
+function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: boolean, formatId: string, months: number): Cert[] {
   const count = each ? item.qty : 1
   const certQty = each ? 1 : item.qty
   const base = getCertificateFormat(formatId)?.getDefaults(item.itemName, certQty) ?? {}
@@ -64,13 +75,40 @@ function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: bo
       certificateNo: "",
       instrumentName,
       calibrationDate: p.invoiceDate,
-      nextCalibrationDate: addMonths(p.invoiceDate, formatId === "test_sieve" ? 12 : 6),
+      nextCalibrationDate: calibrationDueDate(p.invoiceDate, months),
       quantity: nos(certQty),
       // The certificate already prints "Based On", so a stored "Based On 9259 ..." drops the prefix.
       // An item with no stored IS value keeps the format's own default (the CTM formats carry one).
       basedOn: (item.isValue || "").replace(/^\s*based on\s*/i, "").trim() || base.basedOn || "",
     },
   }))
+}
+
+// One certificate for several sieve items of the same kind: common instrument name, every
+// aperture on the specification line, total quantity. Standard comes from the first item that has one.
+function buildMergedCert(idxs: number[], p: Prefill, months: number): Cert {
+  const items = idxs.map((i) => p.items[i])
+  const base = getCertificateFormat("test_sieve")?.getDefaults(items[0].itemName, 1) ?? {}
+  const total = items.reduce((sum, it) => sum + it.qty, 0)
+  const standard = items.map((it) => (it.isValue || "").replace(/^\s*based on\s*/i, "").trim()).find(Boolean)
+  return {
+    id: `${idxs[0]}-merged-${Math.random().toString(36).slice(2, 7)}`,
+    itemIdx: idxs[0],
+    mergedIdx: idxs,
+    nextEdited: false,
+    values: {
+      ...base,
+      customerName: p.companyName,
+      address: p.shippingAddress,
+      certificateNo: "",
+      instrumentName: cleanSieveInstrumentName(items[0].itemName),
+      calibrationDate: p.invoiceDate,
+      nextCalibrationDate: calibrationDueDate(p.invoiceDate, months),
+      quantity: nos(total),
+      sieveSpecification: getMergedSieveSpec(items.map((it) => ({ itemName: it.itemName, qty: it.qty }))),
+      basedOn: standard || base.basedOn || "",
+    },
+  }
 }
 
 type Step = "edit" | "preview"
@@ -96,6 +134,10 @@ export function BatchCertificateDialog({
   const [formats, setFormats] = useState<(string | null)[]>([])
   const [each, setEach] = useState<boolean[]>([])
   const [skipped, setSkipped] = useState<boolean[]>([])
+  // Warranty Duration is common to every certificate of the wave; Next Calibration Date follows it.
+  const [warrantyMonths, setWarrantyMonths] = useState(DEFAULT_WARRANTY_MONTHS)
+  // Sieve groups currently merged into one certificate (each = item indexes).
+  const [merged, setMerged] = useState<number[][]>([])
   const [certs, setCerts] = useState<Cert[]>([])
   const [openIds, setOpenIds] = useState<Set<string>>(new Set())
   const [step, setStep] = useState<Step>("edit")
@@ -123,6 +165,8 @@ export function BatchCertificateDialog({
     setStep("edit")
     setPrefill(null)
     setCerts([])
+    setMerged([])
+    setWarrantyMonths(DEFAULT_WARRANTY_MONTHS)
     setReserved([])
     reservedRef.current = []
     fetch(`/api/otp-supabase/calibration/certificate-prefill?makeInvoiceId=${encodeURIComponent(makeInvoiceId)}`)
@@ -136,7 +180,7 @@ export function BatchCertificateDialog({
         setFormats(p.items.map((it) => it.format))
         setEach(eachArr)
         setSkipped(p.items.map(() => false))
-        const initial = p.items.flatMap((it, i) => (it.format ? buildItemCerts(i, it, p, eachArr[i], it.format!) : []))
+        const initial = p.items.flatMap((it, i) => (it.format ? buildItemCerts(i, it, p, eachArr[i], it.format!, DEFAULT_WARRANTY_MONTHS) : []))
         setCerts(initial)
         setOpenIds(new Set(initial.slice(0, 1).map((c) => c.id)))
       })
@@ -152,7 +196,7 @@ export function BatchCertificateDialog({
     if (!prefill) return
     setCerts((prev) => {
       const rest = prev.filter((c) => c.itemIdx !== i)
-      const fresh = format ? buildItemCerts(i, prefill.items[i], prefill, eachQty, format) : []
+      const fresh = format ? buildItemCerts(i, prefill.items[i], prefill, eachQty, format, warrantyMonths) : []
       if (fresh[0]) setOpenIds((s) => new Set(s).add(fresh[0].id))
       return [...rest, ...fresh].sort((a, b) => a.itemIdx - b.itemIdx)
     })
@@ -183,12 +227,48 @@ export function BatchCertificateDialog({
         if (c.id !== certId) return c
         const values = { ...c.values, [key]: value }
         if (key === "calibrationDate" && !c.nextEdited) {
-          const months = formats[c.itemIdx] === "test_sieve" ? 12 : 6
-          values.nextCalibrationDate = addMonths(value, months)
+          values.nextCalibrationDate = calibrationDueDate(value, warrantyMonths)
         }
         return { ...c, values, nextEdited: c.nextEdited || key === "nextCalibrationDate" }
       })
     )
+  }
+
+  // Changing the duration re-derives every certificate's Next Calibration Date (hand edits included).
+  const changeWarranty = (months: number) => {
+    setWarrantyMonths(months)
+    setCerts((prev) =>
+      prev.map((c) => ({ ...c, nextEdited: false, values: { ...c.values, nextCalibrationDate: calibrationDueDate(c.values.calibrationDate, months) } }))
+    )
+    releasePreview()
+    setStep("edit")
+  }
+
+  // Sieve items of one kind (same instrument name) that could share a certificate.
+  const mergeCandidates = useMemo(() => {
+    const groups = new Map<string, number[]>()
+    prefill?.items.forEach((it, i) => {
+      if (formats[i] !== "test_sieve" || skipped[i]) return
+      const key = cleanSieveInstrumentName(it.itemName).trim().toLowerCase()
+      groups.set(key, [...(groups.get(key) || []), i])
+    })
+    return [...groups.values()].filter((g) => g.length >= 2)
+  }, [prefill, formats, skipped])
+  const mergedGroupOf = (i: number) => merged.find((g) => g.includes(i))
+
+  const toggleMerge = (group: number[], on: boolean) => {
+    if (!prefill) return
+    setMerged((m) => (on ? [...m, group] : m.filter((g) => g[0] !== group[0])))
+    setCerts((prev) => {
+      const rest = prev.filter((c) => !group.includes(c.itemIdx))
+      const fresh = on
+        ? [buildMergedCert(group, prefill, warrantyMonths)]
+        : group.flatMap((i) => buildItemCerts(i, prefill.items[i], prefill, each[i], formats[i] as string, warrantyMonths))
+      if (fresh[0]) setOpenIds((s) => new Set(s).add(fresh[0].id))
+      return [...rest, ...fresh].sort((a, b) => a.itemIdx - b.itemIdx)
+    })
+    releasePreview()
+    setStep("edit")
   }
 
   const toggleOpen = (id: string) =>
@@ -253,8 +333,8 @@ export function BatchCertificateDialog({
       // What the Certi. Hardcopy stage prefills from: each certificate exactly as it was printed.
       const snapshot: CertificateSnapshot = {
         certs: final.map((c) => ({
-          itemName: prefill?.items[c.itemIdx]?.itemName || "",
-          itemCode: prefill?.items[c.itemIdx]?.itemCode || null,
+          itemName: c.mergedIdx ? (c.values as CertificateValues).instrumentName : prefill?.items[c.itemIdx]?.itemName || "",
+          itemCode: c.mergedIdx ? null : prefill?.items[c.itemIdx]?.itemCode || null,
           formatId: formats[c.itemIdx] as string,
           values: c.values,
         })),
@@ -288,6 +368,40 @@ export function BatchCertificateDialog({
         {prefill && step === "edit" && (
           <div className="flex-1 space-y-4 overflow-y-auto pr-1">
             {prefill.items.length === 0 && <p className="text-sm text-muted-foreground">This wave has no packed items.</p>}
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
+              <div>
+                <p className="text-sm font-medium">Warranty Duration</p>
+                <p className="text-xs text-muted-foreground">Applies to every certificate: Next Calibration Date = calibration date + duration - 1 day</p>
+              </div>
+              <Select value={String(warrantyMonths)} onValueChange={(v) => changeWarranty(Number(v))}>
+                <SelectTrigger className="ml-auto h-9 w-36 bg-background text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WARRANTY_OPTIONS.map((o) => (
+                    <SelectItem key={o.months} value={String(o.months)}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {mergeCandidates.map((group) => {
+              const isMerged = !!mergedGroupOf(group[0])
+              return (
+                <label key={group.join("-")} className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
+                  <input type="checkbox" className="mt-1 h-4 w-4" checked={isMerged} onChange={(e) => toggleMerge(group, e.target.checked)} />
+                  <span>
+                    <span className="font-medium">
+                      Merge {group.length} sieves into one certificate · {cleanSieveInstrumentName(prefill.items[group[0]].itemName)}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {group.map((i) => prefill.items[i].itemName.replace(/^.*\bDIA\b\s*[-–:]?\s*/i, "")).join(", ")}
+                    </span>
+                  </span>
+                </label>
+              )
+            })}
             {prefill.items.map((item, i) => {
               const itemCerts = numbered.filter((c) => c.itemIdx === i)
               return (
@@ -308,7 +422,7 @@ export function BatchCertificateDialog({
                           {formats[i] ? ` · ${formatName(formats[i])}` : ""}
                         </p>
                       </div>
-                      {item.qty > 1 && formats[i] && (
+                      {item.qty > 1 && formats[i] && !mergedGroupOf(i) && (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-muted-foreground">Certificate for each qty</span>
                           <div className="inline-flex overflow-hidden rounded-md border">
@@ -326,6 +440,13 @@ export function BatchCertificateDialog({
                         </div>
                       )}
                     </div>
+                    {mergedGroupOf(i) && (
+                      <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                        {mergedGroupOf(i)![0] === i
+                          ? `Merged certificate: ${mergedGroupOf(i)!.length} sieves in one.`
+                          : "Included in the merged certificate above."}
+                      </p>
+                    )}
                     {!formats[i] && !skipped[i] && (
                       <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
                         <AlertTriangle className="h-4 w-4 shrink-0" />

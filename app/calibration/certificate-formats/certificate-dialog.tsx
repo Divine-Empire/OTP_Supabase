@@ -4,7 +4,15 @@ import { useEffect, useState } from "react"
 import { ArrowLeft, Download, Eye, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { CERTIFICATE_FORMATS, addMonths, type CertificateFormat, type CertificateValues } from "./formats"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  CERTIFICATE_FORMATS,
+  DEFAULT_WARRANTY_MONTHS,
+  WARRANTY_OPTIONS,
+  calibrationDueDate,
+  type CertificateFormat,
+  type CertificateValues,
+} from "./formats"
 import { CertificateFields, FormatThumbnail } from "./certificate-fields"
 import { certificatesPdfBlob, downloadBlob } from "./certificates-pdf.jsx"
 
@@ -17,6 +25,7 @@ export function CertificateDialog({ open, onOpenChange }: { open: boolean; onOpe
   const [values, setValues] = useState<CertificateValues>(() => CERTIFICATE_FORMATS[0].getDefaults())
   // Once the user edits Next Calibration Date by hand, stop overwriting it from the calibration date.
   const [nextEdited, setNextEdited] = useState(false)
+  const [warrantyMonths, setWarrantyMonths] = useState(DEFAULT_WARRANTY_MONTHS)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,15 +53,22 @@ export function CertificateDialog({ open, onOpenChange }: { open: boolean; onOpe
     setFormat(f)
     setValues(f.getDefaults())
     setNextEdited(false)
+    setWarrantyMonths(DEFAULT_WARRANTY_MONTHS)
     setStep("edit")
+  }
+
+  // Re-derives Next Calibration Date from the calibration date (a hand edit is overwritten).
+  const changeWarranty = (months: number) => {
+    setWarrantyMonths(months)
+    setNextEdited(false)
+    setValues((prev) => ({ ...prev, nextCalibrationDate: calibrationDueDate(prev.calibrationDate, months) }))
   }
 
   const setField = (key: string, value: string) => {
     setValues((prev) => {
       const next = { ...prev, [key]: value }
       if (key === "calibrationDate" && !nextEdited) {
-        const months = format.id === "test_sieve" ? 12 : 6
-        next.nextCalibrationDate = addMonths(value, months)
+        next.nextCalibrationDate = calibrationDueDate(value, warrantyMonths)
       }
       return next
     })
@@ -118,6 +134,24 @@ export function CertificateDialog({ open, onOpenChange }: { open: boolean; onOpe
 
         {step === "edit" && (
           <>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
+              <div>
+                <p className="text-sm font-medium">Warranty Duration</p>
+                <p className="text-xs text-muted-foreground">Next Calibration Date = calibration date + duration - 1 day</p>
+              </div>
+              <Select value={String(warrantyMonths)} onValueChange={(v) => changeWarranty(Number(v))}>
+                <SelectTrigger className="ml-auto h-9 w-36 bg-background text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {WARRANTY_OPTIONS.map((o) => (
+                    <SelectItem key={o.months} value={String(o.months)}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <CertificateFields format={format} values={values} onChange={setField} idPrefix="cert" />
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-between gap-2 pt-2">
