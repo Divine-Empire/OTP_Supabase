@@ -42,9 +42,9 @@ async function loadAsset({ src, maxPx, mime }) {
 // hardcopy: the page is printed on pre-printed letterhead stock, so the letterhead image and the
 // seal stay off the PDF (the stamp is applied on paper). Layout positions do not change.
 export async function loadAssets({ hardcopy = false } = {}) {
-  if (hardcopy) return { letterhead: null, seal: null, signature: await loadAsset(SIGNATURE) }
+  if (hardcopy) return { hardcopy: true, letterhead: null, seal: null, signature: await loadAsset(SIGNATURE) }
   const [letterhead, seal, signature] = await Promise.all([loadAsset(LETTERHEAD), loadAsset(SEAL), loadAsset(SIGNATURE)])
-  return { letterhead, seal, signature }
+  return { hardcopy: false, letterhead, seal, signature }
 }
 
 export const filled = (v) => String(v ?? "").trim() !== ""

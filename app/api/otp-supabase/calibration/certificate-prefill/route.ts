@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     const namesWithoutCode = [...new Set(packed.filter((it) => !it.item_code && it.item_name).map((it) => it.item_name))] as string[]
 
     // At most two indexed lookups for the whole wave, however many items it has.
-    const [byCode, byName, peek] = await Promise.all([
+    const [byCode, byName, peek, peekAutoLevel, peekTotalStation] = await Promise.all([
       codes.length
         ? supabase.from("lto_items").select("item_code, calibration_certificate_format, otp_is_value").in("item_code", codes)
         : Promise.resolve({ data: [], error: null }),
@@ -34,10 +34,15 @@ export async function GET(request: Request) {
         ? supabase.from("lto_items").select("item_name, item_code, calibration_certificate_format, otp_is_value").in("item_name", namesWithoutCode)
         : Promise.resolve({ data: [], error: null }),
       supabase.rpc("otp_peek_certificate_number"),
+      supabase.rpc("otp_peek_auto_level_number"),
+      supabase.rpc("otp_peek_total_station_number"),
     ])
     if (byCode.error) throw byCode.error
     if (byName.error) throw byName.error
     if (peek.error) throw peek.error
+    // Only Auto Level / Total Station certificates need these; if Database/87 or 88 is not applied yet, other formats still work.
+    if (peekAutoLevel.error) console.error("otp_peek_auto_level_number failed (apply Database/87):", peekAutoLevel.error.message)
+    if (peekTotalStation.error) console.error("otp_peek_total_station_number failed (apply Database/88):", peekTotalStation.error.message)
 
     // item_code is not unique in lto_items; take the first row that has a format.
     const metaByCode = new Map<string, { format: string | null; isValue: string | null }>()
@@ -70,6 +75,8 @@ export async function GET(request: Request) {
         invoiceNumber: (row as any).invoice_number || order.invoice_number || "",
         items,
         nextCertificateNumber: peek.data as string,
+        nextAutoLevelNumber: (peekAutoLevel.data as string | null) || `N${new Date().getFullYear()}00001`,
+        nextTotalStationNumber: (peekTotalStation.data as string | null) || `N${new Date().getFullYear()}00001`,
       },
     })
   } catch (err: any) {

@@ -16,12 +16,23 @@ export interface TableSpec {
   columns: { label: string; key: (row: number) => string }[]
 }
 
+// A Yes / No inspection list: each row's answer is stored under `key` as "yes" or "no" ("" = not chosen yet).
+export interface ChecklistSpec {
+  title: string
+  items: { key: string; label: string }[]
+}
+
 export interface CertificateFormat {
   id: string
   name: string
   thumbnail: "common" | "table"
   fields: CertificateField[]
   table?: TableSpec
+  checklist?: ChecklistSpec
+  // Formats with their own certificate-number series (counter) instead of the shared DE/N-LAB one.
+  numberSeries?: "auto_level" | "total_station"
+  // Returns a message when the values are not ready to print (e.g. an unanswered checklist row).
+  validate?: (values: CertificateValues) => string | null
   getDefaults: (itemName?: string, qty?: number) => CertificateValues
 }
 
@@ -424,6 +435,69 @@ export const TEST_SIEVE_FORMAT: CertificateFormat = {
   }),
 }
 
+// Automatic Level (auto_level_template.jpeg): a full-page designed certificate with its own number
+// series (N<year><5-digit seq>), boxed number / dates, and a Yes / No inspection list the user fills in.
+export const AUTO_LEVEL_CHECKS = [
+  "Rotating Parts Function Check",
+  "Circular Level Check & Adjustment",
+  "Leveling Screw Motion Check",
+  "Fine Motion Rotation Check",
+  "Pinion Rotation Check",
+  "Fixing Of Base Plate & Cover Plate",
+  "Collimation Check",
+  "Compensator Check",
+].map((label, i) => ({ key: `chk${i + 1}`, label }))
+
+// Today as yyyy-mm-dd in local time (the footer Date defaults to it).
+export function todayIso(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+// Auto Level and Total Station share one certificate layout, checklist and fields; they differ in the
+// format id, name, default Instrument Type and number series (each has its own counter).
+function createInstrumentFormat(opts: { id: "auto_level" | "total_station"; name: string; instrumentName: string }): CertificateFormat {
+  return {
+    id: opts.id,
+    name: opts.name,
+    thumbnail: "common",
+    numberSeries: opts.id,
+    fields: [
+      { key: "customerName", label: "Company Name" },
+      { key: "certificateNo", label: "Certificate Number" },
+      { key: "instrumentName", label: "Instrument Type" },
+      { key: "manufacture", label: "Manufacture" },
+      { key: "model", label: "Model" },
+      { key: "serialNo", label: "Serial No." },
+      { key: "calibrationDate", label: "Calibration Date", type: "date" },
+      { key: "nextCalibrationDate", label: "Calibration Due Date", type: "date", hint: "Auto-set from the calibration date and Warranty Duration; editable" },
+      { key: "certDate", label: "Date (footer)", type: "date" },
+    ],
+    checklist: { title: "Inspection", items: AUTO_LEVEL_CHECKS },
+    validate: (v) => {
+      const open = AUTO_LEVEL_CHECKS.findIndex((c) => v[c.key] !== "yes" && v[c.key] !== "no")
+      return open >= 0 ? `${opts.name} certificate: select Yes or No for "${AUTO_LEVEL_CHECKS[open].label}" (and every other inspection row)` : null
+    },
+    getDefaults: () => ({
+      customerName: "As per Invoice",
+      certificateNo: `N${YEAR()}`, // the Generate Certificate dialog replaces it with the reserved number
+      instrumentName: opts.instrumentName,
+      manufacture: "SOKKIA",
+      model: "",
+      serialNo: "",
+      calibrationDate: "",
+      nextCalibrationDate: "",
+      certDate: todayIso(),
+      quantity: "01 Nos", // only drives how many certificates are made, not printed
+      ...Object.fromEntries(AUTO_LEVEL_CHECKS.map((c) => [c.key, ""])),
+    }),
+  }
+}
+
+export const AUTO_LEVEL_FORMAT = createInstrumentFormat({ id: "auto_level", name: "Auto Level", instrumentName: "AUTOMATIC LEVEL" })
+export const TOTAL_STATION_FORMAT = createInstrumentFormat({ id: "total_station", name: "Total Station", instrumentName: "TOTAL STATION" })
+
 export const CERTIFICATE_FORMATS: CertificateFormat[] = [
   COMMON_FORMAT,
   PROVING_RING_50_FORMAT,
@@ -432,6 +506,8 @@ export const CERTIFICATE_FORMATS: CertificateFormat[] = [
   CTM_2000_FORMAT,
   WEIGHT_BALANCE_FORMAT,
   TEST_SIEVE_FORMAT,
+  AUTO_LEVEL_FORMAT,
+  TOTAL_STATION_FORMAT,
 ]
 
 export const getCertificateFormat = (id: string | null | undefined) => CERTIFICATE_FORMATS.find((f) => f.id === id) ?? null

@@ -6,6 +6,7 @@ import { drawProvingRing50Page } from "./proving-ring-50-pdf.jsx"
 import { drawCtmPage } from "./ctm-pdf.jsx"
 import { drawWeightBalancePage } from "./weight-balance-pdf.jsx"
 import { drawTestSieveGi300Page } from "./test-sieve-gi-300-pdf.jsx"
+import { drawAutoLevelPage, drawTotalStationPage } from "./auto-level-pdf.jsx"
 import { drawFitted, loadAssets } from "./pdf-shared.jsx"
 
 // Layouts that can outgrow the page (long address / item name / aperture list) and so accept the
@@ -20,6 +21,8 @@ export const DRAWERS = {
   ctm_2000: drawCtmPage,
   weight_balance: drawWeightBalancePage,
   test_sieve: drawTestSieveGi300Page,
+  auto_level: drawAutoLevelPage,
+  total_station: drawTotalStationPage,
 }
 
 // certs: [{ formatId, values }] -> jsPDF document.

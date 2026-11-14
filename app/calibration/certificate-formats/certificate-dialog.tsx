@@ -76,6 +76,8 @@ export function CertificateDialog({ open, onOpenChange }: { open: boolean; onOpe
   }
 
   const handlePreview = async () => {
+    const invalid = format.validate?.(values)
+    if (invalid) return setError(invalid)
     setBusy(true)
     setError(null)
     try {

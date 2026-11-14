@@ -38,6 +38,18 @@ interface Prefill {
   invoiceNumber?: string
   items: PrefillItem[]
   nextCertificateNumber: string
+  nextAutoLevelNumber?: string
+  nextTotalStationNumber?: string
+}
+
+// Number series: most formats share DE/N-LAB/<FY>/<n>; Auto Level and Total Station each have their own
+// N<year><5-digit seq> counter.
+type Series = "common" | "auto_level" | "total_station"
+const SERIES: Series[] = ["common", "auto_level", "total_station"]
+const seriesOfFormat = (formatId: string | null | undefined): Series => getCertificateFormat(formatId)?.numberSeries ?? "common"
+// "N202600407" -> { prefix: "N2026", start: 407 }
+function parseYearNumber(next: string) {
+  return { prefix: next.slice(0, -5), start: Number(next.slice(-5)) }
 }
 interface Cert {
   id: string
@@ -63,7 +75,8 @@ function buildItemCerts(itemIdx: number, item: PrefillItem, p: Prefill, each: bo
   const count = each ? item.qty : 1
   const certQty = each ? 1 : item.qty
   const base = getCertificateFormat(formatId)?.getDefaults(item.itemName, certQty) ?? {}
-  const instrumentName = formatId === "test_sieve" ? cleanSieveInstrumentName(item.itemName) : item.itemName
+  // Auto Level / Total Station print their own "Instrument Type" and leave Model for the user.
+  const instrumentName = formatId === "test_sieve" ? cleanSieveInstrumentName(item.itemName) : getCertificateFormat(formatId)?.numberSeries ? base.instrumentName : item.itemName
   return Array.from({ length: count }, (_, k) => ({
     id: `${itemIdx}-${k}-${Math.random().toString(36).slice(2, 7)}`,
     itemIdx,
@@ -157,8 +170,8 @@ export function BatchCertificateDialog({
   const [busy, setBusy] = useState(false)
   // Numbers already taken from the DB counter in this session; reused when the PDF is
   // generated again so repeated downloads do not burn new numbers.
-  const [reserved, setReserved] = useState<string[]>([])
-  const reservedRef = useRef<string[]>([])
+  const [reserved, setReserved] = useState<Record<Series, string[]>>({ common: [], auto_level: [], total_station: [] })
+  const reservedRef = useRef<Record<Series, string[]>>({ common: [], auto_level: [], total_station: [] })
 
   const releasePreview = () =>
     setPreviewUrl((url) => {
@@ -179,8 +192,8 @@ export function BatchCertificateDialog({
     setCerts([])
     setMerged([])
     setWarrantyMonths(DEFAULT_WARRANTY_MONTHS)
-    setReserved([])
-    reservedRef.current = []
+    setReserved({ common: [], auto_level: [], total_station: [] })
+    reservedRef.current = { common: [], auto_level: [], total_station: [] }
     fetch(`/api/otp-supabase/calibration/certificate-prefill?makeInvoiceId=${encodeURIComponent(makeInvoiceId)}`)
       .then((r) => r.json())
       .then((json) => {
@@ -291,13 +304,30 @@ export function BatchCertificateDialog({
 
   // Certificate numbers: the ones reserved so far, then provisional ones continuing from the
   // counter's next value (final numbers are fixed when the PDF is generated).
+  // Each number series (shared DE/N-LAB, Auto Level) counts its own certificates in order.
   const numbered = useMemo(() => {
-    const { prefix, start } = prefill ? parseNumber(prefill.nextCertificateNumber) : { prefix: "", start: 0 }
-    return certs.map((c, idx) => ({
-      ...c,
-      values: { ...c.values, certificateNo: reserved[idx] ?? `${prefix}${start + idx}` },
-    }))
-  }, [certs, prefill, reserved])
+    const common = prefill ? parseNumber(prefill.nextCertificateNumber) : { prefix: "", start: 0 }
+    const yearSeries = (next?: string) => (next ? parseYearNumber(next) : { prefix: `N${new Date().getFullYear()}`, start: 1 })
+    const autoLevel = yearSeries(prefill?.nextAutoLevelNumber)
+    const totalStation = yearSeries(prefill?.nextTotalStationNumber)
+    const used: Record<Series, number> = { common: 0, auto_level: 0, total_station: 0 }
+    return certs.map((c) => {
+      const s = seriesOfFormat(formats[c.itemIdx])
+      const k = used[s]++
+      const yr = s === "auto_level" ? autoLevel : s === "total_station" ? totalStation : null
+      const provisional = yr ? `${yr.prefix}${String(yr.start + k).padStart(5, "0")}` : `${common.prefix}${common.start + k}`
+      return { ...c, values: { ...c.values, certificateNo: reserved[s][k] ?? provisional } }
+    })
+  }, [certs, prefill, reserved, formats])
+
+  // The first certificate that is not ready to print (e.g. an Auto Level row with no Yes / No).
+  const firstInvalid = (list: typeof numbered) => {
+    for (const c of list) {
+      const msg = getCertificateFormat(formats[c.itemIdx])?.validate?.(c.values)
+      if (msg) return msg
+    }
+    return null
+  }
 
   const missing = (prefill?.items || []).map((_, i) => i).filter((i) => !formats[i] && !skipped[i])
   const skippedCount = skipped.filter(Boolean).length
@@ -306,6 +336,8 @@ export function BatchCertificateDialog({
   const toPdfInput = (list: typeof numbered) => list.map((c) => ({ formatId: formats[c.itemIdx] as string, values: c.values }))
 
   const handlePreview = async () => {
+    const invalid = firstInvalid(numbered)
+    if (invalid) return toast.error(invalid)
     setBusy(true)
     try {
       const blob = await certificatesPdfBlob(toPdfInput(numbered))
@@ -320,22 +352,30 @@ export function BatchCertificateDialog({
   }
 
   const handleGenerate = async () => {
+    const invalid = firstInvalid(numbered)
+    if (invalid) return toast.error(invalid)
     setBusy(true)
     try {
-      // Take only the numbers still missing from the counter, so re-generating is free.
-      const need = certs.length - reservedRef.current.length
-      if (need > 0) {
+      // Per number series, take only the numbers still missing from its counter, so re-generating is free.
+      for (const s of SERIES) {
+        const total = certs.filter((c) => seriesOfFormat(formats[c.itemIdx]) === s).length
+        const need = total - reservedRef.current[s].length
+        if (need <= 0) continue
         const res = await fetch("/api/otp-supabase/calibration/certificate-numbers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ count: need }),
+          body: JSON.stringify({ count: need, series: s }),
         })
         const json = await res.json()
         if (!json.success) throw new Error(json.error || "Could not reserve certificate numbers")
-        reservedRef.current = [...reservedRef.current, ...(json.numbers as string[])]
+        reservedRef.current = { ...reservedRef.current, [s]: [...reservedRef.current[s], ...(json.numbers as string[])] }
         setReserved(reservedRef.current)
       }
-      const final = numbered.map((c, idx) => ({ ...c, values: { ...c.values, certificateNo: reservedRef.current[idx] } }))
+      const used: Record<Series, number> = { common: 0, auto_level: 0, total_station: 0 }
+      const final = certs.map((c) => {
+        const s = seriesOfFormat(formats[c.itemIdx])
+        return { ...c, values: { ...c.values, certificateNo: reservedRef.current[s][used[s]++] } }
+      })
       const blob = await certificatesPdfBlob(toPdfInput(final))
       const inv = prefill?.invoiceNumber || invoiceNumber || orderNo || "order"
       const safeInvoiceNo = String(inv).trim().replace(/[/\\?%*:|"<>]/g, "_").replace(/\s+/g, "_")
