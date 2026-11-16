@@ -5,7 +5,7 @@
 // No seal is drawn (the signature and stamp are applied by hand on the printout).
 // hardcopy: only the content is drawn (no crystal bands, logos, watermark, picture or contact bar).
 import { FONT, fmtDate, filled } from "./pdf-shared.jsx"
-import { AUTO_LEVEL_CHECKS } from "./formats"
+import { AUTO_LEVEL_CHECKS, TOTAL_STATION_CHECKS } from "./formats"
 
 const BLUE = [27, 94, 150]
 const EDGE = [43, 123, 185]
@@ -146,10 +146,9 @@ function drawCells(doc, x, y, chars, { w = 6, h = 6.4, gapAfter = [] } = {}) {
   })
 }
 
-function drawDateCells(doc, x, y, iso) {
-  const parts = fmtDate(iso).split("-") // dd-mm-yyyy
-  if (parts.length !== 3) return
-  drawCells(doc, x, y, parts.join("").split(""), { gapAfter: [1, 3] })
+// Empty DD MM YYYY boxes: the dates are written by hand on the printout.
+function drawDateCells(doc, x, y) {
+  drawCells(doc, x, y, Array(8).fill(""), { gapAfter: [1, 3] })
 }
 
 function drawDetails(doc, v) {
@@ -185,10 +184,10 @@ function drawDetails(doc, v) {
   textRow("MODEL", v.model)
   textRow("SERIAL NO.", v.serialNo)
   label("CALIBRATION DATE")
-  drawDateCells(doc, VALUE_X, y, v.calibrationDate)
+  drawDateCells(doc, VALUE_X, y)
   y += 8.4
   label("CALIBRATION DUE DATE")
-  drawDateCells(doc, VALUE_X, y, v.nextCalibrationDate)
+  drawDateCells(doc, VALUE_X, y)
   return y + 6
 }
 
@@ -200,14 +199,17 @@ function drawTick(doc, x, y, size) {
 }
 
 // Table cells are outlined only (no white fill), so the watermark shows through.
-function drawTable(doc, startY, v) {
+function drawTable(doc, startY, v, checks) {
   const colSno = 14
   const colAccept = 52
   const x0 = L
   const x1 = x0 + colSno
   const x2 = R - colAccept
   const headH = 9
-  const rowH = 9
+  // A longer inspection list (Total Station, 11 points) uses tighter rows so the page still fits.
+  const long = checks.length > 8
+  const rowH = long ? 7 : 9
+  const rowGap = long ? 1.1 : 1.6
   let y = startY
 
   doc.setDrawColor(0, 0, 0)
@@ -227,7 +229,7 @@ function drawTable(doc, startY, v) {
   })
   y += headH + 1.6
 
-  AUTO_LEVEL_CHECKS.forEach((item, i) => {
+  checks.forEach((item, i) => {
     doc.setDrawColor(0, 0, 0)
     doc.setLineWidth(0.7)
     doc.rect(x0, y, colSno, rowH, "S")
@@ -255,7 +257,7 @@ function drawTable(doc, startY, v) {
     doc.rect(noBox, by, box, box, "S")
     if (v[item.key] === "yes") drawTick(doc, yesBox, by, box)
     if (v[item.key] === "no") drawTick(doc, noBox, by, box)
-    y += rowH + 1.6
+    y += rowH + rowGap
   })
   return y
 }
@@ -309,8 +311,8 @@ function drawFooter(doc, W, H, v, images, hardcopy, machine) {
 }
 
 // The picture in the footer is the only thing that differs between the instruments.
-const AUTO_LEVEL_MACHINE = { src: "/machine_auto_level.svg", width: 34 }
-const TOTAL_STATION_MACHINE = { src: "/total_station.png", width: 30 }
+const AUTO_LEVEL_MACHINE = { src: "/machine_auto_level.svg", width: 34, checks: AUTO_LEVEL_CHECKS }
+const TOTAL_STATION_MACHINE = { src: "/total_station.png", width: 30, checks: TOTAL_STATION_CHECKS }
 
 export const drawAutoLevelPage = (doc, values, assets) => drawInstrumentPage(doc, values, assets, AUTO_LEVEL_MACHINE)
 export const drawTotalStationPage = (doc, values, assets) => drawInstrumentPage(doc, values, assets, TOTAL_STATION_MACHINE)
@@ -351,7 +353,7 @@ async function drawInstrumentPage(doc, values, assets, machine) {
 
   drawTitle(doc, W)
   let y = drawDetails(doc, values)
-  y = drawTable(doc, y + 4, values)
+  y = drawTable(doc, y + 4, values, machine.checks)
 
   doc.setFont(FONT, "bold")
   doc.setFontSize(12.5)

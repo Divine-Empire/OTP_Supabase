@@ -437,7 +437,9 @@ export const TEST_SIEVE_FORMAT: CertificateFormat = {
 
 // Automatic Level (auto_level_template.jpeg): a full-page designed certificate with its own number
 // series (N<year><5-digit seq>), boxed number / dates, and a Yes / No inspection list the user fills in.
-export const AUTO_LEVEL_CHECKS = [
+const checklistItems = (labels: string[]) => labels.map((label, i) => ({ key: `chk${i + 1}`, label }))
+
+export const AUTO_LEVEL_CHECKS = checklistItems([
   "Rotating Parts Function Check",
   "Circular Level Check & Adjustment",
   "Leveling Screw Motion Check",
@@ -446,7 +448,21 @@ export const AUTO_LEVEL_CHECKS = [
   "Fixing Of Base Plate & Cover Plate",
   "Collimation Check",
   "Compensator Check",
-].map((label, i) => ({ key: `chk${i + 1}`, label }))
+])
+
+export const TOTAL_STATION_CHECKS = checklistItems([
+  "Rotating Parts Function Check",
+  "Key Function Check",
+  "H & V Encoder Check",
+  "Circular Level Check & Adjustment",
+  "Plate Level Check & Adjustment",
+  "Accuracy Of Tilt Center",
+  "Collimation Check",
+  "Horizontal Angle Check",
+  "Vertical Angle Check",
+  "EDM Unit",
+  "Optical Plummet Check & Adjustment.",
+])
 
 // Today as yyyy-mm-dd in local time (the footer Date defaults to it).
 export function todayIso(): string {
@@ -455,9 +471,14 @@ export function todayIso(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-// Auto Level and Total Station share one certificate layout, checklist and fields; they differ in the
-// format id, name, default Instrument Type and number series (each has its own counter).
-function createInstrumentFormat(opts: { id: "auto_level" | "total_station"; name: string; instrumentName: string }): CertificateFormat {
+// Auto Level and Total Station share one certificate layout and fields; they differ in the format id,
+// name, default Instrument Type, inspection list and number series (each has its own counter).
+function createInstrumentFormat(opts: {
+  id: "auto_level" | "total_station"
+  name: string
+  instrumentName: string
+  checks: { key: string; label: string }[]
+}): CertificateFormat {
   return {
     id: opts.id,
     name: opts.name,
@@ -470,14 +491,14 @@ function createInstrumentFormat(opts: { id: "auto_level" | "total_station"; name
       { key: "manufacture", label: "Manufacture" },
       { key: "model", label: "Model" },
       { key: "serialNo", label: "Serial No." },
-      { key: "calibrationDate", label: "Calibration Date", type: "date" },
-      { key: "nextCalibrationDate", label: "Calibration Due Date", type: "date", hint: "Auto-set from the calibration date and Warranty Duration; editable" },
+      // Calibration Date / Calibration Due Date are not form fields: the certificate prints empty boxes
+      // for them, to be filled in by pen after printing.
       { key: "certDate", label: "Date (footer)", type: "date" },
     ],
-    checklist: { title: "Inspection", items: AUTO_LEVEL_CHECKS },
+    checklist: { title: "Inspection", items: opts.checks },
     validate: (v) => {
-      const open = AUTO_LEVEL_CHECKS.findIndex((c) => v[c.key] !== "yes" && v[c.key] !== "no")
-      return open >= 0 ? `${opts.name} certificate: select Yes or No for "${AUTO_LEVEL_CHECKS[open].label}" (and every other inspection row)` : null
+      const open = opts.checks.findIndex((c) => v[c.key] !== "yes" && v[c.key] !== "no")
+      return open >= 0 ? `${opts.name} certificate: select Yes or No for "${opts.checks[open].label}" (and every other inspection row)` : null
     },
     getDefaults: () => ({
       customerName: "As per Invoice",
@@ -490,13 +511,13 @@ function createInstrumentFormat(opts: { id: "auto_level" | "total_station"; name
       nextCalibrationDate: "",
       certDate: todayIso(),
       quantity: "01 Nos", // only drives how many certificates are made, not printed
-      ...Object.fromEntries(AUTO_LEVEL_CHECKS.map((c) => [c.key, ""])),
+      ...Object.fromEntries(opts.checks.map((c) => [c.key, ""])),
     }),
   }
 }
 
-export const AUTO_LEVEL_FORMAT = createInstrumentFormat({ id: "auto_level", name: "Auto Level", instrumentName: "AUTOMATIC LEVEL" })
-export const TOTAL_STATION_FORMAT = createInstrumentFormat({ id: "total_station", name: "Total Station", instrumentName: "TOTAL STATION" })
+export const AUTO_LEVEL_FORMAT = createInstrumentFormat({ id: "auto_level", name: "Auto Level", instrumentName: "AUTOMATIC LEVEL", checks: AUTO_LEVEL_CHECKS })
+export const TOTAL_STATION_FORMAT = createInstrumentFormat({ id: "total_station", name: "Total Station", instrumentName: "TOTAL STATION", checks: TOTAL_STATION_CHECKS })
 
 export const CERTIFICATE_FORMATS: CertificateFormat[] = [
   COMMON_FORMAT,
