@@ -739,6 +739,9 @@ export function mapMakeInvoiceHistoryRowToUI(row: any): any {
     invoicedAt: formatDateTime(queue.invoiced_at),
     remarks: row.remarks || "",
     createdBy: row.created_by || "",
+    // Set only when an admin edited the invoice from History (Database/89); blank otherwise.
+    updatedBy: row.updated_by || "",
+    updatedAt: row.updated_by ? formatDateTime(row.updated_at) : "",
     planned: formatDateTime(queue.make_invoice_planned),
     actual: formatDateTime(row.created_at),
 

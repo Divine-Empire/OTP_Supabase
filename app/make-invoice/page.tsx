@@ -18,6 +18,7 @@ import { mapMakeInvoicePendingRowToUI, mapMakeInvoiceHistoryRowToUI } from "@/li
 import { MobileRecordCard } from "@/components/mobile-record-card"
 import { StatusTabs, ColumnSelector, FilterSearch, FilterChips, DataTable, StatusBadge } from "@/components/shared"
 import { toast } from "sonner"
+import { EditInvoiceDialog } from "./edit-invoice-dialog"
 
 // Column definitions for Pending tab
 const pendingColumns = [
@@ -62,6 +63,7 @@ const pendingColumns = [
 
 // Column definitions for History tab
 const historyColumns = [
+  { key: "editInvoice", label: "Actions", searchable: false }, // admin only, see shownColumns
   ...pendingColumns.filter((col) => col.key !== "actions" && col.key !== "totalQty" && col.key !== "pendingQty"),
   { key: "invoiceNumber", label: "Invoice Number", searchable: true },
   { key: "invoiceDate", label: "Invoice Date", searchable: true },
@@ -70,6 +72,8 @@ const historyColumns = [
   { key: "ewayBillUpload", label: "Eway Bill Upload", searchable: false },
   { key: "totalBillAmount", label: "Total Bill Amount", searchable: false },
   { key: "createdBy", label: "Created By", searchable: true },
+  { key: "updatedAt", label: "Updated At", searchable: false },
+  { key: "updatedBy", label: "Updated By", searchable: true },
   { key: "invoicedAt", label: "Invoiced At", searchable: true },
   { key: "actual", label: "Actual", searchable: true },
 ]
@@ -134,6 +138,10 @@ export default function MakeInvoicePage() {
     defaultHiddenColumns: DEFAULT_HIDDEN_COLUMNS,
   })
   // History is fetched a page at a time by the hook; these keep the page's older names.
+  // Edit Invoice (History > Actions) is for admins only.
+  const isAdmin = currentUser?.role === "admin"
+  const shownColumns = activeColumns.filter((c) => c.key !== "editInvoice" || isAdmin)
+  const [editInvoiceOrder, setEditInvoiceOrder] = useState<any>(null)
   const processedOrders = history.rows
   const processedLoading = history.loading
   const fetchProcessedOrders = history.reload
@@ -387,6 +395,18 @@ export default function MakeInvoicePage() {
   const renderCellContent = (order: any, columnKey: string) => {
     const value = order[columnKey]
     switch (columnKey) {
+      case "editInvoice":
+        if (!isAdmin) return null
+        return (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs border-input bg-card hover:bg-accent"
+            onClick={() => setEditInvoiceOrder(order)}
+          >
+            Edit
+          </Button>
+        )
       case "actions":
         return (
           <div className="flex items-center gap-1.5">
@@ -607,11 +627,11 @@ export default function MakeInvoicePage() {
         {/* Unified Enterprise DataTable */}
         <div className="flex-1 flex flex-col min-h-0">
           <DataTable
-            headers={activeColumns.map((col) => ({
+            headers={shownColumns.map((col) => ({
               key: col.key,
               label: col.label,
               minWidth:
-                col.key === "actions"
+                col.key === "actions" || col.key === "editInvoice"
                   ? "90px"
                   : col.key === "itemList"
                   ? "75px"
@@ -653,7 +673,7 @@ export default function MakeInvoicePage() {
                 key={order.id || order.queueId || order.orderId || order.orderNo}
                 className="hover:bg-secondary/50 transition-colors"
               >
-                {activeColumns.map((column) => (
+                {shownColumns.map((column) => (
                   <TableCell key={column.key} className="px-3.5 py-2 text-xs text-foreground align-middle">
                     {(() => {
                       const content = renderCellContent(order, column.key)
@@ -680,14 +700,21 @@ export default function MakeInvoicePage() {
           />
         </div>
 
+        <EditInvoiceDialog
+          order={editInvoiceOrder}
+          onOpenChange={(o) => !o && setEditInvoiceOrder(null)}
+          onSaved={() => fetchProcessedOrders()}
+        />
+
         {/* Process Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
             <DialogHeader>
               <DialogTitle>Process Make Invoice</DialogTitle>
               <DialogDescription>Enter the invoice details for this order&apos;s available quantity</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            {/* Only the form body scrolls; the title and the Cancel / Submit buttons stay in view. */}
+            <div className="space-y-4 flex-1 min-h-0 overflow-y-auto px-1">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="orderNo">Order No.</Label>
@@ -810,24 +837,24 @@ export default function MakeInvoicePage() {
                 <Input id="remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Enter any remarks..." />
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  onClick={handleSubmit}
-                  disabled={!invoiceNumber.trim() || !invoiceDate || !totalBillAmount || !invoiceUploadFile || isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    "Submit"
-                  )}
-                </Button>
-              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={!invoiceNumber.trim() || !invoiceDate || !totalBillAmount || !invoiceUploadFile || isSubmitting}
+              >
+                {isSubmitting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Submit"
+                )}
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

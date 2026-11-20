@@ -206,3 +206,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })
   }
 }
+
+// Make Invoice History edit (admin only): Invoice Number, Invoice Date, Eway Bill Number, Total Bill
+// Amount and re-uploaded Invoice / Eway Bill files. The rules and the write run in one transaction in
+// otp_edit_make_invoice (Database/89): the Invoice Number is refused once a credit note exists for it.
+// A file URL left empty keeps the current file. updated_by = the editor's full name.
+export async function PUT(request: Request) {
+  try {
+    const access = await requestAccess(request)
+    if (!access.userId) return NextResponse.json({ success: false, error: "Not signed in" }, { status: 401 })
+    if (!access.isAdmin) return NextResponse.json({ success: false, error: "Only an admin can edit this" }, { status: 403 })
+
+    const body = (await request.json()) as {
+      id?: string
+      invoiceNumber?: string
+      invoiceDate?: string
+      ewayBillNumber?: string
+      totalBillAmount?: number | string
+      invoiceUploadUrl?: string
+      ewayBillUploadUrl?: string
+    }
+    const total = Number(body.totalBillAmount)
+    if (!body.id || !body.invoiceNumber?.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(body.invoiceDate || "") || body.totalBillAmount === "" || body.totalBillAmount == null || !Number.isFinite(total) || total < 0) {
+      return NextResponse.json({ success: false, error: "Invoice Number, Invoice Date and a valid Total Bill Amount are required" }, { status: 400 })
+    }
+
+    const { data, error } = await getSupabaseAdmin().rpc("otp_edit_make_invoice", {
+      p_id: body.id,
+      p_invoice_number: body.invoiceNumber.trim(),
+      p_invoice_date: body.invoiceDate,
+      p_eway_number: body.ewayBillNumber?.trim() || null,
+      p_total: total,
+      p_invoice_url: body.invoiceUploadUrl || null,
+      p_eway_url: body.ewayBillUploadUrl || null,
+      p_actor: access.actorName,
+    })
+    if (error) {
+      // The function's own refusals (RAISE EXCEPTION) are user-facing messages.
+      const userFacing = /credit note|not found|required/i.test(error.message)
+      return NextResponse.json({ success: false, error: error.message }, { status: userFacing ? 409 : 500 })
+    }
+    return NextResponse.json({ success: true, data })
+  } catch (err: any) {
+    console.error("PUT /api/otp-supabase/make-invoice exception:", err)
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
